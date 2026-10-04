@@ -98,3 +98,23 @@ describe('line-by-line recognition', () => {
     expect(r.text).toBe('Leadership Meeting 9/3/26\n\n- Sprint goals\n  - how?')
   })
 })
+
+describe('line-by-line recognition of pictures', () => {
+  it('finds the written lines in a picture, reads them one by one and rebuilds the list', async () => {
+    const { renderDrawingPng } = await import('../src/ai')
+    // a "photo" of three handwritten lines: a title, a bullet, an indented bullet
+    const picture = renderDrawingPng([...word(70, 60, 10), dash(110, 200), ...word(160, 200, 8), dash(220, 330), ...word(270, 330, 4)])!
+    tidyAnswer = '' // clean-up agent "fails", so we see the raw structure
+    ocrIndex = 0
+    calls.length = 0
+    const res = await fetch(`${base}/api/ai/image-to-text`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'image/png' },
+      body: new Uint8Array(picture),
+    }).then((r) => r.json())
+    expect(res.text).toBe('Leadership Meeting 9/3/26\n\n- Sprint goals\n  - how?')
+    const ocrCalls = calls.filter((c) => c.model === 'ocr')
+    expect(ocrCalls).toHaveLength(3)
+    expect(ocrCalls.every((c) => /single line/.test(c.prompt))).toBe(true)
+  })
+})

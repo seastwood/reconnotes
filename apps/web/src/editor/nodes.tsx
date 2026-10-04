@@ -71,12 +71,14 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const img = (e.currentTarget.parentElement as HTMLElement).querySelector('img')!
+    // The frame hugs the image, so the handle always sits on its corner.
+    const frame = e.currentTarget.closest('.image-frame') as HTMLElement
     const startX = e.clientX
-    const startW = img.getBoundingClientRect().width
-    const parentW = (e.currentTarget.closest('.ProseMirror') as HTMLElement).clientWidth
+    const startW = frame.getBoundingClientRect().width
+    // the block the frame sits in is exactly the text column's width
+    const parentW = (frame.parentElement as HTMLElement).clientWidth
     const move = (ev: PointerEvent) => {
-      img.style.width = `${Math.max(60, Math.min(parentW, startW + ev.clientX - startX))}px`
+      frame.style.width = `${Math.max(60, Math.min(parentW, startW + ev.clientX - startX))}px`
     }
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move)
@@ -90,18 +92,22 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   return (
     <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}`} data-drag-handle="">
       {url ? (
-        <img src={url} alt={node.attrs.alt ?? ''} style={width ? { width: `${width}%` } : undefined} draggable={false} />
+        <div className="image-frame" style={width ? { width: `${width}%` } : undefined}>
+          <img src={url} alt={node.attrs.alt ?? ''} draggable={false} />
+          {selected && editor.isEditable && (
+            <div className="image-resize" onPointerDown={startResize} title="Drag to resize" aria-label="Resize image" />
+          )}
+          {editor.isEditable && (
+            <div className={`image-actions${selected || busy ? ' show' : ''}`}>
+              <button onClick={convert} disabled={busy} title="Read the handwriting or text in this picture and add it below">
+                {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="attachment-placeholder">
           {missing ? 'Image will appear when synced' : <Loader2 className="spin" size={18} />}
-        </div>
-      )}
-      {selected && url && <div className="image-resize" onPointerDown={startResize} />}
-      {url && editor.isEditable && (
-        <div className={`image-actions${selected || busy ? ' show' : ''}`}>
-          <button onClick={convert} disabled={busy} title="Read the handwriting or text in this picture and add it below">
-            {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
-          </button>
         </div>
       )}
       {error && (

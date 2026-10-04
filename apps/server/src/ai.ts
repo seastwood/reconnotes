@@ -3,7 +3,8 @@ import { DRAWING_WIDTH, drawingToSvg, linesToMarkdown, segmentLines, unionBounds
 import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
-import { fitForAi } from './images'
+import { fitForAi, pictureLines, type PictureLine } from './images'
+import { createHash } from 'node:crypto'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -194,11 +195,45 @@ export class Ai {
   async transcribePhoto(data: Buffer, mime: string, opts: { format?: boolean } = {}): Promise<{ text: string; agent: string }> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)
-    const { result, agent } = await this.agents.run('handwriting', (backend, agent) =>
-      this.transcribeWith(backend, agent, fit.data, { requireText: true, mime: fit.mime, photo: true }),
-    )
+    // Find the written lines once (only needed for line-by-line agents).
+    let lines: PictureLine[] | null | undefined
+    const { result, agent } = await this.agents.run('handwriting', async (backend, agent) => {
+      if (readingMode(agent) === 'lines') {
+        if (lines === undefined) lines = pictureLines(data, mime)
+        if (lines) {
+          const md = await this.readLines(backend, agent, lines)
+          if (md !== null) return md
+          log.info(`"${agent.name}": most lines came back empty – reading the picture as a whole instead`)
+        }
+      }
+      return this.transcribeWith(backend, agent, fit.data, { requireText: true, mime: fit.mime, photo: true })
+    })
     const text = opts.format === false ? result : await this.tidy(result, fit.data, fit.mime)
     return { text, agent: agent.name }
+  }
+
+  /**
+   * Read the lines found in a picture one at a time and rebuild the
+   * structure. Returns null when the picture doesn't seem to be lines of
+   * text after all (most lines empty), so the caller can read it whole.
+   */
+  private async readLines(backend: Backend, agent: AgentConfig, lines: PictureLine[]): Promise<string | null> {
+    const texts: string[] = []
+    for (const line of lines) {
+      const key = `${agent.id}|${agent.model}|${agent.prompt}|${createHash('sha1').update(line.png).digest('hex')}`
+      let text = this.lineCache.get(key)
+      if (text === undefined) {
+        text = (await this.transcribeWith(backend, agent, line.png, { line: true })).replace(/\s*\n\s*/g, ' ').trim()
+        this.lineCache.set(key, text)
+        if (this.lineCache.size > 5000) this.lineCache.delete(this.lineCache.keys().next().value!)
+      }
+      texts.push(text)
+    }
+    const filled = texts.filter((t) => t).length
+    if (filled < Math.max(1, lines.length * 0.4)) return null
+    const md = linesToMarkdown(lines, texts)
+    log.info(`picture via "${agent.name}" line by line: ${lines.length} lines, ${md.length} chars`)
+    return md
   }
 
   /** Recent line results, so unchanged lines aren't re-read every time a drawing changes. */
