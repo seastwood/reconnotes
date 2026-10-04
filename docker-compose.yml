@@ -1,0 +1,19 @@
+# docker compose up -d
+# Put RECON_TOKEN (and optionally ANTHROPIC_API_KEY / RECON_OLLAMA_URL) in a .env file next to this one.
+services:
+  reconnotes:
+    build: .
+    image: reconnotes:latest
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file: .env
+    environment:
+      RECON_DATA_DIR: /data
+      RECON_BACKUP_DIR: /backups
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    # If Ollama runs on the Docker host, use http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

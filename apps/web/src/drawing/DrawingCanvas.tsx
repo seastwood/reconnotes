@@ -314,7 +314,6 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) 
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (e.pointerType === 'pen') inkUi.set({ lastPencil: { x: e.clientX, y: e.clientY } })
     if (e.pointerId !== activePointer.current) return
     const g = gesture.current
     if (!g) return

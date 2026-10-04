@@ -1,0 +1,34 @@
+# systemd unit for running ReconNotes without Docker.
+#
+#   sudo useradd --system --home /var/lib/reconnotes --create-home reconnotes
+#   sudo mkdir -p /opt/reconnotes && sudo cp -r . /opt/reconnotes   # after `npm ci && npm run build`
+#   sudo cp deploy/reconnotes.service /etc/systemd/system/
+#   sudo cp apps/server/.env.example /etc/reconnotes.env   # then edit it
+#   sudo systemctl daemon-reload && sudo systemctl enable --now reconnotes
+#   journalctl -u reconnotes -f
+
+[Unit]
+Description=ReconNotes sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reconnotes
+WorkingDirectory=/opt/reconnotes/apps/server
+EnvironmentFile=/etc/reconnotes.env
+Environment=NODE_ENV=production
+Environment=RECON_DATA_DIR=/var/lib/reconnotes
+Environment=RECON_WEB_DIR=/opt/reconnotes/apps/web/dist
+ExecStart=/usr/bin/node dist/index.js serve
+Restart=on-failure
+RestartSec=5
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/reconnotes
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
