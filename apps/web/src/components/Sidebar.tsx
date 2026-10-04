@@ -1,0 +1,280 @@
+import { useMemo, useState } from 'react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderPlus,
+  Inbox,
+  MoreHorizontal,
+  Search,
+  Settings as SettingsIcon,
+  Trash2,
+} from 'lucide-react'
+import {
+  buildTree,
+  createFolder,
+  getSettings,
+  moveFolder,
+  moveNote,
+  trashFolder,
+  updateFolder,
+  type SortMode,
+  type TreeNode,
+} from '@reconnotes/core'
+import { useWorkspace, workspaceDoc } from '../lib/workspace'
+import { SyncBadge } from './SyncBadge'
+import { safeLocalGet, safeLocalSet } from '../lib/store'
+
+export type View = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder'; folderId: string } | { kind: 'search'; query: string }
+
+interface Props {
+  view: View
+  onView: (v: View) => void
+  onSettings: () => void
+  onMoveFolder: (folderId: string) => void
+}
+
+export const SORT_LABELS: Record<SortMode, string> = {
+  manual: 'Manual (drag to reorder)',
+  title: 'Title',
+  created: 'Date created',
+  updated: 'Date edited',
+}
+
+const DND_TYPE = 'application/x-reconnotes'
+
+export interface DragPayload {
+  kind: 'folder' | 'note'
+  id: string
+}
+
+export function setDrag(e: React.DragEvent, p: DragPayload) {
+  e.dataTransfer.setData(DND_TYPE, JSON.stringify(p))
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+export function getDrag(e: React.DragEvent): DragPayload | null {
+  try {
+    return JSON.parse(e.dataTransfer.getData(DND_TYPE)) as DragPayload
+  } catch {
+    return null
+  }
+}
+
+export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
+  const ws = useWorkspace()
+  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
+  const [query, setQuery] = useState('')
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<{ id: string; where: 'before' | 'inside' | 'after' } | null>(null)
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const n of ws.notes) if (!n.trashedAt && n.folderId) c[n.folderId] = (c[n.folderId] ?? 0) + 1
+    return c
+  }, [ws.notes])
+  const liveCount = ws.notes.filter((n) => !n.trashedAt).length
+  const trashCount = ws.notes.filter((n) => n.trashedAt).length
+
+  const toggle = (id: string) => {
+    const next = { ...collapsed, [id]: !collapsed[id] }
+    setCollapsed(next)
+    safeLocalSet('reconnotes.collapsed', next)
+  }
+
+  const newFolder = (parentId: string | null) => {
+    const id = createFolder(workspaceDoc, { name: 'New Folder', parentId })
+    if (parentId && collapsed[parentId]) toggle(parentId)
+    setRenaming(id)
+  }
+
+  const onDrop = (e: React.DragEvent, node: TreeNode, where: 'before' | 'inside' | 'after', siblings: TreeNode[]) => {
+    e.preventDefault()
+    setDropHint(null)
+    const p = getDrag(e)
+    if (!p) return
+    if (p.kind === 'note') return moveNote(workspaceDoc, p.id, node.folder.id)
+    if (p.id === node.folder.id) return
+    if (where === 'inside') return void moveFolder(workspaceDoc, p.id, node.folder.id)
+    // reorder among siblings: switch the parent to manual sort
+    const parentId = node.folder.parentId
+    const others = siblings.filter((s) => s.folder.id !== p.id)
+    const idx = others.findIndex((s) => s.folder.id === node.folder.id) + (where === 'after' ? 1 : 0)
+    if (parentId) updateFolder(workspaceDoc, parentId, { sort: 'manual' })
+    else getSettings(workspaceDoc).set('rootSort', 'manual')
+    moveFolder(workspaceDoc, p.id, parentId, idx)
+  }
+
+  const renderNodes = (nodes: TreeNode[], depth: number) =>
+    nodes.map((node) => {
+      const f = node.folder
+      const open = !collapsed[f.id]
+      const active = view.kind === 'folder' && view.folderId === f.id
+      const hint = dropHint?.id === f.id ? dropHint.where : null
+      return (
+        <li key={f.id}>
+          <div
+            className={`folder-row${active ? ' active' : ''}${hint ? ` drop-${hint}` : ''}`}
+            style={{ paddingLeft: 8 + depth * 16 }}
+            draggable={renaming !== f.id}
+            onDragStart={(e) => setDrag(e, { kind: 'folder', id: f.id })}
+            onDragOver={(e) => {
+              e.preventDefault()
+              const r = e.currentTarget.getBoundingClientRect()
+              const y = (e.clientY - r.top) / r.height
+              setDropHint({ id: f.id, where: y < 0.25 ? 'before' : y > 0.75 ? 'after' : 'inside' })
+            }}
+            onDragLeave={() => setDropHint(null)}
+            onDrop={(e) => onDrop(e, node, hint ?? 'inside', nodes)}
+            onClick={() => onView({ kind: 'folder', folderId: f.id })}
+          >
+            <button
+              className="twisty"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggle(f.id)
+              }}
+              style={{ visibility: node.children.length ? 'visible' : 'hidden' }}
+              aria-label={open ? 'Collapse' : 'Expand'}
+            >
+              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+            <Folder size={16} className="folder-icon" />
+            {renaming === f.id ? (
+              <input
+                className="rename"
+                autoFocus
+                defaultValue={f.name}
+                onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => e.target.select()}
+                onBlur={(e) => {
+                  updateFolder(workspaceDoc, f.id, { name: e.target.value.trim() || 'Untitled folder' })
+                  setRenaming(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'Escape') setRenaming(null)
+                }}
+              />
+            ) : (
+              <span className="folder-name" onDoubleClick={() => setRenaming(f.id)}>
+                {f.name}
+              </span>
+            )}
+            <span className="count">{counts[f.id] ?? ''}</span>
+            <button
+              className="row-menu"
+              aria-label="Folder actions"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuFor(menuFor === f.id ? null : f.id)
+              }}
+            >
+              <MoreHorizontal size={16} />
+            </button>
+            {menuFor === f.id && (
+              <div className="menu right" onClick={(e) => (e.stopPropagation(), setMenuFor(null))}>
+                <button onClick={() => newFolder(f.id)}>New subfolder</button>
+                <button onClick={() => setRenaming(f.id)}>Rename</button>
+                <button onClick={() => onMoveFolder(f.id)}>Move to…</button>
+                <div className="menu-label">Sort subfolders &amp; notes by</div>
+                {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
+                  <button key={m} className={f.sort === m ? 'checked' : ''} onClick={() => updateFolder(workspaceDoc, f.id, { sort: m })}>
+                    {SORT_LABELS[m]}
+                  </button>
+                ))}
+                <button className="danger" onClick={() => trashFolder(workspaceDoc, f.id)}>
+                  Delete folder
+                </button>
+              </div>
+            )}
+          </div>
+          {open && node.children.length > 0 && <ul>{renderNodes(node.children, depth + 1)}</ul>}
+        </li>
+      )
+    })
+
+  return (
+    <aside className="sidebar">
+      <header className="sidebar-head">
+        <h1>ReconNotes</h1>
+        <SyncBadge />
+        <button className="icon" onClick={onSettings} aria-label="Settings">
+          <SettingsIcon size={18} />
+        </button>
+      </header>
+      <form
+        className="search"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (query.trim()) onView({ kind: 'search', query })
+        }}
+      >
+        <Search size={16} />
+        <input
+          type="search"
+          placeholder="Search everything"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            if (e.target.value.trim()) onView({ kind: 'search', query: e.target.value })
+            else if (view.kind === 'search') onView({ kind: 'all' })
+          }}
+        />
+      </form>
+      <nav className="folders">
+        <div className={`folder-row special${view.kind === 'all' ? ' active' : ''}`} onClick={() => onView({ kind: 'all' })}>
+          <Inbox size={16} /> <span className="folder-name">All Notes</span>
+          <span className="count">{liveCount}</span>
+        </div>
+        <div className="section-label">
+          Folders
+          <div className="menu-anchor">
+            <button className="icon" onClick={() => setMenuFor(menuFor === 'root' ? null : 'root')} aria-label="Folder sort">
+              <MoreHorizontal size={14} />
+            </button>
+            {menuFor === 'root' && (
+              <div className="menu right" onClick={() => setMenuFor(null)}>
+                <div className="menu-label">Sort folders by</div>
+                {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
+                  <button key={m} className={ws.rootSort === m ? 'checked' : ''} onClick={() => getSettings(workspaceDoc).set('rootSort', m)}>
+                    {SORT_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="icon" onClick={() => newFolder(null)} aria-label="New folder" title="New folder">
+            <FolderPlus size={16} />
+          </button>
+        </div>
+        <ul
+          className="tree"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            // dropped on empty space: move folder to the top level
+            const p = getDrag(e)
+            if (p?.kind === 'folder' && e.target === e.currentTarget) moveFolder(workspaceDoc, p.id, null)
+          }}
+        >
+          {renderNodes(tree, 0)}
+        </ul>
+        {!tree.length && ws.loaded && <p className="empty-hint">No folders yet. Create one with the + button.</p>}
+        <div
+          className={`folder-row special${view.kind === 'trash' ? ' active' : ''}`}
+          onClick={() => onView({ kind: 'trash' })}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const p = getDrag(e)
+            if (p?.kind === 'folder') trashFolder(workspaceDoc, p.id)
+          }}
+        >
+          <Trash2 size={16} /> <span className="folder-name">Recently Deleted</span>
+          <span className="count">{trashCount || ''}</span>
+        </div>
+      </nav>
+    </aside>
+  )
+}

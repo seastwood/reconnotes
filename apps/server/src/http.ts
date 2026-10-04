@@ -243,5 +243,12 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     })
   })
 
-  return server
+  /** Drop every connection so shutdown is immediate; devices reconnect later. */
+  const closeSockets = () => {
+    for (const ws of wss.clients) ws.terminate()
+    wss.close()
+    server.closeAllConnections()
+  }
+
+  return { server, closeSockets }
 }

@@ -1,0 +1,470 @@
+import { useEffect, useRef, useState } from 'react'
+import * as Y from 'yjs'
+import {
+  DRAWING_WIDTH,
+  eraseFromStroke,
+  getDrawingHeight,
+  getDrawingMeta,
+  getStrokes,
+  newId,
+  round1,
+  round2,
+  strokeHit,
+  strokeInLasso,
+  strokeOpacity,
+  strokePath,
+  translateStroke,
+  unionBounds,
+  type Rect,
+  type Stroke,
+  type Tool,
+} from '@reconnotes/core'
+import { DRAW_ORIGIN } from '../editor/undo'
+import { inkUi, toolState, useTools } from './toolState'
+import { settings } from '../lib/settings'
+
+interface Props {
+  doc: Y.Doc
+  drawingId: string
+  undoManager: Y.UndoManager | null
+  editable: boolean
+}
+
+const ERASER_RADIUS = 10
+const GROW_MARGIN = 80
+const GROW_BY = 300
+const MAX_HEIGHT = 20000
+
+const isDark = () => document.documentElement.dataset.theme === 'dark'
+
+/** Like Apple Notes, black ink shows as white in dark mode (and vice versa). */
+function displayColor(c: string, dark: boolean) {
+  if (!dark) return c
+  const l = c.toLowerCase()
+  if (l === '#000000' || l === '#000') return '#f5f5f5'
+  if (l === '#5b5b5b') return '#bdbdbd'
+  return c
+}
+
+/**
+ * An ink canvas embedded in a note.
+ *
+ * Input handling mirrors Apple Notes on iPad:
+ *  - Apple Pencil always draws; once a pencil has been used, fingers scroll
+ *    instead (palm rejection) unless "draw with finger" is on.
+ *  - Pressure, tilt-independent width and 240 Hz coalesced pencil samples are
+ *    used for smooth, natural strokes.
+ *  - Eraser (whole stroke or pixel), lasso select/move, and an undo history
+ *    shared with the typed text.
+ */
+export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const baseRef = useRef<HTMLCanvasElement>(null)
+  const liveRef = useRef<HTMLCanvasElement>(null)
+  const [width, setWidth] = useState(0)
+  const [height, setHeight] = useState(() => getDrawingHeight(doc, drawingId))
+  const [selection, setSelection] = useState<{ ids: Set<string>; bounds: Rect } | null>(null)
+  const selectionRef = useRef(selection)
+  selectionRef.current = selection
+  const tool = useTools((s) => s.tool)
+
+  const strokes = getStrokes(doc, drawingId)
+  const scale = width / DRAWING_WIDTH
+
+  // Keep ink in the undo history.
+  useEffect(() => {
+    undoManager?.addToScope(strokes)
+  }, [undoManager, strokes])
+
+  // Track width (ink is stored in a fixed 1000-unit-wide coordinate space).
+  useEffect(() => {
+    const el = wrapRef.current!
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el)
+    setWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+
+  // Height is shared between devices.
+  useEffect(() => {
+    const meta = getDrawingMeta(doc)
+    const update = () => setHeight(getDrawingHeight(doc, drawingId))
+    meta.observe(update)
+    return () => meta.unobserve(update)
+  }, [doc, drawingId])
+
+  // --- Rendering ------------------------------------------------------------
+  const pathCache = useRef(new Map<string, Path2D>())
+  const pathFor = (s: Stroke) => {
+    let p = pathCache.current.get(s.id)
+    if (!p) {
+      p = new Path2D(strokePath(s))
+      pathCache.current.set(s.id, p)
+    }
+    return p
+  }
+
+  const prepare = (canvas: HTMLCanvasElement | null) => {
+    if (!canvas || !width) return null
+    const dpr = window.devicePixelRatio || 1
+    const w = Math.round(width * dpr)
+    const h = Math.round(height * scale * dpr)
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+    const ctx = canvas.getContext('2d')!
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0)
+    return ctx
+  }
+
+  const paintStroke = (ctx: CanvasRenderingContext2D, s: Stroke, dark: boolean, path?: Path2D) => {
+    ctx.globalAlpha = strokeOpacity(s)
+    ctx.fillStyle = displayColor(s.color, dark)
+    ctx.fill(path ?? pathFor(s))
+  }
+
+  const hiddenIds = useRef<Set<string>>(new Set())
+
+  const renderBase = () => {
+    const ctx = prepare(baseRef.current)
+    if (!ctx) return
+    const dark = isDark()
+    // Highlighter goes underneath other ink, like a real highlighter.
+    const all = strokes.toArray().filter((s) => !hiddenIds.current.has(s.id))
+    for (const s of all) if (s.tool === 'highlighter') paintStroke(ctx, s, dark)
+    for (const s of all) if (s.tool !== 'highlighter') paintStroke(ctx, s, dark)
+    ctx.globalAlpha = 1
+  }
+
+  useEffect(() => {
+    renderBase()
+    const obs = () => {
+      // drop cached paths for strokes that no longer exist
+      const ids = new Set(strokes.toArray().map((s) => s.id))
+      for (const id of pathCache.current.keys()) if (!ids.has(id)) pathCache.current.delete(id)
+      renderBase()
+      const sel = selectionRef.current
+      if (sel && ![...sel.ids].every((id) => ids.has(id))) setSelection(null)
+    }
+    strokes.observe(obs)
+    const mo = new MutationObserver(renderBase)
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => {
+      strokes.unobserve(obs)
+      mo.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strokes, width, height])
+
+  // Clear lasso selection when switching tools.
+  useEffect(() => {
+    if (tool !== 'lasso') setSelection(null)
+  }, [tool])
+
+  // --- Input --------------------------------------------------------------
+  type Gesture =
+    | { kind: 'ink'; stroke: Stroke }
+    | { kind: 'erase' }
+    | { kind: 'lasso'; poly: number[] }
+    | { kind: 'move'; startX: number; startY: number; dx: number; dy: number }
+
+  const gesture = useRef<Gesture | null>(null)
+  const activePointer = useRef<number | null>(null)
+
+  const toLocal = (e: { clientX: number; clientY: number }) => {
+    const r = liveRef.current!.getBoundingClientRect()
+    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }
+  }
+
+  const canDraw = (e: React.PointerEvent | PointerEvent) => {
+    if (!editable) return false
+    if (e.pointerType === 'pen') return true
+    if (e.pointerType === 'mouse') return e.button === 0 || e.buttons === 1
+    // touch: draw only if the user allows finger drawing, or no pencil yet
+    return settings.get().fingerDrawing || !inkUi.get().pencilSeen
+  }
+
+  // iOS: stop the pencil from scrolling the page, but let fingers scroll.
+  useEffect(() => {
+    const el = liveRef.current!
+    const onTouch = (e: TouchEvent) => {
+      const t = e.touches[0] as Touch & { touchType?: string }
+      if (t?.touchType === 'stylus' || settings.get().fingerDrawing || !inkUi.get().pencilSeen) {
+        if (editable) e.preventDefault()
+      }
+    }
+    el.addEventListener('touchstart', onTouch, { passive: false })
+    el.addEventListener('touchmove', onTouch, { passive: false })
+    return () => {
+      el.removeEventListener('touchstart', onTouch)
+      el.removeEventListener('touchmove', onTouch)
+    }
+  }, [editable])
+
+  const growIfNeeded = (y: number) => {
+    const h = getDrawingHeight(doc, drawingId)
+    if (y > h - GROW_MARGIN && h < MAX_HEIGHT) getDrawingMeta(doc).set(drawingId, { height: h + GROW_BY })
+  }
+
+  const eraseAt = (x: number, y: number) => {
+    const mode = toolState.get().eraserMode
+    const arr = strokes.toArray()
+    doc.transact(() => {
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const s = arr[i]
+        if (mode === 'object') {
+          if (strokeHit(s, x, y, ERASER_RADIUS)) strokes.delete(i, 1)
+        } else {
+          const runs = eraseFromStroke(s, x, y, ERASER_RADIUS)
+          if (runs) {
+            strokes.delete(i, 1)
+            strokes.insert(
+              i,
+              runs.map((pts) => ({ ...s, id: newId(), pts })),
+            )
+          }
+        }
+      }
+    }, DRAW_ORIGIN)
+  }
+
+  const drawLive = () => {
+    const ctx = prepare(liveRef.current)
+    if (!ctx) return
+    const g = gesture.current
+    const dark = isDark()
+    if (g?.kind === 'ink' && g.stroke.pts.length) {
+      paintStroke(ctx, g.stroke, dark, new Path2D(strokePath(g.stroke)))
+    }
+    if (g?.kind === 'lasso' && g.poly.length > 2) {
+      ctx.globalAlpha = 1
+      ctx.setLineDash([6, 6])
+      ctx.lineWidth = 1.5 / scale
+      ctx.strokeStyle = dark ? '#e5e5e5' : '#444'
+      ctx.beginPath()
+      ctx.moveTo(g.poly[0], g.poly[1])
+      for (let i = 2; i < g.poly.length; i += 2) ctx.lineTo(g.poly[i], g.poly[i + 1])
+      ctx.stroke()
+    }
+    const sel = selectionRef.current
+    if (sel) {
+      const dx = g?.kind === 'move' ? g.dx : 0
+      const dy = g?.kind === 'move' ? g.dy : 0
+      for (const s of strokes.toArray()) {
+        if (sel.ids.has(s.id)) {
+          ctx.save()
+          ctx.translate(dx, dy)
+          paintStroke(ctx, s, dark)
+          ctx.restore()
+        }
+      }
+      ctx.globalAlpha = 1
+      ctx.setLineDash([6, 6])
+      ctx.lineWidth = 1.5 / scale
+      ctx.strokeStyle = '#0a84ff'
+      ctx.strokeRect(sel.bounds.x + dx, sel.bounds.y + dy, sel.bounds.w, sel.bounds.h)
+    }
+    ctx.setLineDash([])
+    ctx.globalAlpha = 1
+  }
+
+  useEffect(drawLive)
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'pen' && !inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
+    if (activePointer.current !== null || !canDraw(e)) return
+    e.preventDefault()
+    inkUi.set({ activeDrawing: drawingId, palette: null })
+    activePointer.current = e.pointerId
+    liveRef.current!.setPointerCapture(e.pointerId)
+    const { x, y } = toLocal(e)
+    const t = toolState.get()
+    undoManager?.stopCapturing()
+
+    if (t.tool === 'eraser' || (e.pointerType === 'pen' && e.button === 5)) {
+      gesture.current = { kind: 'erase' }
+      eraseAt(x, y)
+    } else if (t.tool === 'lasso') {
+      const sel = selectionRef.current
+      if (sel && x >= sel.bounds.x && x <= sel.bounds.x + sel.bounds.w && y >= sel.bounds.y && y <= sel.bounds.y + sel.bounds.h) {
+        gesture.current = { kind: 'move', startX: x, startY: y, dx: 0, dy: 0 }
+        hiddenIds.current = new Set(sel.ids)
+        renderBase()
+      } else {
+        setSelection(null)
+        gesture.current = { kind: 'lasso', poly: [x, y] }
+      }
+    } else {
+      const inkTool = t.tool as Tool
+      gesture.current = {
+        kind: 'ink',
+        stroke: {
+          id: newId(),
+          tool: inkTool,
+          color: t.colors[inkTool],
+          size: t.sizes[inkTool],
+          pts: [round1(x), round1(y), round2(e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5)],
+        },
+      }
+    }
+    drawLive()
+  }
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === 'pen') inkUi.set({ lastPencil: { x: e.clientX, y: e.clientY } })
+    if (e.pointerId !== activePointer.current) return
+    const g = gesture.current
+    if (!g) return
+    const events = e.nativeEvent.getCoalescedEvents?.() ?? [e.nativeEvent]
+    for (const ev of events.length ? events : [e.nativeEvent]) {
+      const { x, y } = toLocal(ev)
+      if (g.kind === 'ink') {
+        const p = g.stroke.pts
+        const lx = p[p.length - 3]
+        const ly = p[p.length - 2]
+        if (Math.abs(lx - x) + Math.abs(ly - y) < 0.4) continue
+        p.push(round1(x), round1(y), round2(ev.pointerType === 'pen' ? ev.pressure || 0.5 : 0.5))
+      } else if (g.kind === 'erase') {
+        eraseAt(x, y)
+      } else if (g.kind === 'lasso') {
+        g.poly.push(round1(x), round1(y))
+      } else if (g.kind === 'move') {
+        g.dx = x - g.startX
+        g.dy = y - g.startY
+      }
+    }
+    drawLive()
+  }
+
+  const finish = (e: React.PointerEvent) => {
+    if (e.pointerId !== activePointer.current) return
+    activePointer.current = null
+    const g = gesture.current
+    gesture.current = null
+    if (!g) return
+    if (g.kind === 'ink' && g.stroke.pts.length >= 3) {
+      undoManager?.stopCapturing()
+      doc.transact(() => strokes.push([g.stroke]), DRAW_ORIGIN)
+      // keep the cached path so the committed stroke renders without a flicker
+      pathCache.current.set(g.stroke.id, new Path2D(strokePath(g.stroke)))
+      growIfNeeded(Math.max(...g.stroke.pts.filter((_, i) => i % 3 === 1)))
+    } else if (g.kind === 'lasso') {
+      const chosen = strokes.toArray().filter((s) => strokeInLasso(s, g.poly))
+      const bounds = unionBounds(chosen)
+      setSelection(bounds ? { ids: new Set(chosen.map((s) => s.id)), bounds } : null)
+    } else if (g.kind === 'move') {
+      const sel = selectionRef.current
+      hiddenIds.current = new Set()
+      if (sel && (g.dx || g.dy)) {
+        const arr = strokes.toArray()
+        const moved: Stroke[] = []
+        undoManager?.stopCapturing()
+        doc.transact(() => {
+          for (let i = arr.length - 1; i >= 0; i--) {
+            if (!sel.ids.has(arr[i].id)) continue
+            const s = translateStroke(arr[i], g.dx, g.dy, newId())
+            moved.push(s)
+            strokes.delete(i, 1)
+            strokes.insert(i, [s])
+          }
+        }, DRAW_ORIGIN)
+        const bounds = unionBounds(moved)!
+        setSelection({ ids: new Set(moved.map((s) => s.id)), bounds })
+        growIfNeeded(bounds.y + bounds.h)
+      } else renderBase()
+    }
+    drawLive()
+  }
+
+  const deleteSelection = () => {
+    const sel = selectionRef.current
+    if (!sel) return
+    const arr = strokes.toArray()
+    undoManager?.stopCapturing()
+    doc.transact(() => {
+      for (let i = arr.length - 1; i >= 0; i--) if (sel.ids.has(arr[i].id)) strokes.delete(i, 1)
+    }, DRAW_ORIGIN)
+    setSelection(null)
+  }
+
+  const recolorSelection = (color: string) => {
+    const sel = selectionRef.current
+    if (!sel) return
+    const arr = strokes.toArray()
+    const ids = new Set<string>()
+    doc.transact(() => {
+      for (let i = arr.length - 1; i >= 0; i--) {
+        if (!sel.ids.has(arr[i].id)) continue
+        const s = { ...arr[i], id: newId(), color }
+        ids.add(s.id)
+        strokes.delete(i, 1)
+        strokes.insert(i, [s])
+      }
+    }, DRAW_ORIGIN)
+    setSelection({ ids, bounds: sel.bounds })
+  }
+
+  // Expose selection actions to the toolbar.
+  useEffect(() => {
+    const onAction = (e: Event) => {
+      const { drawingId: id, action, color } = (e as CustomEvent).detail
+      if (id !== drawingId) return
+      if (action === 'delete-selection') deleteSelection()
+      if (action === 'recolor-selection') recolorSelection(color)
+    }
+    window.addEventListener('reconnotes:ink-action', onAction)
+    return () => window.removeEventListener('reconnotes:ink-action', onAction)
+  })
+
+  useEffect(() => {
+    if (!selection) return
+    window.dispatchEvent(new CustomEvent('reconnotes:ink-selection', { detail: { drawingId, count: selection.ids.size } }))
+    return () => {
+      window.dispatchEvent(new CustomEvent('reconnotes:ink-selection', { detail: { drawingId, count: 0 } }))
+    }
+  }, [selection, drawingId])
+
+  // Resize handle: drag to make the drawing taller or shorter.
+  const onResizeDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startY = e.clientY
+    const startH = getDrawingHeight(doc, drawingId)
+    const minH = Math.max(150, (unionBounds(strokes.toArray())?.y ?? 0) + (unionBounds(strokes.toArray())?.h ?? 0) + 20)
+    const move = (ev: PointerEvent) => {
+      const h = Math.min(MAX_HEIGHT, Math.max(minH, startH + (ev.clientY - startY) / scale))
+      setHeight(h)
+    }
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      const h = Math.min(MAX_HEIGHT, Math.max(minH, startH + (ev.clientY - startY) / scale))
+      getDrawingMeta(doc).set(drawingId, { height: Math.round(h) })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const cssHeight = height * scale
+  const touchAction = settings.get().fingerDrawing ? 'none' : 'pan-y pinch-zoom'
+
+  return (
+    <div ref={wrapRef} className="drawing-canvas" style={{ height: cssHeight || 200 }}>
+      <canvas ref={baseRef} className="ink-layer" style={{ width: '100%', height: cssHeight }} />
+      <canvas
+        ref={liveRef}
+        className={`ink-layer ink-input tool-${tool}`}
+        style={{ width: '100%', height: cssHeight, touchAction }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={finish}
+        onPointerCancel={finish}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      {editable && <div className="drawing-resize" onPointerDown={onResizeDown} title="Drag to resize" />}
+    </div>
+  )
+}

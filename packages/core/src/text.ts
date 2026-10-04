@@ -90,6 +90,10 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
 
   const nonEmpty = lines.map((l) => l.trim()).filter(Boolean)
   const title = (nonEmpty[0] ?? '').replace(/^\[[ x]\] /, '').slice(0, 200)
-  const snippet = nonEmpty.slice(1).join(' ').slice(0, 200)
+  const snippet = nonEmpty
+    .slice(1)
+    .map((l) => l.replace(/^\[[ x]\] /, ''))
+    .join(' ')
+    .slice(0, 200)
   return { title, snippet, text: nonEmpty.join('\n'), attachments, drawings }
 }

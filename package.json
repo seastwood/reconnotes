@@ -13,9 +13,13 @@
     "dev:web": "npm run dev -w @reconnotes/web",
     "build": "npm run build -w @reconnotes/web && npm run build -w @reconnotes/server",
     "test": "npm test -w @reconnotes/core && npm test -w @reconnotes/server",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "e2e": "node scripts/e2e-smoke.mjs"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
   }
 }

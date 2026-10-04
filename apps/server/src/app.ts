@@ -23,7 +23,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   const store = new Store(config.dataDir)
   const ai = new Ai(config)
   const sync = new SyncEngine(config, store, ai)
-  const server = createHttpServer(config, store, sync, ai)
+  const { server, closeSockets } = createHttpServer(config, store, sync, ai)
   resumePendingAttachments(config, store, ai, sync)
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   return {
@@ -35,7 +35,9 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     async close() {
       stopBackups()
       await sync.destroy()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()))
+      closeSockets()
+      await closed
       store.close()
     },
   }
