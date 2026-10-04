@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowDown, ArrowUp, CheckCircle2, CircleAlert, Circle, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
 import {
+  ApiError,
   DEFAULT_URLS,
   KIND_LABELS,
   TASK_HELP,
@@ -21,6 +22,7 @@ import {
 export function AiAgentsSection() {
   const [state, setState] = useState<AgentsState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [editing, setEditing] = useState<Agent | 'new' | null>(null)
 
   const refresh = () =>
@@ -29,8 +31,9 @@ export function AiAgentsSection() {
       .then((s) => {
         setState(s)
         setError(null)
+        setLoadError(null)
       })
-      .catch((e) => setError((e as Error).message))
+      .catch((e) => setLoadError(e instanceof ApiError ? e : new ApiError((e as Error).message, 0)))
 
   useEffect(() => {
     void refresh()
@@ -51,7 +54,15 @@ export function AiAgentsSection() {
     await refresh()
   }
 
-  if (!state) return <p className="hint">{error ? `Couldn't load AI agents: ${error}` : 'Loading…'}</p>
+  if (!state) {
+    if (!loadError)
+      return (
+        <p className="hint">
+          <Loader2 size={14} className="spin" /> Loading AI agents from your server…
+        </p>
+      )
+    return <LoadProblem error={loadError} onRetry={() => void refresh()} />
+  }
 
   const byId = new Map(state.agents.map((a) => [a.id, a]))
 
@@ -430,4 +441,36 @@ function defaultName(kind: AgentKind, model: string) {
   if (kind === 'anthropic') return 'Claude'
   if (kind === 'ollama') return short ? `Ollama · ${short}` : 'Ollama'
   return short || 'OpenAI-compatible'
+}
+
+/** Explain why agents can't be shown, and how to fix it. */
+function LoadProblem({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
+  let title: string
+  let body: React.ReactNode
+  if (error.status === 404) {
+    title = 'Your server needs updating'
+    body = (
+      <>
+        The app is newer than the server it's connected to, which doesn't support AI agents yet. On the server, run:
+        <pre>cd /opt/reconnotes && git pull && npm ci && npm run build && systemctl restart reconnotes</pre>
+        Then press Retry.
+      </>
+    )
+  } else if (error.status === 401) {
+    title = 'The server rejected your access token'
+    body = <>Check the access token above (it's RECON_TOKEN in /etc/reconnotes.env on the server), then press Save &amp; connect.</>
+  } else if (error.status === 0) {
+    title = "Can't reach your server"
+    body = <>{error.message} Check the server address above and that the server is running, then press Retry.</>
+  } else {
+    title = "Couldn't load AI agents"
+    body = <>{error.message}</>
+  }
+  return (
+    <div className="setup-problem" role="alert">
+      <strong>{title}</strong>
+      <div>{body}</div>
+      <button onClick={onRetry}>Retry</button>
+    </div>
+  )
 }

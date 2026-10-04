@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Popover } from './Popover'
 import {
   ChevronDown,
   ChevronRight,
@@ -68,6 +69,11 @@ export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  const menuAnchor = useRef<HTMLElement | null>(null)
+  const openMenu = (id: string, el: HTMLElement) => {
+    menuAnchor.current = el
+    setMenuFor(menuFor === id ? null : id)
+  }
   const [dropHint, setDropHint] = useState<{ id: string; where: 'before' | 'inside' | 'after' } | null>(null)
 
   const counts = useMemo(() => {
@@ -169,13 +175,13 @@ export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
               aria-label="Folder actions"
               onClick={(e) => {
                 e.stopPropagation()
-                setMenuFor(menuFor === f.id ? null : f.id)
+                openMenu(f.id, e.currentTarget)
               }}
             >
               <MoreHorizontal size={16} />
             </button>
             {menuFor === f.id && (
-              <div className="menu right" onClick={(e) => (e.stopPropagation(), setMenuFor(null))}>
+              <Popover anchorRef={menuAnchor} align="right" onClose={() => setMenuFor(null)}>
                 <button onClick={() => newFolder(f.id)}>New subfolder</button>
                 <button onClick={() => setRenaming(f.id)}>Rename</button>
                 <button onClick={() => onMoveFolder(f.id)}>Move to…</button>
@@ -188,7 +194,7 @@ export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
                 <button className="danger" onClick={() => trashFolder(workspaceDoc, f.id)}>
                   Delete folder
                 </button>
-              </div>
+              </Popover>
             )}
           </div>
           {open && node.children.length > 0 && <ul>{renderNodes(node.children, depth + 1)}</ul>}
@@ -232,18 +238,18 @@ export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
         <div className="section-label">
           Folders
           <div className="menu-anchor">
-            <button className="icon" onClick={() => setMenuFor(menuFor === 'root' ? null : 'root')} aria-label="Folder sort">
+            <button className="icon" onClick={(e) => openMenu('root', e.currentTarget)} aria-label="Folder sort">
               <MoreHorizontal size={14} />
             </button>
             {menuFor === 'root' && (
-              <div className="menu right" onClick={() => setMenuFor(null)}>
+              <Popover anchorRef={menuAnchor} align="right" onClose={() => setMenuFor(null)}>
                 <div className="menu-label">Sort folders by</div>
                 {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
                   <button key={m} className={ws.rootSort === m ? 'checked' : ''} onClick={() => getSettings(workspaceDoc).set('rootSort', m)}>
                     {SORT_LABELS[m]}
                   </button>
                 ))}
-              </div>
+              </Popover>
             )}
           </div>
           <button className="icon" onClick={() => newFolder(null)} aria-label="New folder" title="New folder">

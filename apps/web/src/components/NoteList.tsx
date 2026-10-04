@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Popover } from './Popover'
 import { ArrowUpDown, ChevronLeft, FolderInput, Pin, SquarePen, RotateCcw, Trash2 } from 'lucide-react'
 import {
   createNote,
@@ -39,6 +40,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onMoveNote }: Props) {
   const ws = useWorkspace()
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [sortMenu, setSortMenu] = useState(false)
+  const sortBtn = useRef<HTMLButtonElement>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
@@ -105,11 +107,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onMoveNote }: Props) {
         <h2>{title}</h2>
         {view.kind !== 'search' && view.kind !== 'trash' && (
           <div className="menu-anchor">
-            <button className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
+            <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
               <ArrowUpDown size={18} />
             </button>
             {sortMenu && (
-              <div className="menu right" onClick={() => setSortMenu(false)}>
+              <Popover anchorRef={sortBtn} align="right" onClose={() => setSortMenu(false)}>
                 <div className="menu-label">Sort notes by</div>
                 {(Object.keys(SORT_LABELS) as SortMode[])
                   .filter((m) => m !== 'manual' || view.kind === 'folder')
@@ -118,7 +120,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onMoveNote }: Props) {
                       {SORT_LABELS[m]}
                     </button>
                   ))}
-              </div>
+              </Popover>
             )}
           </div>
         )}

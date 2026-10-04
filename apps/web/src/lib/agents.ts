@@ -43,14 +43,30 @@ export interface ProbeResult {
 /** Fields the user edits; apiKey is only sent when typed (blank keeps the saved one). */
 export type AgentInput = Partial<Omit<Agent, 'hasApiKey' | 'apiKeyHint' | 'status'>> & { apiKey?: string }
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    /** HTTP status, or 0 when the server couldn't be reached */
+    readonly status: number,
+  ) {
+    super(message)
+  }
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(path), {
-    method,
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let res: Response
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(method === 'POST' && path.endsWith('/probe') ? 60_000 : 15_000),
+    })
+  } catch (e) {
+    throw new ApiError((e as Error).name === 'TimeoutError' ? 'The server took too long to answer.' : "Couldn't reach the server.", 0)
+  }
   const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Server error ${res.status}`)
+  if (!res.ok) throw new ApiError((json as { error?: string }).error ?? `Server error ${res.status}`, res.status)
   return json as T
 }
 

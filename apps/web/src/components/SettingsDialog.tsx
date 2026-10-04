@@ -11,6 +11,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
 
+  const connected = Boolean(s.serverUrl && s.token)
+  const unsaved = url !== s.serverUrl || token !== s.token
+
   const test = async () => {
     setTesting(true)
     setStatus(null)
@@ -22,7 +25,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           .filter(([, v]) => v)
           .map(([k]) => k)
         setStatus(
-          `✅ Connected to ReconNotes ${info.version}. AI: ${ai.length ? ai.join(', ') : 'off'}. Audio transcription: ${info.transcription ? 'on' : 'off'}.`,
+          `✅ Connected to ReconNotes ${info.version}. AI: ${ai.length ? ai.join(', ') : 'off'}. Audio transcription: ${info.transcription ? 'on' : 'off'}.` +
+            (unsaved ? ' Press “Save & connect” to start using it.' : ''),
         )
       }
     } catch (e) {
@@ -76,14 +80,21 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
           {status && <p className="status">{status}</p>}
+          {unsaved && url && token && <p className="status warn-text">You have unsaved changes – press “Save &amp; connect”.</p>}
         </section>
 
         <section>
           <h3>AI agents</h3>
-          {s.serverUrl && s.token ? (
+          {connected ? (
             <AiAgentsSection key={s.serverUrl + s.token} />
           ) : (
-            <p className="hint">Connect your server above to set up AI for handwriting recognition, image search and compiling notes.</p>
+            <div className="setup-problem">
+              <strong>Connect your server first</strong>
+              <div>
+                AI agents are set up on your ReconNotes server. Enter the server address and access token above (the token is RECON_TOKEN in
+                /etc/reconnotes.env), press <b>Save &amp; connect</b>, and the “Add AI agent” button will appear here.
+              </div>
+            </div>
           )}
         </section>
 

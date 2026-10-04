@@ -354,6 +354,44 @@ button.text {
   left: auto;
   right: 0;
 }
+/* dropdowns rendered in a portal above the whole app */
+.menu.floating {
+  position: fixed;
+  z-index: 200;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.setup-problem {
+  border: 1px solid var(--accent);
+  background: var(--active);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.setup-problem pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--paper);
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: 6px 0;
+  width: 100%;
+}
+.setup-problem button {
+  padding: 6px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.warn-text {
+  color: var(--accent-text);
+}
 .menu button {
   display: flex;
   align-items: center;

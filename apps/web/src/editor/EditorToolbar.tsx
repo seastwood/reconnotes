@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Popover } from '../components/Popover'
 import { useEditorState, type Editor } from '@tiptap/react'
 import {
   Bold,
@@ -85,6 +86,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const styleBtn = useRef<HTMLButtonElement>(null)
+  const moreBtn = useRef<HTMLButtonElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -155,21 +158,24 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
       </button>
       <span className="sep" />
 
-      <div className="menu-anchor">
-        <button className={`tb${menu === 'style' ? ' on' : ''}`} onClick={() => setMenu(menu === 'style' ? null : 'style')} title="Text style">
-          <Type size={20} />
-          <span className="tb-label">{state.style}</span>
-        </button>
-        {menu === 'style' && (
-          <div className="menu" onClick={() => setMenu(null)}>
-            {STYLES.map((s) => (
-              <button key={s.key} className={s.className} onClick={() => applyStyle(editor, s.key)}>
-                {s.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <button
+        ref={styleBtn}
+        className={`tb${menu === 'style' ? ' on' : ''}`}
+        onClick={() => setMenu(menu === 'style' ? null : 'style')}
+        title="Text style"
+      >
+        <Type size={20} />
+        <span className="tb-label">{state.style}</span>
+      </button>
+      {menu === 'style' && (
+        <Popover anchorRef={styleBtn} onClose={() => setMenu(null)} keepFocus>
+          {STYLES.map((s) => (
+            <button key={s.key} className={s.className} onClick={() => applyStyle(editor, s.key)}>
+              {s.label}
+            </button>
+          ))}
+        </Popover>
+      )}
       <button className={`tb${state.bold ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} aria-label="Bold">
         <Bold size={18} />
       </button>
@@ -196,7 +202,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
       <button className="tb hide-sm" onClick={() => cameraRef.current?.click()} aria-label="Take photo" title="Take photo / scan">
         <Camera size={20} />
       </button>
-      <AudioRecorder editor={editor} />
+      <AudioRecorder editor={editor} onError={setError} />
       <button className="tb hide-sm" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
         <Paperclip size={20} />
       </button>
@@ -215,12 +221,11 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
       >
         <Sparkles size={20} />
       </button>
-      <div className="menu-anchor">
-        <button className="tb" onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label="More">
-          <MoreHorizontal size={20} />
-        </button>
-        {menu === 'more' && (
-          <div className="menu right" onClick={() => setMenu(null)}>
+      <button ref={moreBtn} className={`tb${menu === 'more' ? ' on' : ''}`} onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label="More">
+        <MoreHorizontal size={20} />
+      </button>
+      {menu === 'more' && (
+        <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>
               {pinned ? <PinOff size={16} /> : <Pin size={16} />} {pinned ? 'Unpin' : 'Pin to top'}
             </button>
@@ -230,9 +235,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
             <button className="danger" onClick={() => updateNote(workspaceDoc, noteId, { trashedAt: Date.now() })}>
               <Trash2 size={16} /> Move to Trash
             </button>
-          </div>
-        )}
-      </div>
+        </Popover>
+      )}
       {error && (
         <div className="toolbar-error" onClick={() => setError(null)}>
           {error}
@@ -242,7 +246,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
   )
 }
 
-function AudioRecorder({ editor }: { editor: Editor }) {
+function AudioRecorder({ editor, onError }: { editor: Editor; onError: (msg: string) => void }) {
+  const pickRef = useRef<HTMLInputElement>(null)
   const [rec, setRec] = useState<MediaRecorder | null>(null)
   const [secs, setSecs] = useState(0)
   useEffect(() => {
@@ -252,6 +257,19 @@ function AudioRecorder({ editor }: { editor: Editor }) {
   }, [rec])
 
   const start = async () => {
+    // Browsers only allow the microphone on secure (https) pages; on a plain
+    // http address navigator.mediaDevices doesn't exist at all.
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      onError(
+        window.isSecureContext
+          ? 'This browser can’t record audio. Pick an existing recording instead.'
+          : `Recording needs a secure (https) connection, and this page is ${location.protocol}//${location.host}. ` +
+              'Set up HTTPS for your server (see “Reaching the server from your phone” in the README) or use the iOS app. ' +
+              'For now you can attach a recording, e.g. from Voice Memos.',
+      )
+      pickRef.current?.click()
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? ''
@@ -270,9 +288,28 @@ function AudioRecorder({ editor }: { editor: Editor }) {
       setSecs(0)
       setRec(r)
     } catch (e) {
-      alert(`Microphone unavailable: ${(e as Error).message}`)
+      const err = e as Error
+      onError(
+        err.name === 'NotAllowedError'
+          ? 'Microphone access was denied. Allow it in your browser or iOS settings to record audio.'
+          : `Microphone unavailable: ${err.message}`,
+      )
     }
   }
+
+  const picker = (
+    <input
+      ref={pickRef}
+      type="file"
+      accept="audio/*"
+      hidden
+      onChange={(e) => {
+        const files = Array.from(e.target.files ?? [])
+        e.target.value = ''
+        if (files.length) void insertFiles(editor, files)
+      }}
+    />
+  )
 
   if (rec)
     return (
@@ -288,8 +325,11 @@ function AudioRecorder({ editor }: { editor: Editor }) {
       </button>
     )
   return (
-    <button className="tb" onClick={start} aria-label="Record audio" title="Record audio">
-      <Mic size={20} />
-    </button>
+    <>
+      <button className="tb" onClick={start} aria-label="Record audio" title="Record audio">
+        <Mic size={20} />
+      </button>
+      {picker}
+    </>
   )
 }
