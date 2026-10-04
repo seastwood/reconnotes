@@ -49,9 +49,9 @@ afterAll(async () => {
 })
 
 describe('ollama backend', () => {
-  it('is selected automatically when only RECON_OLLAMA_URL is set', async () => {
+  it('is imported from RECON_OLLAMA_URL on first start', async () => {
     const h = await fetch(`${base}/api/health`).then((r) => r.json())
-    expect(h.ai).toEqual({ handwriting: true, images: true, compile: true })
+    expect(h.ai).toEqual({ handwriting: true, images: true, pdf: false, compile: true })
   })
 
   it('converts handwriting with the local OCR model', async () => {

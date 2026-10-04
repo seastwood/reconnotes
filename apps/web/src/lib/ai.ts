@@ -88,7 +88,7 @@ export async function compileNote(editor: Editor, noteId: string, folderId: stri
 export interface ServerInfo {
   ok: boolean
   version: string
-  ai: { handwriting: boolean; images: boolean; compile: boolean }
+  ai: { handwriting: boolean; images: boolean; pdf: boolean; compile: boolean }
   autoHandwriting: boolean
   transcription: boolean
 }

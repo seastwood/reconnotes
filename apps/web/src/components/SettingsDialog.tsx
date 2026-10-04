@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib/settings'
 import { serverInfo } from '../lib/ai'
+import { AiAgentsSection } from './AiAgentsSection'
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const s = useSettings((x) => x)
@@ -75,6 +76,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
           {status && <p className="status">{status}</p>}
+        </section>
+
+        <section>
+          <h3>AI agents</h3>
+          {s.serverUrl && s.token ? (
+            <AiAgentsSection key={s.serverUrl + s.token} />
+          ) : (
+            <p className="hint">Connect your server above to set up AI for handwriting recognition, image search and compiling notes.</p>
+          )}
         </section>
 
         <section>

@@ -122,62 +122,53 @@ node apps/server/dist/index.js reindex    # rebuild the search index
 node apps/server/dist/index.js gen-token  # print a random token
 ```
 
-## AI: Claude and/or a local Ollama model
+## AI agents
 
-All AI runs on the server, so the token for Claude and the connection to Ollama never live on
-your devices. Each task can use a different backend:
+AI runs on the server and is configured in the app: **Settings › AI agents**. API keys are stored
+on the server and never sent back to your devices.
 
-| Task | What it does | Backends |
-| --- | --- | --- |
-| Handwriting | *Convert to text*, plus automatic recognition so handwriting is searchable | Claude or Ollama |
-| Images | OCR and a short description of photos, screenshots and charts, for search | Claude or Ollama |
-| PDFs | Text extraction for search | Claude |
-| Compile | Turns a whole note into a clean document | Claude or Ollama |
-| Audio | Transcripts for search | Any OpenAI-compatible speech-to-text server (e.g. a local Whisper server) |
+- **Add as many agents as you like:** Claude (Anthropic API key), Ollama models on your network,
+  or anything that speaks the OpenAI API (LM Studio, vLLM, llama.cpp server, OpenRouter, OpenAI).
+- **Test connection** checks the address and model, lists the installed models to pick from,
+  and explains common problems.
+- **Enable or disable** an agent with its switch.
+- **Choose who does what.** Each task has its own priority list:
 
-### Using your Ollama model (e.g. `HSR-DeepThink/strike-ocr`)
+| Task | What it does |
+| --- | --- |
+| Handwriting to text | *Convert to text*, plus automatic recognition so handwriting is searchable |
+| Text from images | Reads text in photos, screenshots and charts so search finds them |
+| Text from PDFs | Extracts PDF text for search (Claude only) |
+| Compile notes | Turns a whole note into a clean document |
 
-1. On the Ollama machine, let Ollama listen on the network (by default it only accepts local
-   connections):
+  The first enabled agent in a list is tried first. If it fails (unreachable, timed out, wrong
+  model, refused), the next one takes over automatically. The last error shows on the agent's
+  card.
+- Agents that can't read images still work for *Compile*: the server transcribes the
+  handwriting with your handwriting agents first and hands them text.
 
-   ```bash
-   sudo systemctl edit ollama
-   # add:
-   # [Service]
-   # Environment="OLLAMA_HOST=0.0.0.0:11434"
-   sudo systemctl restart ollama
-   ```
+### Connecting your Ollama machine
 
-   Check it from the ReconNotes server: `curl http://ollama-handwriting-to-text:11434/api/tags`.
+Ollama only accepts connections from its own machine unless told otherwise. On the Ollama
+machine:
 
-2. In the server's `.env`:
+```bash
+sudo systemctl edit ollama
+# add these two lines, then save:
+# [Service]
+# Environment="OLLAMA_HOST=0.0.0.0:11434"
+sudo systemctl restart ollama
+```
 
-   ```bash
-   RECON_OLLAMA_URL=http://ollama-handwriting-to-text:11434
-   RECON_OLLAMA_MODEL=HSR-DeepThink/strike-ocr:latest   # reads handwriting and images
-   # An OCR model is not good at writing documents; for "Compile" use a general model…
-   RECON_OLLAMA_TEXT_MODEL=qwen3:8b
-   # …or use Claude for compile and keep handwriting local:
-   # ANTHROPIC_API_KEY=sk-ant-...
-   # RECON_HANDWRITING_PROVIDER=ollama
-   # RECON_IMAGE_PROVIDER=ollama
-   # RECON_COMPILE_PROVIDER=anthropic
-   ```
+Then add an **Ollama** agent with the address `http://<ollama-machine-ip>:11434` and press
+**Test connection**. If your OCR model works better with a short instruction, set one under
+*Advanced › Handwriting prompt*.
 
-3. Restart the server. The startup log shows which backend handles each task, and the app's
-   **Settings › Test connection** shows which AI features are on.
+Audio transcription is separate: point `RECON_TRANSCRIBE_URL` at any OpenAI-compatible
+speech-to-text server (for example a local Whisper server).
 
-If your OCR model works better with a short instruction, set
-`RECON_OLLAMA_HANDWRITING_PROMPT="Transcribe the handwritten text in this image."`. Reasoning
-output in `<think>` blocks is stripped automatically.
-
-### Using Claude
-
-Set `ANTHROPIC_API_KEY`. The default model is `claude-opus-5-5` (change it with
-`RECON_AI_MODEL`, and the depth with `RECON_AI_EFFORT=low|medium|high`).
-
-Automatic handwriting recognition runs after you stop writing for 90 seconds, and only when a
-drawing has changed. Turn it off with `RECON_AUTO_HANDWRITING=false` to control costs.
+Older setups that used `ANTHROPIC_API_KEY` / `RECON_OLLAMA_*` environment variables are imported
+as agents on first start; after that the app is in charge.
 
 ## The iPhone and iPad app
 

@@ -1097,3 +1097,232 @@ button.link {
 .move-row svg {
   color: var(--accent-text);
 }
+
+/* ------------------------------------------------------------ AI agents */
+.dialog {
+  width: min(640px, 100%);
+}
+.dialog textarea {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.error-text {
+  color: var(--danger);
+}
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.agent-card.off {
+  opacity: 0.6;
+}
+.agent-main {
+  flex: 1;
+  min-width: 0;
+}
+.agent-name {
+  font-weight: 600;
+}
+.agent-kind {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+.agent-sub {
+  font-size: 13px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-error {
+  font-size: 13px;
+  color: var(--danger);
+  margin-top: 3px;
+}
+.dot-ok {
+  color: #2e9d4f;
+  flex-shrink: 0;
+}
+.dot-bad {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+.dot-unknown {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+  margin: 0 !important;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 13px;
+  background: rgba(127, 127, 127, 0.35);
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.switch span::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.switch input:checked + span {
+  background: #34c759;
+}
+.switch input:checked + span::after {
+  transform: translateX(18px);
+}
+.add-agent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--accent-text);
+}
+.agent-form {
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 4px 14px 14px;
+  background: var(--bg);
+}
+.agent-form label > .hint {
+  margin-top: 2px;
+}
+.model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.model-chips button {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--text);
+}
+.model-chips button.on {
+  border-color: var(--accent);
+  background: var(--active);
+}
+.probe {
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin: 10px 0;
+  line-height: 1.4;
+}
+.probe.ok {
+  background: rgba(52, 199, 89, 0.14);
+}
+.probe.bad {
+  background: rgba(217, 45, 32, 0.12);
+}
+.probe-warn {
+  margin-top: 6px;
+}
+.task-route {
+  margin: 12px 0 16px;
+}
+.task-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.route-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.route-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.route-list li.off {
+  opacity: 0.55;
+}
+.route-list li.none {
+  color: var(--muted);
+  font-size: 14px;
+  padding: 8px 10px;
+  border-style: dashed;
+}
+.route-list .rank {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--active);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.route-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+.route-name em {
+  color: var(--danger);
+  font-style: normal;
+  font-size: 13px;
+}
+.route-list .icon {
+  width: 30px;
+  height: 30px;
+}
+.route-add {
+  margin-top: 6px;
+  width: 100%;
+}

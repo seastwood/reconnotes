@@ -6,8 +6,19 @@ import { noteDocName, noteToMarkdown, getStrokes, extractNote } from '@reconnote
 import type { Config } from './config'
 import type { Store } from './store'
 import { SyncEngine, safeEqual } from './sync'
-import { Ai, AiUnavailableError, renderDrawingPng } from './ai'
-import { initialTextStatus, queueAttachment } from './attachments'
+import { Ai, renderDrawingPng } from './ai'
+import {
+  AI_TASKS,
+  AgentValidationError,
+  AllAgentsFailedError,
+  NoAgentError,
+  TASK_LABELS,
+  probeAgent,
+  validateAgent,
+  type AgentConfig,
+  type AiSettings,
+} from './agents'
+import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
 import { listBackups, runBackup } from './backup'
 import { log } from './log'
 
@@ -74,8 +85,8 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, {
       ok: true,
       version: VERSION,
-      ai: { handwriting: ai.canHandwriting, images: ai.canImages, compile: ai.canCompile },
-      autoHandwriting: config.autoHandwriting && ai.canHandwriting,
+      ai: { handwriting: ai.canHandwriting, images: ai.canImages, pdf: ai.canPdf, compile: ai.canCompile },
+      autoHandwriting: ai.autoHandwriting,
       transcription: Boolean(config.transcribeUrl),
     }),
   )
@@ -161,6 +172,56 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, { markdown, title: extractNote(doc).title })
   })
 
+  // --- AI agent management ------------------------------------------------
+  const agentsPayload = () => ({
+    agents: ai.agents.view(),
+    settings: ai.agents.settings(),
+    tasks: AI_TASKS.map((id) => ({ id, label: TASK_LABELS[id] })),
+  })
+
+  route('GET', '/api/ai/agents', (_req, res) => json(res, 200, agentsPayload()))
+
+  route('POST', '/api/ai/agents', async (req, res) => {
+    const body = await readJson<Partial<AgentConfig>>(req)
+    const { id: _ignored, ...input } = body
+    const agent = ai.agents.save(input)
+    retryAttachments(config, store, ai, sync)
+    json(res, 201, { agent: ai.agents.viewOf(agent.id), ...agentsPayload() })
+  })
+
+  route('PUT', `/api/ai/agents/${ID}`, async (req, res, [id]) => {
+    if (!ai.agents.get(id)) throw new HttpError(404, 'agent not found')
+    const body = await readJson<Partial<AgentConfig>>(req)
+    ai.agents.save({ ...body, id })
+    retryAttachments(config, store, ai, sync)
+    json(res, 200, { agent: ai.agents.viewOf(id), ...agentsPayload() })
+  })
+
+  route('DELETE', `/api/ai/agents/${ID}`, (_req, res, [id]) => {
+    ai.agents.remove(id)
+    json(res, 200, agentsPayload())
+  })
+
+  route('PUT', '/api/ai/settings', async (req, res) => {
+    ai.agents.updateSettings(await readJson<Partial<AiSettings>>(req))
+    retryAttachments(config, store, ai, sync)
+    json(res, 200, agentsPayload())
+  })
+
+  /**
+   * Test an agent's connection, saved or not. For a saved agent, fields that
+   * are left out (like the API key) come from the stored configuration.
+   */
+  route('POST', '/api/ai/probe', async (req, res) => {
+    const body = await readJson<Partial<AgentConfig>>(req)
+    const saved = body.id ? ai.agents.get(body.id) : undefined
+    const merged = { ...(saved ?? {}), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) }
+    const agent = validateAgent(merged)
+    const result = await probeAgent(agent)
+    if (saved) ai.agents.recordProbe(saved.id, result)
+    json(res, 200, result)
+  })
+
   // --- Backups & export ---------------------------------------------------
   route('GET', '/api/backups', (_req, res) => json(res, 200, { backups: listBackups(config) }))
   route('POST', '/api/backups', async (_req, res) => {
@@ -205,7 +266,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     // The web app may be served from a different origin (dev server, iOS app).
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-File-Name')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, POST, DELETE, OPTIONS')
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
       return res.end()
@@ -220,8 +281,18 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       }
       throw new HttpError(404, 'not found')
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : err instanceof AiUnavailableError ? 503 : 500
-      if (status >= 500) log.error(req.method, url.pathname, err)
+      const status =
+        err instanceof HttpError
+          ? err.status
+          : err instanceof AgentValidationError
+            ? 400
+            : err instanceof NoAgentError
+              ? 503
+              : err instanceof AllAgentsFailedError
+                ? 502
+                : 500
+      if (status === 502 || status === 503) log.warn(`${req.method} ${url.pathname}: ${(err as Error).message}`)
+      else if (status >= 500) log.error(req.method, url.pathname, err)
       if (!res.headersSent) json(res, status, { error: (err as Error).message })
       else res.end()
     }

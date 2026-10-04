@@ -67,6 +67,10 @@ export class Store {
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (note_id, drawing_id)
       );
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
         note_id UNINDEXED,
         title,
@@ -74,6 +78,19 @@ export class Store {
         tokenize = 'porter unicode61 remove_diacritics 2'
       );
     `)
+  }
+
+  // --- Server settings (AI agents etc.) ----------------------------------
+
+  getSetting<T>(key: string): T | null {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+    return row ? (JSON.parse(row.value) as T) : null
+  }
+
+  setSetting(key: string, value: unknown) {
+    this.db
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, JSON.stringify(value))
   }
 
   // --- Yjs documents -------------------------------------------------------
@@ -129,6 +146,12 @@ export class Store {
 
   setAttachmentText(id: string, text: string | null, status: AttachmentRow['text_status']) {
     this.db.prepare('UPDATE attachments SET text = ?, text_status = ? WHERE id = ?').run(text, status, id)
+  }
+
+  attachmentsWithStatus(statuses: AttachmentRow['text_status'][]): AttachmentRow[] {
+    return this.db
+      .prepare(`SELECT * FROM attachments WHERE text_status IN (${statuses.map(() => '?').join(',')})`)
+      .all(...statuses) as AttachmentRow[]
   }
 
   pendingAttachments(): AttachmentRow[] {
