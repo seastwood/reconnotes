@@ -1,7 +1,7 @@
 import { Resvg } from '@resvg/resvg-js'
-import { DRAWING_WIDTH, drawingToSvg, unionBounds, type Stroke } from '@reconnotes/core'
+import { DRAWING_WIDTH, drawingToSvg, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi } from './images'
 export { stripThinking } from './agents'
@@ -80,6 +80,20 @@ const PHOTO_PROMPT = `Transcribe all the text in this image – handwritten and 
 
 const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image.'
 
+/** One line of a drawing, for line-by-line recognition. */
+const LINE_PROMPT = 'Transcribe the handwritten text in this image. It is a single line of handwriting: output it as one line of plain text, with no commentary.'
+
+/** Second pass: tidy OCR output into well-structured Markdown. */
+const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritten notes{IMAGE}. Clean it up:
+
+- Fix obvious recognition mistakes (misread letters, words split or run together) using {SOURCE} and the context – but keep the writer's own words; don't reword, summarise or add anything.
+- Join fragments that belong on one line; keep genuinely separate lines and items separate.
+- Keep and improve the structure: a title/heading if the first line is one, bullet lists with the same nesting, "- [ ]" / "- [x]" checkboxes, numbered lists, tables.
+- Output only the Markdown.
+
+Recognised text:
+`
+
 const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce text that will make it findable by search:
 
 1. Transcribe all legible text in the image (signs, screenshots, documents, whiteboards, handwriting, chart labels and values).
@@ -146,14 +160,14 @@ export class Ai {
     backend: Backend,
     agent: AgentConfig,
     png: Buffer,
-    opts: { requireText?: boolean; mime?: string; photo?: boolean } = {},
+    opts: { requireText?: boolean; mime?: string; photo?: boolean; line?: boolean } = {},
   ): Promise<string> {
     // Try the agent's own prompt (or the detailed built-in one); if the model
     // returns nothing, try once more with a minimal instruction, which many
     // OCR models handle better.
     const prompts = [
       ...new Set([
-        agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : HANDWRITING_PROMPT),
+        agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT),
         opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
       ]),
     ]
@@ -175,15 +189,79 @@ export class Ai {
 
   /**
    * A photo or screenshot (e.g. of handwritten notes) → Markdown, using the
-   * handwriting agents in priority order.
+   * handwriting agents in priority order, then the clean-up agents.
    */
-  async transcribePhoto(data: Buffer, mime: string): Promise<{ text: string; agent: string }> {
+  async transcribePhoto(data: Buffer, mime: string, opts: { format?: boolean } = {}): Promise<{ text: string; agent: string }> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)
     const { result, agent } = await this.agents.run('handwriting', (backend, agent) =>
       this.transcribeWith(backend, agent, fit.data, { requireText: true, mime: fit.mime, photo: true }),
     )
-    return { text: result, agent: agent.name }
+    const text = opts.format === false ? result : await this.tidy(result, fit.data, fit.mime)
+    return { text, agent: agent.name }
+  }
+
+  /** Recent line results, so unchanged lines aren't re-read every time a drawing changes. */
+  private lineCache = new Map<string, string>()
+
+  /**
+   * Handwritten drawing → Markdown. Agents set to read "line by line" get
+   * each text line separately and the structure (bullets, indentation) is
+   * rebuilt from the stroke layout; "whole page" agents get one image.
+   * With `format`, the result is then tidied by the clean-up agents.
+   */
+  async transcribeDrawing(
+    strokes: Stroke[],
+    opts: { requireText?: boolean; format?: boolean } = {},
+  ): Promise<{ text: string; agent: string | null }> {
+    const page = renderDrawingPng(strokes)
+    if (!page) return { text: '', agent: null }
+    const lines = segmentLines(strokes)
+    const { result, agent } = await this.agents.run('handwriting', async (backend, agent) => {
+      if (readingMode(agent) === 'page' || lines.length < 2) return this.transcribeWith(backend, agent, page, opts)
+      const texts: string[] = []
+      for (const line of lines) {
+        const key = `${agent.id}|${agent.model}|${agent.prompt}|${line.strokes.map((s) => s.id).join(',')}`
+        let text = this.lineCache.get(key)
+        if (text === undefined) {
+          const png = renderDrawingPng(line.strokes)
+          text = png ? (await this.transcribeWith(backend, agent, png, { line: true })).replace(/\s*\n\s*/g, ' ').trim() : ''
+          this.lineCache.set(key, text)
+          if (this.lineCache.size > 5000) this.lineCache.delete(this.lineCache.keys().next().value!)
+        }
+        texts.push(text)
+      }
+      const md = linesToMarkdown(lines, texts)
+      log.info(`handwriting via "${agent.name}" line by line: ${lines.length} lines, ${md.length} chars`)
+      if (opts.requireText && !md.trim()) throw new Error(`returned no text for any of the ${lines.length} lines`)
+      return md
+    })
+    const text = opts.format && result.trim() ? await this.tidy(result, page, 'image/png') : result
+    return { text, agent: agent.name }
+  }
+
+  /**
+   * Optional clean-up pass with the "Clean up converted text" agents. Never
+   * fails the conversion: if no agent is set up or all fail, the recognised
+   * text is returned as is.
+   */
+  async tidy(text: string, image: Buffer, mime: string): Promise<string> {
+    if (!this.agents.available('format') || !text.trim()) return text
+    try {
+      const { result, agent } = await this.agents.run('format', (backend, agent) => {
+        const prompt =
+          FORMAT_PROMPT.replace('{IMAGE}', agent.vision ? ' (the original image is attached)' : '').replace(
+            '{SOURCE}',
+            agent.vision ? 'the image' : 'common sense',
+          ) + text
+        return backend.generate(agent.vision ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], 16000)
+      })
+      log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${result.length} chars)`)
+      return result.trim() ? stripFences(result) : text
+    } catch (err) {
+      log.warn(`clean-up skipped: ${(err as Error).message}`)
+      return text
+    }
   }
 
   /** Image → searchable text (OCR + short description). */
@@ -226,9 +304,9 @@ export class Ai {
         for (const p of parts) {
           if ('text' in p) text += p.text
           else if (p.kind === 'drawing')
-            text += '\n[handwritten section]\n' + (await this.transcribeHandwriting(p.image)).text + '\n[end handwritten section]\n'
+            text += '\n[handwritten section]\n' + (await this.transcribeDrawing(p.strokes)).text + '\n[end handwritten section]\n'
           else {
-            const t = await this.transcribePhoto(p.image, p.mime).then((r) => r.text, () => '(could not be read)')
+            const t = await this.transcribePhoto(p.image, p.mime, { format: false }).then((r) => r.text, () => '(could not be read)')
             text += '\n[picture, transcribed]\n' + t + '\n[end picture]\n'
           }
         }
@@ -256,7 +334,16 @@ export class Ai {
 }
 
 /** The note in reading order: text, drawings (rendered) and pictures. */
-export type CompilePart = { text: string } | { image: Buffer; mime: string; kind: 'drawing' | 'photo' }
+export type CompilePart =
+  | { text: string }
+  | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[] }
+  | { image: Buffer; mime: string; kind: 'photo' }
+
+/** Models sometimes wrap Markdown in a ```markdown fence; unwrap it. */
+function stripFences(s: string): string {
+  const m = /^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/.exec(s)
+  return (m ? m[1] : s).trim()
+}
 
 /**
  * Speech-to-text through any OpenAI-compatible transcription endpoint, such

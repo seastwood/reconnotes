@@ -161,9 +161,10 @@ export class SyncEngine {
     if (!doc) throw new Error('note not found')
     const strokes = getStrokes(doc, drawingId).toArray()
     const hash = strokesHash(strokes)
-    const png = renderDrawingPng(strokes)
-    if (!png && opts.requireText) throw new EmptyDrawingError()
-    const { text, agent } = png ? await this.ai.transcribeHandwriting(png, opts) : { text: '', agent: null }
+    if (!renderDrawingPng(strokes) && opts.requireText) throw new EmptyDrawingError()
+    // An explicit "Convert to text" also gets the clean-up pass; background
+    // recognition (for search) doesn't need it.
+    const { text, agent } = await this.ai.transcribeDrawing(strokes, { requireText: opts.requireText, format: opts.requireText })
     this.store.setDrawingHash(noteId, drawingId, hash)
     await this.change(noteDocName(noteId), (d) => {
       const tr = getTranscripts(d)

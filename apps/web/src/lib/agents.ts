@@ -3,7 +3,8 @@ import { apiUrl, authHeaders } from './settings'
 /** Client for the server's AI agent management API (see apps/server/src/agents.ts). */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai'
-export type AiTask = 'handwriting' | 'images' | 'pdf' | 'compile'
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile'
+export type ReadingMode = 'auto' | 'page' | 'lines'
 
 export interface Agent {
   id: string
@@ -16,6 +17,7 @@ export interface Agent {
   timeoutSec: number
   prompt: string
   effort: 'low' | 'medium' | 'high'
+  reading: ReadingMode
   hasApiKey: boolean
   apiKeyHint: string
   status: { lastOkAt: number | null; lastError: string | null; lastErrorAt: number | null }
@@ -85,6 +87,8 @@ export const KIND_LABELS: Record<AgentKind, string> = {
 
 export const TASK_HELP: Record<AiTask, string> = {
   handwriting: '“Convert to text” and automatic recognition that makes handwriting searchable. Needs a model that reads images.',
+  format:
+    'After handwriting is recognised, a general model tidies it up: fixes misread words, joins split lines and keeps lists and headings. Use Claude or a general model (e.g. qwen2.5vl, llama3.1) – not an OCR-only model. Leave empty to skip.',
   images: 'Reads text in photos, screenshots and charts so search can find them. Needs a model that reads images.',
   pdf: 'Extracts text from attached PDFs for search. Only Claude agents can read PDFs.',
   compile: 'Turns a whole note into a clean document. A general model works best; OCR-only models do poorly here.',

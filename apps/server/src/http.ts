@@ -195,8 +195,9 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       if (!m) {
         parts.push({ text: piece })
       } else if (m[1] === 'DRAWING') {
-        const png = renderDrawingPng(getStrokes(doc, m[2]).toArray())
-        if (png) parts.push({ image: png, mime: 'image/png', kind: 'drawing' })
+        const strokes = getStrokes(doc, m[2]).toArray()
+        const png = renderDrawingPng(strokes)
+        if (png) parts.push({ image: png, mime: 'image/png', kind: 'drawing', strokes })
       } else {
         const att = store.getAttachment(m[2])
         if (att && isAiImage(att.mime) && store.hasBlob(att.id)) {

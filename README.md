@@ -137,6 +137,7 @@ on the server and never sent back to your devices.
 | Task | What it does |
 | --- | --- |
 | Handwriting to text | *Convert to text*, plus automatic recognition so handwriting is searchable |
+| Clean up converted text | Optional second pass: a general model fixes misread words and tidies lists and headings |
 | Text from images | Reads text in photos, screenshots and charts so search finds them |
 | Text from PDFs | Extracts PDF text for search (Claude only) |
 | Compile notes | Turns a whole note into a clean document |
@@ -144,6 +145,10 @@ on the server and never sent back to your devices.
   The first enabled agent in a list is tried first. If it fails (unreachable, timed out, wrong
   model, refused), the next one takes over automatically. The last error shows on the agent's
   card.
+- **Reading style.** OCR models read letters well but lose page layout. With *line by line*
+  (the default for non-Claude agents), ReconNotes finds each written line, bullet and indent
+  from your pen strokes, reads the lines one at a time and rebuilds the nested lists itself.
+  Unchanged lines are not re-read. *Whole page* suits general vision models like Claude.
 - Agents that can't read images still work for *Compile*: the server transcribes the
   handwriting with your handwriting agents first and hands them text.
 

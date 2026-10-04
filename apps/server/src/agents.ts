@@ -19,8 +19,11 @@ import { log } from './log'
  */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai'
-export type AiTask = 'handwriting' | 'images' | 'pdf' | 'compile'
-export const AI_TASKS: AiTask[] = ['handwriting', 'images', 'pdf', 'compile']
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile'
+export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile']
+
+/** How an agent reads handwritten drawings. */
+export type ReadingMode = 'auto' | 'page' | 'lines'
 
 export interface AgentConfig {
   id: string
@@ -37,6 +40,17 @@ export interface AgentConfig {
   prompt: string
   /** Claude only: reasoning effort */
   effort: 'low' | 'medium' | 'high'
+  /**
+   * Drawings: read the whole page at once (general vision models) or one
+   * line at a time (OCR models, which are poor at page layout).
+   */
+  reading: ReadingMode
+}
+
+/** Resolve "auto": Claude reads whole pages well; other (often OCR) models do better line by line. */
+export function readingMode(a: AgentConfig): 'page' | 'lines' {
+  if (a.reading === 'page' || a.reading === 'lines') return a.reading
+  return a.kind === 'anthropic' ? 'page' : 'lines'
 }
 
 export interface AgentStatus {
@@ -386,6 +400,7 @@ export class NoAgentError extends Error {
 
 export const TASK_LABELS: Record<AiTask, string> = {
   handwriting: 'Handwriting to text',
+  format: 'Clean up converted text',
   images: 'Text from images',
   pdf: 'Text from PDFs',
   compile: 'Compile notes',
@@ -395,7 +410,7 @@ export const TASK_LABELS: Record<AiTask, string> = {
 function defaultTasks(a: AgentConfig): AiTask[] {
   const t: AiTask[] = []
   if (a.vision) t.push('handwriting', 'images')
-  if (a.kind === 'anthropic') t.push('pdf')
+  if (a.kind === 'anthropic') t.push('format', 'pdf')
   t.push('compile')
   return t
 }
@@ -416,7 +431,7 @@ export class AgentRegistry {
 
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
-    const routing = { handwriting: [], images: [], pdf: [], compile: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
+    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
     return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true }
   }
 
@@ -549,6 +564,7 @@ export class AgentRegistry {
       handwriting: order(c.handwritingProvider, [claude, ollama]),
       images: order(c.imageProvider, [claude, ollama]),
       pdf: claude ? [claude.id] : [],
+      format: claude ? [claude.id] : [],
       compile: order(c.compileProvider, [claude, ollamaText ?? ollama]),
     }
     this.store.setSetting(AGENTS_KEY, agents)
@@ -575,6 +591,7 @@ function withDefaults(a: Partial<AgentConfig>): AgentConfig {
     timeoutSec: a.timeoutSec ?? (kind === 'anthropic' ? 300 : 300),
     prompt: a.prompt ?? '',
     effort: effortOf(a.effort ?? 'medium'),
+    reading: a.reading === 'page' || a.reading === 'lines' ? a.reading : 'auto',
   }
 }
 

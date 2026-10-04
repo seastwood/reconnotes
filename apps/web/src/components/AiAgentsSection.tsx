@@ -12,6 +12,7 @@ import {
   type AgentsState,
   type AiTask,
   type ProbeResult,
+  type ReadingMode,
 } from '../lib/agents'
 import { apiUrl, settings } from '../lib/settings'
 
@@ -239,7 +240,18 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
   const [form, setForm] = useState<AgentInput>(() =>
     agent
       ? { ...agent }
-      : { kind: 'ollama', name: '', baseUrl: DEFAULT_URLS.ollama, model: '', vision: true, timeoutSec: 300, prompt: '', effort: 'medium', enabled: true },
+      : {
+          kind: 'ollama',
+          name: '',
+          baseUrl: DEFAULT_URLS.ollama,
+          model: '',
+          vision: true,
+          timeoutSec: 300,
+          prompt: '',
+          effort: 'medium',
+          enabled: true,
+          reading: 'auto',
+        },
   )
   const [apiKey, setApiKey] = useState('')
   const [probe, setProbe] = useState<ProbeResult | null>(null)
@@ -380,6 +392,20 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
         <input type="checkbox" checked={form.vision ?? true} onChange={(e) => set({ vision: e.target.checked })} />
         Reads images (needed for handwriting and image text)
       </label>
+      {(form.vision ?? true) && (
+        <label>
+          Reading style for drawings
+          <select value={form.reading ?? 'auto'} onChange={(e) => set({ reading: e.target.value as ReadingMode })}>
+            <option value="auto">Automatic ({kind === 'anthropic' ? 'whole page' : 'line by line'})</option>
+            <option value="lines">Line by line – best for OCR models</option>
+            <option value="page">Whole page at once – best for general vision models</option>
+          </select>
+          <span className="hint">
+            Line by line finds each written line, bullet and indent from your pen strokes and reads the lines one at a time, so OCR models
+            don’t break lines apart or lose the list structure.
+          </span>
+        </label>
+      )}
       {kind === 'anthropic' && (
         <label>
           Thinking effort
