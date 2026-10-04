@@ -142,3 +142,19 @@ describe('AI agents managed from the app', () => {
     expect(r.status).toBe(400)
   })
 })
+
+describe('model picker', () => {
+  it('lists Ollama models with size and whether they read images', async () => {
+    const { body } = await api('POST', '/api/ai/models', { kind: 'ollama', baseUrl: ollamaUrl })
+    expect(body.error).toBeNull()
+    expect(body.models.map((m: { id: string }) => m.id)).toEqual(['strike-ocr:latest', 'qwen3:8b'])
+    expect(body.models.find((m: { id: string }) => m.id === 'qwen3:8b').vision).toBe(false)
+    expect(body.models.find((m: { id: string }) => m.id === 'strike-ocr:latest').vision).toBe(true)
+  })
+
+  it('explains when the server cannot be reached', async () => {
+    const { body } = await api('POST', '/api/ai/models', { kind: 'ollama', baseUrl: deadUrl })
+    expect(body.models).toEqual([])
+    expect(body.error).toMatch(/connection refused/)
+  })
+})

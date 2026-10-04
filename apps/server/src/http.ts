@@ -15,6 +15,7 @@ import {
   TASK_LABELS,
   makeBackend,
   probeAgent,
+  listModels,
   validateAgent,
   type AgentConfig,
   type AiSettings,
@@ -257,6 +258,14 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const result = await probeAgent(agent)
     if (saved) ai.agents.recordProbe(saved.id, result)
     json(res, 200, result)
+  })
+
+  /** The models available on an agent's server (saved or being edited), for the picker. */
+  route('POST', '/api/ai/models', async (req, res) => {
+    const body = await readJson<Partial<AgentConfig>>(req)
+    const saved = body.id ? ai.agents.get(body.id) : undefined
+    const agent = validateAgent({ ...(saved ?? {}), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) })
+    json(res, 200, await listModels(agent))
   })
 
   /** Ask an agent (saved or being edited) to read a sample handwritten word. */

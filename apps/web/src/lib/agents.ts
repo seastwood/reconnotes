@@ -35,6 +35,12 @@ export interface AgentsState {
   tasks: { id: AiTask; label: string }[]
 }
 
+export interface ModelInfo {
+  id: string
+  detail: string
+  vision: boolean | null
+}
+
 export interface ProbeResult {
   ok: boolean
   message: string
@@ -75,7 +81,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const DEFAULT_URLS: Record<AgentKind, string> = {
   anthropic: 'https://api.anthropic.com',
-  ollama: 'http://192.168.1.x:11434',
+  ollama: '',
   openai: 'http://localhost:1234/v1',
 }
 
@@ -101,6 +107,7 @@ export const agentsApi = {
   remove: (id: string) => call<AgentsState>('DELETE', `/api/ai/agents/${id}`),
   updateSettings: (s: Partial<AiSettings>) => call<AgentsState>('PUT', '/api/ai/settings', s),
   probe: (a: AgentInput) => call<ProbeResult>('POST', '/api/ai/probe', a),
+  models: (a: AgentInput) => call<{ models: ModelInfo[]; error: string | null }>('POST', '/api/ai/models', a),
   tryHandwriting: (a: AgentInput) =>
     call<{ ok: boolean; text: string; message: string; seconds: number }>('POST', '/api/ai/try-handwriting', a),
 }

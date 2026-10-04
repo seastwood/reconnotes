@@ -1411,3 +1411,13 @@ button.link {
   margin-top: 6px;
   width: 100%;
 }
+.model-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.model-row select,
+.model-row input {
+  flex: 1;
+  min-width: 0;
+}

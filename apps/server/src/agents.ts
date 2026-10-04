@@ -317,6 +317,79 @@ export interface ProbeResult {
   warnings: string[]
 }
 
+export interface ModelInfo {
+  id: string
+  /** e.g. "3.3 GB · 4B · Q4_K_M" */
+  detail: string
+  /** can it read images? null = unknown */
+  vision: boolean | null
+}
+
+/** List the models an agent's server offers, for the model picker. */
+export async function listModels(agent: AgentConfig): Promise<{ models: ModelInfo[]; error: string | null }> {
+  try {
+    if (agent.kind === 'ollama') {
+      const base = trimSlash(agent.baseUrl)
+      const res = await fetchWithHints(base + '/api/tags', { signal: AbortSignal.timeout(10_000) })
+      if (!res.ok) return { models: [], error: `Ollama answered ${res.status}` }
+      const body = (await res.json()) as {
+        models?: { name: string; size?: number; details?: { parameter_size?: string; quantization_level?: string } }[]
+      }
+      const list = body.models ?? []
+      // Ask each model what it can do (Ollama ≥ 0.6 reports "vision").
+      const caps = await Promise.all(
+        list.map(async (m) => {
+          try {
+            const r = await fetch(base + '/api/show', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: m.name }),
+              signal: AbortSignal.timeout(8_000),
+            })
+            const info = (await r.json()) as { capabilities?: string[] }
+            return info.capabilities ? info.capabilities.includes('vision') : null
+          } catch {
+            return null
+          }
+        }),
+      )
+      return {
+        models: list.map((m, i) => ({
+          id: m.name,
+          detail: [m.size ? `${(m.size / 1e9).toFixed(1)} GB` : '', m.details?.parameter_size ?? '', m.details?.quantization_level ?? '']
+            .filter(Boolean)
+            .join(' · '),
+          vision: caps[i],
+        })),
+        error: null,
+      }
+    }
+    if (agent.kind === 'openai') {
+      const res = await fetchWithHints(trimSlash(agent.baseUrl) + '/models', {
+        signal: AbortSignal.timeout(10_000),
+        headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {},
+      })
+      if (res.status === 401 || res.status === 403) return { models: [], error: 'The server rejected the API key.' }
+      if (!res.ok) return { models: [], error: `The server answered ${res.status}. The base URL usually ends in /v1.` }
+      const body = (await res.json()) as { data?: { id: string }[] }
+      return { models: (body.data ?? []).map((m) => ({ id: m.id, detail: '', vision: null })), error: null }
+    }
+    if (!agent.apiKey) return { models: [], error: 'Enter an API key to list models.' }
+    const client = new Anthropic({
+      apiKey: agent.apiKey,
+      baseURL: agent.baseUrl && agent.baseUrl !== DEFAULT_URLS.anthropic ? agent.baseUrl : undefined,
+      timeout: 15_000,
+      maxRetries: 0,
+    })
+    const models: ModelInfo[] = []
+    for await (const m of client.models.list({ limit: 100 })) models.push({ id: m.id, detail: m.display_name, vision: true })
+    return { models, error: null }
+  } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError) return { models: [], error: 'Anthropic rejected the API key.' }
+    return { models: [], error: (err as Error).message }
+  }
+}
+
 /** Check that an agent is reachable, authorised and has the chosen model. */
 export async function probeAgent(agent: AgentConfig): Promise<ProbeResult> {
   const warnings: string[] = []

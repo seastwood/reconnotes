@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowDown, ArrowUp, CheckCircle2, CircleAlert, Circle, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, CheckCircle2, CircleAlert, Circle, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import {
   ApiError,
   DEFAULT_URLS,
@@ -11,6 +11,7 @@ import {
   type AgentKind,
   type AgentsState,
   type AiTask,
+  type ModelInfo,
   type ProbeResult,
   type ReadingMode,
 } from '../lib/agents'
@@ -259,6 +260,10 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
   const [trial, setTrial] = useState<{ ok: boolean; text: string; message: string; seconds: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(Boolean(agent?.prompt))
+  const [models, setModels] = useState<ModelInfo[] | null>(null)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [typing, setTyping] = useState(false)
 
   const set = (patch: AgentInput) => setForm((f) => ({ ...f, ...patch }))
   const kind = form.kind as AgentKind
@@ -271,6 +276,31 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
       model: k === 'anthropic' ? 'claude-opus-5-5' : '',
       name: form.name,
     })
+
+  const canList = kind === 'anthropic' ? Boolean(apiKey || agent?.hasApiKey) : Boolean(form.baseUrl)
+  const loadModels = async () => {
+    if (!canList) {
+      setModels(null)
+      return
+    }
+    setLoadingModels(true)
+    try {
+      const r = await agentsApi.models(payload())
+      setModels(r.models)
+      setModelsError(r.error)
+    } catch (e) {
+      setModels(null)
+      setModelsError((e as Error).message)
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+  // Fetch the model list when the form opens and whenever the address/key changes.
+  useEffect(() => {
+    const t = setTimeout(() => void loadModels(), 500)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, form.baseUrl, apiKey])
 
   const test = async () => {
     setBusy('test')
@@ -337,7 +367,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
           <input
             value={form.baseUrl ?? ''}
             onChange={(e) => set({ baseUrl: e.target.value.trim() })}
-            placeholder={DEFAULT_URLS[kind]}
+            placeholder={kind === 'ollama' ? 'http://192.168.1.50:11434' : DEFAULT_URLS[kind]}
             autoCapitalize="off"
             autoCorrect="off"
           />
@@ -362,31 +392,64 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
       )}
       <label>
         Model
-        <div className="row">
-          <input
-            list={`models-${agent?.id ?? 'new'}`}
-            value={form.model ?? ''}
-            onChange={(e) => set({ model: e.target.value.trim() })}
-            placeholder={kind === 'ollama' ? 'e.g. HSR-DeepThink/strike-ocr:latest' : kind === 'anthropic' ? 'claude-opus-5-5' : 'model id'}
-            autoCapitalize="off"
-            autoCorrect="off"
-            style={{ flex: 1 }}
-          />
+        <div className="row model-row">
+          {models && models.length > 0 && !typing ? (
+            <select
+              value={form.model && models.some((m) => m.id === form.model) ? form.model : form.model ? '__missing' : ''}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === '__type') return setTyping(true)
+                const m = models.find((x) => x.id === v)
+                if (m) set({ model: m.id, ...(m.vision !== null ? { vision: m.vision } : {}) })
+              }}
+            >
+              {!form.model && <option value="">Choose a model…</option>}
+              {form.model && !models.some((m) => m.id === form.model) && (
+                <option value="__missing">{form.model} (not found on the server)</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id}
+                  {m.detail ? ` — ${m.detail}` : ''}
+                  {m.vision === true ? ' · reads images' : m.vision === false ? ' · text only' : ''}
+                </option>
+              ))}
+              <option value="__type">Type a model name…</option>
+            </select>
+          ) : (
+            <input
+              value={form.model ?? ''}
+              onChange={(e) => set({ model: e.target.value.trim() })}
+              placeholder={kind === 'ollama' ? 'e.g. qwen3-vl:4b' : kind === 'anthropic' ? 'claude-opus-5-5' : 'model id'}
+              autoCapitalize="off"
+              autoCorrect="off"
+            />
+          )}
+          <button type="button" className="icon" onClick={() => void loadModels()} aria-label="Refresh the model list" title="Refresh the model list">
+            {loadingModels ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+          </button>
         </div>
-        <datalist id={`models-${agent?.id ?? 'new'}`}>
-          {probe?.models.map((m) => <option key={m} value={m} />)}
-        </datalist>
-        {probe?.models.length ? (
-          <span className="model-chips">
-            {probe.models.slice(0, 20).map((m) => (
-              <button key={m} type="button" className={m === form.model ? 'on' : ''} onClick={() => set({ model: m })}>
-                {m}
-              </button>
-            ))}
-          </span>
-        ) : (
-          <span className="hint">Press “Test connection” to list the available models.</span>
-        )}
+        <span className="hint">
+          {loadingModels
+            ? 'Looking for models…'
+            : modelsError
+              ? `Couldn’t list models: ${modelsError}`
+              : models
+                ? models.length
+                  ? `${models.length} model${models.length === 1 ? '' : 's'} on this server.${typing ? ' ' : ''}`
+                  : kind === 'ollama'
+                    ? 'No models installed yet. On the Ollama machine run e.g. “ollama pull qwen3-vl:4b”, then refresh.'
+                    : 'The server lists no models.'
+                : kind === 'anthropic'
+                  ? 'Enter your API key to see the available models.'
+                  : 'Enter the address to see the available models.'}
+          {typing && models && models.length > 0 && (
+            <button type="button" className="link" onClick={() => setTyping(false)}>
+              {' '}
+              Pick from the list instead
+            </button>
+          )}
+        </span>
       </label>
       <label className="check">
         <input type="checkbox" checked={form.vision ?? true} onChange={(e) => set({ vision: e.target.checked })} />
