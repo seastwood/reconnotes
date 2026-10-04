@@ -21,8 +21,8 @@ export const TOOL_STYLES: Record<Tool, ToolStyle> = {
   highlighter: { sizeMul: 5, thinning: 0, opacity: 0.35, simulatePressure: false },
 }
 
-export function strokeOutline(s: Stroke): number[][] {
-  const style = TOOL_STYLES[s.tool] ?? TOOL_STYLES.pen
+export function strokeOutline(s: Stroke, override?: Partial<ToolStyle> & { size?: number }): number[][] {
+  const style = { ...(TOOL_STYLES[s.tool] ?? TOOL_STYLES.pen), ...(override ?? {}) }
   const pts: number[][] = []
   // Mouse / touch input reports a constant pressure; let perfect-freehand
   // simulate pressure from velocity in that case so lines still look natural.
@@ -32,7 +32,7 @@ export function strokeOutline(s: Stroke): number[][] {
     if (i > 0 && s.pts[i + 2] !== s.pts[2]) constant = false
   }
   return getStroke(pts, {
-    size: s.size * style.sizeMul,
+    size: override?.size ?? s.size * style.sizeMul,
     thinning: style.thinning,
     smoothing: 0.5,
     streamline: 0.45,
@@ -44,8 +44,8 @@ export function strokeOutline(s: Stroke): number[][] {
 }
 
 /** SVG path data for a stroke outline. */
-export function strokePath(s: Stroke): string {
-  const pts = strokeOutline(s)
+export function strokePath(s: Stroke, override?: Partial<ToolStyle> & { size?: number }): string {
+  const pts = strokeOutline(s, override)
   if (!pts.length) return ''
   const avg = (a: number, b: number) => ((a + b) / 2).toFixed(1)
   let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)} Q`
@@ -61,10 +61,29 @@ export function strokeOpacity(s: Stroke): number {
   return (TOOL_STYLES[s.tool] ?? TOOL_STYLES.pen).opacity
 }
 
-/** Render a whole drawing to a standalone SVG string (white background). */
-export function drawingToSvg(strokes: Stroke[], width: number, height: number, scale = 1): string {
+/**
+ * Render a whole drawing to a standalone SVG string (white background).
+ *
+ * `recognition` renders for handwriting recognition rather than display:
+ * highlighter is left out, all ink is near-black (pale colours vanish on
+ * white), and lines are evenly thick with a minimum width of ~3 output pixels
+ * so light Apple Pencil pressure stays readable.
+ */
+export function drawingToSvg(
+  strokes: Stroke[],
+  width: number,
+  height: number,
+  scale = 1,
+  opts: { recognition?: boolean } = {},
+): string {
+  const minSize = 3 / scale
   const paths = strokes
+    .filter((s) => !opts.recognition || s.tool !== 'highlighter')
     .map((s) => {
+      if (opts.recognition) {
+        const d = strokePath(s, { thinning: 0.15, simulatePressure: false, size: Math.max(s.size * 1.2, minSize) })
+        return d ? `<path d="${d}" fill="#111111"/>` : ''
+      }
       const d = strokePath(s)
       if (!d) return ''
       const op = strokeOpacity(s)

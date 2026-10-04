@@ -7,7 +7,7 @@ import { getTranscripts, newId } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
 import { useUndoManager } from '../editor/undo'
 import { inkUi, useInkUi } from './toolState'
-import { convertHandwriting } from '../lib/ai'
+import { convertHandwriting, drawingImageUrl } from '../lib/ai'
 
 export interface NoteContextValue {
   doc: Y.Doc
@@ -115,7 +115,17 @@ function DrawingView({ node, editor, deleteNode, selected }: ReactNodeViewProps)
           </button>
         </div>
       )}
-      {error && <div className="drawing-error">{error}</div>}
+      {error && (
+        <div className="drawing-error" role="alert">
+          {error}{' '}
+          <a href={drawingImageUrl(ctx.noteId, drawingId)} target="_blank" rel="noreferrer">
+            See the image sent to the AI
+          </a>
+          <button className="link" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {transcript && !active && <div className="drawing-transcript" title="Recognised handwriting (searchable)">{transcript}</div>}
     </NodeViewWrapper>
   )

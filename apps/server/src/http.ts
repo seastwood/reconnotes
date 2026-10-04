@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws'
 import { noteDocName, noteToMarkdown, getStrokes, extractNote } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
-import { SyncEngine, safeEqual } from './sync'
+import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
 import { Ai, renderDrawingPng } from './ai'
 import {
   AI_TASKS,
@@ -150,8 +150,20 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { noteId, drawingId } = await readJson<{ noteId: string; drawingId: string }>(req)
     if (!/^[a-z0-9]{8,64}$/.test(noteId ?? '') || !/^[a-z0-9]{8,64}$/.test(drawingId ?? ''))
       throw new HttpError(400, 'noteId and drawingId required')
-    const text = await sync.enqueue(() => sync.recogniseDrawing(noteId, drawingId))
-    json(res, 200, { text })
+    const { text, agent } = await sync.enqueue(() => sync.recogniseDrawing(noteId, drawingId, { requireText: true }))
+    json(res, 200, { text, agent })
+  })
+
+  /** The exact image sent to the AI for a drawing – handy when recognition goes wrong. */
+  route('GET', '/api/ai/drawing-image', (_req, res, _p, url) => {
+    const noteId = url.searchParams.get('noteId') ?? ''
+    const drawingId = url.searchParams.get('drawingId') ?? ''
+    const doc = /^[a-z0-9]{8,64}$/.test(noteId) ? sync.getDoc(noteDocName(noteId)) : null
+    if (!doc || !/^[a-z0-9]{8,64}$/.test(drawingId)) throw new HttpError(404, 'drawing not found')
+    const png = renderDrawingPng(getStrokes(doc, drawingId).toArray())
+    if (!png) throw new HttpError(404, 'this drawing has no ink on the server')
+    res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' })
+    res.end(png)
   })
 
   route('POST', '/api/ai/compile', async (req, res) => {
@@ -286,6 +298,8 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
           ? err.status
           : err instanceof AgentValidationError
             ? 400
+            : err instanceof EmptyDrawingError
+              ? 409
             : err instanceof NoAgentError
               ? 503
               : err instanceof AllAgentsFailedError

@@ -156,13 +156,14 @@ export class SyncEngine {
   }
 
   /** Recognise handwriting in a drawing and store it as the drawing's transcript. */
-  async recogniseDrawing(noteId: string, drawingId: string): Promise<string> {
+  async recogniseDrawing(noteId: string, drawingId: string, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string | null }> {
     const doc = this.getDoc(noteDocName(noteId))
     if (!doc) throw new Error('note not found')
     const strokes = getStrokes(doc, drawingId).toArray()
     const hash = strokesHash(strokes)
     const png = renderDrawingPng(strokes)
-    const text = png ? await this.ai.transcribeHandwriting(png) : ''
+    if (!png && opts.requireText) throw new EmptyDrawingError()
+    const { text, agent } = png ? await this.ai.transcribeHandwriting(png, opts) : { text: '', agent: null }
     this.store.setDrawingHash(noteId, drawingId, hash)
     await this.change(noteDocName(noteId), (d) => {
       const tr = getTranscripts(d)
@@ -170,7 +171,7 @@ export class SyncEngine {
       else tr.delete(drawingId)
     })
     log.info(`recognised handwriting in ${noteId}/${drawingId} (${text.length} chars)`)
-    return text
+    return { text, agent }
   }
 
   /** Live (non-trashed) note metadata, used to filter search results. */
@@ -185,6 +186,12 @@ export class SyncEngine {
     for (const t of this.hwTimers.values()) clearTimeout(t)
     this.hocuspocus.flushPendingStores()
     this.hocuspocus.closeConnections()
+  }
+}
+
+export class EmptyDrawingError extends Error {
+  constructor() {
+    super('This drawing has no ink on the server yet. Wait a moment for it to sync and try again.')
   }
 }
 

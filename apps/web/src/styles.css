@@ -896,7 +896,12 @@ button.link {
 .drawing-error {
   color: var(--danger);
   font-size: 13px;
-  padding: 4px 8px;
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+.drawing-error a {
+  color: var(--blue);
+  margin-right: 10px;
 }
 .drawing-transcript {
   display: none;

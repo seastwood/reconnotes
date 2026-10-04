@@ -3,7 +3,7 @@ import { generateJSON } from '@tiptap/core'
 import { prosemirrorJSONToYXmlFragment } from '@tiptap/y-tiptap'
 import { marked } from 'marked'
 import { createNote, getContent, noteDocName } from '@reconnotes/core'
-import { apiUrl, authHeaders, isSyncConfigured } from './settings'
+import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
 
 /**
@@ -55,8 +55,8 @@ export function markdownToHtml(md: string): string {
 /** Recognise the handwriting in a drawing and insert it as text right below. */
 export async function convertHandwriting(editor: Editor, noteId: string, drawingId: string) {
   await flushNote(noteId)
-  const { text } = await post<{ text: string }>('/api/ai/handwriting', { noteId, drawingId })
-  if (!text.trim()) throw new Error('No handwriting found in this drawing.')
+  const { text } = await post<{ text: string; agent: string }>('/api/ai/handwriting', { noteId, drawingId })
+  if (!text.trim()) throw new Error('The AI returned no text for this drawing.')
   let at: number | null = null
   editor.state.doc.descendants((node, pos) => {
     if (node.type.name === 'drawing' && node.attrs.drawingId === drawingId) {
@@ -83,6 +83,12 @@ export async function compileNote(editor: Editor, noteId: string, folderId: stri
   prosemirrorJSONToYXmlFragment(editor.schema, json, getContent(handle.doc))
   close()
   return id
+}
+
+/** URL of the exact image the server sends to the AI for a drawing (for troubleshooting). */
+export function drawingImageUrl(noteId: string, drawingId: string): string {
+  const t = encodeURIComponent(settings.get().token)
+  return apiUrl(`/api/ai/drawing-image?noteId=${noteId}&drawingId=${drawingId}&token=${t}`)
 }
 
 export interface ServerInfo {

@@ -120,6 +120,21 @@ class OllamaBackend implements Backend {
     if (parts.some((p) => 'pdf' in p)) throw new Error('Ollama models cannot read PDFs')
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
+    const message = { role: 'user', content: text, ...(images.length ? { images } : {}) }
+    const first = await this.chat(message, maxTokens)
+    const answer = stripThinking(first.content)
+    if (answer || !(first.thinking.trim() || first.content.trim())) return answer
+
+    // "Thinking" models sometimes spend the whole reply reasoning and give no
+    // answer. Ask once more with thinking switched off.
+    log.info(`Ollama model ${this.agent.model} replied with reasoning only; retrying with thinking off`)
+    const retry = await this.chat(message, maxTokens, false).catch(() => null)
+    const retryAnswer = retry ? stripThinking(retry.content) : ''
+    if (retryAnswer) return retryAnswer
+    throw new Error(`the model only produced reasoning and no answer. It said: “${preview(first.thinking || first.content)}”`)
+  }
+
+  private async chat(message: object, maxTokens: number, think?: boolean): Promise<{ content: string; thinking: string }> {
     const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,13 +142,14 @@ class OllamaBackend implements Backend {
       body: JSON.stringify({
         model: this.agent.model,
         stream: false,
+        ...(think === undefined ? {} : { think }),
         options: { num_predict: maxTokens, temperature: 0 },
-        messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
+        messages: [message],
       }),
     })
     if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
-    const body = (await res.json()) as { message?: { content?: string } }
-    return stripThinking(body.message?.content ?? '')
+    const body = (await res.json()) as { message?: { content?: string; thinking?: string } }
+    return { content: body.message?.content ?? '', thinking: body.message?.thinking ?? '' }
   }
 }
 
@@ -171,6 +187,13 @@ export function makeBackend(agent: AgentConfig): Backend {
     case 'openai':
       return new OpenAiBackend(agent)
   }
+}
+
+/** Shorten model output for error messages. */
+export function preview(s: string, n = 160): string {
+  const t = stripThinking(s) || s.replace(/<\/?think>/gi, '')
+  const one = t.replace(/\s+/g, ' ').trim()
+  return one.length > n ? one.slice(0, n) + '…' : one || '(empty)'
 }
 
 /** Reasoning models may include <think>…</think> blocks; drop them. */

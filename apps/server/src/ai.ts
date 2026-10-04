@@ -2,6 +2,7 @@ import { Resvg } from '@resvg/resvg-js'
 import { DRAWING_WIDTH, drawingToSvg, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import type { AgentRegistry, Part } from './agents'
+import { log } from './log'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -12,7 +13,8 @@ export const isAiImage = (mime: string) => IMAGE_MIMES.has(mime)
 /**
  * Render a drawing to PNG, cropped to the ink. Returns null for an empty drawing.
  */
-export function renderDrawingPng(strokes: Stroke[]): Buffer | null {
+export function renderDrawingPng(allStrokes: Stroke[]): Buffer | null {
+  const strokes = allStrokes.filter((s) => s.tool !== 'highlighter')
   const b = unionBounds(strokes)
   if (!b) return null
   const pad = 20
@@ -26,7 +28,7 @@ export function renderDrawingPng(strokes: Stroke[]): Buffer | null {
   }))
   // Scale so the longest side is ~1500px: plenty for recognition, small upload.
   const scale = Math.min(3, 1500 / Math.max(w, h))
-  const svg = drawingToSvg(shifted, w, h, scale)
+  const svg = drawingToSvg(shifted, w, h, scale, { recognition: true })
   return new Resvg(svg, { background: '#ffffff' }).render().asPng()
 }
 
@@ -89,12 +91,20 @@ export class Ai {
     return this.agents.describe()
   }
 
-  /** Handwriting → Markdown. */
-  async transcribeHandwriting(png: Buffer): Promise<string> {
-    const { result } = await this.agents.run('handwriting', (backend, agent) =>
-      backend.generate([{ image: png, mime: 'image/png' }, { text: agent.prompt.trim() || HANDWRITING_PROMPT }], 16000),
-    )
-    return result
+  /**
+   * Handwriting → Markdown. With `requireText` (an explicit "Convert to
+   * text"), an agent that returns nothing counts as a failure, so the next
+   * agent gets a try and the error explains what happened.
+   */
+  async transcribeHandwriting(png: Buffer, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run('handwriting', async (backend, agent) => {
+      const text = await backend.generate([{ image: png, mime: 'image/png' }, { text: agent.prompt.trim() || HANDWRITING_PROMPT }], 16000)
+      log.info(`handwriting via "${agent.name}": ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
+      if (opts.requireText && !text.trim())
+        throw new Error('returned no text. If the drawing does contain writing, try a short instruction under the agent’s Advanced › Handwriting prompt, or a different model')
+      return text
+    })
+    return { text: result, agent: agent.name }
   }
 
   /** Image → searchable text (OCR + short description). */
@@ -135,7 +145,7 @@ export class Ai {
         let text = ''
         for (const p of parts) {
           if ('text' in p) text += p.text
-          else text += '\n[handwritten section]\n' + (await this.transcribeHandwriting(p.png)) + '\n[end handwritten section]\n'
+          else text += '\n[handwritten section]\n' + (await this.transcribeHandwriting(p.png)).text + '\n[end handwritten section]\n'
         }
         return text
       })())
