@@ -10,8 +10,8 @@ const TEXT_MIMES = /^(text\/|application\/(json|xml|x-markdown))/
 /** Decide up front whether an uploaded file will get text extracted. */
 export function initialTextStatus(config: Config, ai: Ai, mime: string): AttachmentRow['text_status'] {
   if (TEXT_MIMES.test(mime)) return 'pending'
-  if (isAiImage(mime)) return ai.enabled && config.autoImageText ? 'pending' : 'skipped'
-  if (mime === 'application/pdf') return ai.enabled && config.autoImageText ? 'pending' : 'skipped'
+  if (isAiImage(mime)) return ai.canImages && config.autoImageText ? 'pending' : 'skipped'
+  if (mime === 'application/pdf') return ai.canPdf && config.autoImageText ? 'pending' : 'skipped'
   if (mime.startsWith('audio/') || mime.startsWith('video/')) return config.transcribeUrl ? 'pending' : 'skipped'
   return 'skipped'
 }

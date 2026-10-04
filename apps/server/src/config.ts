@@ -3,6 +3,8 @@ import path from 'node:path'
 /**
  * Server configuration, read from environment variables (see .env.example).
  */
+export type AiProvider = 'anthropic' | 'ollama' | 'none'
+
 export interface Config {
   port: number
   host: string
@@ -12,6 +14,18 @@ export interface Config {
   /** directory containing the built web app, served at / (optional) */
   webDir: string | null
   anthropicApiKey: string | null
+  /** which AI backend handles each task */
+  handwritingProvider: AiProvider
+  imageProvider: AiProvider
+  compileProvider: AiProvider
+  ollamaUrl: string | null
+  /** vision/OCR model used for handwriting and images */
+  ollamaModel: string
+  /** text model used to compile documents (defaults to ollamaModel) */
+  ollamaTextModel: string
+  /** replace the built-in handwriting prompt for Ollama OCR models */
+  ollamaHandwritingPrompt: string | null
+  ollamaTimeoutMs: number
   aiModel: string
   aiEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   /** automatically recognise handwriting in drawings so it is searchable */
@@ -36,6 +50,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const dataDir = path.resolve(env.RECON_DATA_DIR ?? './data')
   const token = env.RECON_TOKEN ?? ''
   const anthropicApiKey = env.ANTHROPIC_API_KEY || null
+  const ollamaUrl = env.RECON_OLLAMA_URL || null
+  const fallbackProvider: AiProvider = anthropicApiKey ? 'anthropic' : ollamaUrl ? 'ollama' : 'none'
+  const provider = (v: string | undefined): AiProvider =>
+    v === 'anthropic' || v === 'ollama' || v === 'none' ? v : ((env.RECON_AI_PROVIDER as AiProvider) ?? fallbackProvider)
+  const ollamaModel = env.RECON_OLLAMA_MODEL ?? 'HSR-DeepThink/strike-ocr:latest'
+  const handwritingProvider = provider(env.RECON_HANDWRITING_PROVIDER)
+  const imageProvider = provider(env.RECON_IMAGE_PROVIDER)
+  const aiOn = (p: AiProvider) => (p === 'anthropic' && Boolean(anthropicApiKey)) || (p === 'ollama' && Boolean(ollamaUrl))
   return {
     port: Number(env.RECON_PORT ?? env.PORT ?? 8787),
     host: env.RECON_HOST ?? '0.0.0.0',
@@ -43,11 +65,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     token,
     webDir: env.RECON_WEB_DIR ? path.resolve(env.RECON_WEB_DIR) : null,
     anthropicApiKey,
+    handwritingProvider,
+    imageProvider,
+    compileProvider: provider(env.RECON_COMPILE_PROVIDER),
+    ollamaUrl,
+    ollamaModel,
+    ollamaTextModel: env.RECON_OLLAMA_TEXT_MODEL ?? ollamaModel,
+    ollamaHandwritingPrompt: env.RECON_OLLAMA_HANDWRITING_PROMPT || null,
+    ollamaTimeoutMs: Number(env.RECON_OLLAMA_TIMEOUT_MS ?? 300_000),
     aiModel: env.RECON_AI_MODEL ?? 'claude-opus-5-5',
     aiEffort: (env.RECON_AI_EFFORT as Config['aiEffort']) ?? 'medium',
-    autoHandwriting: bool(env.RECON_AUTO_HANDWRITING, Boolean(anthropicApiKey)),
+    autoHandwriting: bool(env.RECON_AUTO_HANDWRITING, aiOn(handwritingProvider)),
     handwritingDebounceMs: Number(env.RECON_HANDWRITING_DEBOUNCE_MS ?? 90_000),
-    autoImageText: bool(env.RECON_AUTO_IMAGE_TEXT, Boolean(anthropicApiKey)),
+    autoImageText: bool(env.RECON_AUTO_IMAGE_TEXT, aiOn(imageProvider)),
     transcribeUrl: env.RECON_TRANSCRIBE_URL || null,
     transcribeModel: env.RECON_TRANSCRIBE_MODEL ?? 'whisper-1',
     transcribeApiKey: env.RECON_TRANSCRIBE_API_KEY || null,

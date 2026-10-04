@@ -45,7 +45,7 @@ async function main() {
     log.info(`ReconNotes server ${VERSION} listening on http://${config.host}:${config.port}`)
     log.info(`data: ${config.dataDir}  backups: ${config.backupDir}`)
     log.info(
-      `AI: ${app.ai.enabled ? config.aiModel : 'disabled (set ANTHROPIC_API_KEY)'}; audio transcription: ${config.transcribeUrl ?? 'disabled'}`,
+      `AI: ${app.ai.enabled ? app.ai.describe() : 'disabled (set ANTHROPIC_API_KEY and/or RECON_OLLAMA_URL)'}; audio transcription: ${config.transcribeUrl ?? 'disabled'}`,
     )
   })
 

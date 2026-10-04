@@ -115,7 +115,7 @@ export class SyncEngine {
       }).catch((err) => log.error('could not write attachment text', err))
     }
 
-    if (this.config.autoHandwriting && this.ai.enabled) {
+    if (this.config.autoHandwriting && this.ai.canHandwriting) {
       for (const drawingId of ex.drawings) this.maybeScheduleHandwriting(noteId, drawingId, doc)
     }
   }

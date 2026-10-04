@@ -74,8 +74,8 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, {
       ok: true,
       version: VERSION,
-      ai: ai.enabled,
-      autoHandwriting: config.autoHandwriting && ai.enabled,
+      ai: { handwriting: ai.canHandwriting, images: ai.canImages, compile: ai.canCompile },
+      autoHandwriting: config.autoHandwriting && ai.canHandwriting,
       transcription: Boolean(config.transcribeUrl),
     }),
   )
