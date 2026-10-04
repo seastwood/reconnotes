@@ -16,21 +16,39 @@ let ollama: http.Server
 let ollamaUrl: string
 /** how the fake model behaves: 'think-then-answer' | 'think-only' | 'empty' | 'answer' */
 let mode = 'answer'
-const requests: { think?: boolean }[] = []
+const requests: { think?: boolean; url?: string }[] = []
 
 beforeAll(async () => {
   ollama = http.createServer(async (req, res) => {
     let body = ''
     for await (const c of req) body += c
     const json = JSON.parse(body || '{}')
-    requests.push(json)
+    requests.push({ ...json, url: req.url })
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    const reply = (content: string, thinking = '') => res.end(JSON.stringify({ message: { role: 'assistant', content, thinking } }))
-    if (mode === 'answer') return reply('Buy milk')
-    if (mode === 'empty') return reply('')
-    if (mode === 'think-only') return reply('', 'I see strokes that might be letters')
-    // think-then-answer: reasoning only unless thinking is switched off
-    return json.think === false ? reply('Buy milk') : reply('', 'Let me look at this image carefully')
+    const isGenerate = req.url === '/api/generate'
+    const prompt: string = isGenerate ? json.prompt : json.messages?.[0]?.content ?? ''
+    const reply = (content: string, thinking = '', evalCount = content ? 5 : 0) =>
+      res.end(
+        JSON.stringify(
+          isGenerate
+            ? { response: content, thinking, done_reason: 'stop', eval_count: evalCount }
+            : { message: { role: 'assistant', content, thinking }, done_reason: 'stop', eval_count: evalCount },
+        ),
+      )
+    switch (mode) {
+      case 'answer':
+        return reply('Buy milk')
+      case 'empty':
+        return reply('')
+      case 'think-only':
+        return isGenerate ? reply('') : reply('', 'I see strokes that might be letters', 40)
+      case 'think-then-answer':
+        return json.think === false ? reply('Buy milk') : reply('', 'Let me look at this image carefully', 40)
+      case 'generate-only':
+        return isGenerate ? reply('Buy milk') : reply('')
+      case 'short-prompt':
+        return prompt.length < 80 ? reply('Buy milk') : reply('', '', 3)
+    }
   })
   await new Promise<void>((r) => ollama.listen(0, '127.0.0.1', () => r()))
   ollamaUrl = `http://127.0.0.1:${(ollama.address() as AddressInfo).port}`
@@ -73,16 +91,32 @@ describe('handwriting conversion troubleshooting', () => {
     mode = 'think-only'
     const r = await convert()
     expect(r.status).toBe(502)
-    expect(r.body.error).toMatch(/only produced reasoning/)
+    expect(r.body.error).toMatch(/reasoning only/)
     expect(r.body.error).toMatch(/strokes that might be letters/)
   })
 
-  it('treats an empty reply to an explicit conversion as a failure with advice', async () => {
+  it('falls back to the plain generate endpoint', async () => {
+    mode = 'generate-only'
+    requests.length = 0
+    const r = await convert()
+    expect(r.body).toEqual({ text: 'Buy milk', agent: 'OCR' })
+    expect(requests.map((q) => q.url)).toEqual(['/api/chat', '/api/generate'])
+  })
+
+  it('falls back to a minimal prompt for OCR models that ignore long ones', async () => {
+    mode = 'short-prompt'
+    const r = await convert()
+    expect(r.status).toBe(200)
+    expect(r.body.text).toBe('Buy milk')
+  })
+
+  it('reports what the model did and hints at missing vision support', async () => {
     mode = 'empty'
     const r = await convert()
     expect(r.status).toBe(502)
     expect(r.body.error).toMatch(/OCR: returned no text/)
-    expect(r.body.error).toMatch(/Handwriting prompt/)
+    expect(r.body.error).toMatch(/0 tokens/)
+    expect(r.body.error).toMatch(/ollama show strike-ocr/)
   })
 
   it('says so when the drawing has no ink on the server', async () => {
@@ -96,5 +130,20 @@ describe('handwriting conversion troubleshooting', () => {
     const res = await fetch(`${base}/api/ai/drawing-image?noteId=notehw00000000000001&drawingId=drawinghw000000001&token=${TOKEN}`)
     expect(res.headers.get('content-type')).toBe('image/png')
     expect(Buffer.from(await res.arrayBuffer()).subarray(1, 4).toString()).toBe('PNG')
+  })
+})
+
+describe('testing an agent with a sample word', () => {
+  it('reports whether the agent read the sample correctly', async () => {
+    mode = 'answer' // the fake model always says "Buy milk"
+    const agent = app.ai.agents.agents()[0]
+    const res = await fetch(`${base}/api/ai/try-handwriting`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: agent.id }),
+    }).then((r) => r.json())
+    expect(res.ok).toBe(false)
+    expect(res.text).toBe('Buy milk')
+    expect(res.message).toMatch(/HELLO/)
   })
 })

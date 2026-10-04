@@ -1,7 +1,7 @@
 import { Resvg } from '@resvg/resvg-js'
 import { DRAWING_WIDTH, drawingToSvg, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import type { AgentRegistry, Part } from './agents'
+import { EmptyReplyError, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 export { stripThinking } from './agents'
 
@@ -39,6 +39,33 @@ const HANDWRITING_PROMPT = `Transcribe the handwriting in this image.
 - Describe non-text content (diagrams, arrows, sketches, charts) briefly in square brackets, e.g. [diagram: flow from A to B].
 - If a word is illegible write [illegible].
 - Output only the transcription, with no preamble.`
+
+/** The word HELLO in simple handwritten strokes, for testing an agent. */
+export function sampleHandwritingPng(): Buffer {
+  const line = (pts: [number, number][]): number[] => {
+    const out: number[] = []
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i]
+      const [x1, y1] = pts[i + 1]
+      const n = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 6))
+      for (let k = i ? 1 : 0; k <= n; k++) out.push(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n, 0.5)
+    }
+    return out
+  }
+  const ring: [number, number][] = []
+  for (let a = 0; a <= 360; a += 10) ring.push([560 + 45 * Math.cos((a * Math.PI) / 180), 100 + 60 * Math.sin((a * Math.PI) / 180)])
+  const paths: [number, number][][] = [
+    [[40, 40], [42, 160]], [[120, 38], [118, 160]], [[42, 100], [118, 98]],
+    [[170, 40], [170, 160]], [[170, 40], [240, 42]], [[170, 100], [228, 100]], [[170, 160], [242, 158]],
+    [[290, 38], [292, 160], [356, 158]],
+    [[400, 40], [400, 160], [466, 160]],
+    ring,
+  ]
+  return renderDrawingPng(paths.map((p, i) => ({ id: `s${i}`, tool: 'pen' as const, color: '#000000', size: 4, pts: line(p) })))!
+}
+
+/** A minimal fallback instruction for OCR models that ignore long prompts. */
+const SHORT_HANDWRITING_PROMPT = 'Transcribe the handwritten text in this image.'
 
 const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce text that will make it findable by search:
 
@@ -97,14 +124,30 @@ export class Ai {
    * agent gets a try and the error explains what happened.
    */
   async transcribeHandwriting(png: Buffer, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string }> {
-    const { result, agent } = await this.agents.run('handwriting', async (backend, agent) => {
-      const text = await backend.generate([{ image: png, mime: 'image/png' }, { text: agent.prompt.trim() || HANDWRITING_PROMPT }], 16000)
-      log.info(`handwriting via "${agent.name}": ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
-      if (opts.requireText && !text.trim())
-        throw new Error('returned no text. If the drawing does contain writing, try a short instruction under the agent’s Advanced › Handwriting prompt, or a different model')
-      return text
-    })
+    const { result, agent } = await this.agents.run('handwriting', (backend, agent) => this.transcribeWith(backend, agent, png, opts))
     return { text: result, agent: agent.name }
+  }
+
+  /** Transcribe with one specific agent (used by the chain above and by "Test reading handwriting"). */
+  async transcribeWith(backend: Backend, agent: AgentConfig, png: Buffer, opts: { requireText?: boolean } = {}): Promise<string> {
+    // Try the agent's own prompt (or the detailed built-in one); if the model
+    // returns nothing, try once more with a minimal instruction, which many
+    // OCR models handle better.
+    const prompts = [...new Set([agent.prompt.trim() || HANDWRITING_PROMPT, SHORT_HANDWRITING_PROMPT])]
+    const empties: string[] = []
+    for (const [i, prompt] of prompts.entries()) {
+      try {
+        const text = await backend.generate([{ image: png, mime: 'image/png' }, { text: prompt }], 16000)
+        log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
+        if (text.trim()) return text
+        empties.push(`prompt ${i + 1}: empty reply`)
+      } catch (err) {
+        if (!(err instanceof EmptyReplyError)) throw err
+        empties.push(prompts.length > 1 ? `prompt ${i + 1}: ${err.details}` : err.details)
+      }
+    }
+    if (!opts.requireText) return ''
+    throw new Error(`returned no text (${empties.join(' | ')})`)
   }
 
   /** Image → searchable text (OCR + short description). */

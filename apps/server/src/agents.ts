@@ -113,6 +113,20 @@ class AnthropicBackend implements Backend {
   }
 }
 
+/** A model answered, but with nothing usable. `details` says what it did. */
+export class EmptyReplyError extends Error {
+  constructor(readonly details: string) {
+    super(`returned an empty reply (${details})`)
+  }
+}
+
+interface OllamaReply {
+  content: string
+  thinking: string
+  doneReason: string
+  evalCount: number
+}
+
 class OllamaBackend implements Backend {
   constructor(private agent: AgentConfig) {}
 
@@ -120,36 +134,78 @@ class OllamaBackend implements Backend {
     if (parts.some((p) => 'pdf' in p)) throw new Error('Ollama models cannot read PDFs')
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
-    const message = { role: 'user', content: text, ...(images.length ? { images } : {}) }
-    const first = await this.chat(message, maxTokens)
-    const answer = stripThinking(first.content)
-    if (answer || !(first.thinking.trim() || first.content.trim())) return answer
+    // Generous but bounded: very large values can exceed small context windows.
+    const limit = Math.min(maxTokens, 8192)
+    const tried: string[] = []
 
-    // "Thinking" models sometimes spend the whole reply reasoning and give no
-    // answer. Ask once more with thinking switched off.
-    log.info(`Ollama model ${this.agent.model} replied with reasoning only; retrying with thinking off`)
-    const retry = await this.chat(message, maxTokens, false).catch(() => null)
-    const retryAnswer = retry ? stripThinking(retry.content) : ''
-    if (retryAnswer) return retryAnswer
-    throw new Error(`the model only produced reasoning and no answer. It said: “${preview(first.thinking || first.content)}”`)
+    const attempt = async (label: string, run: () => Promise<OllamaReply>): Promise<string | null> => {
+      const r = await run()
+      const answer = stripThinking(r.content)
+      if (answer) return answer
+      tried.push(
+        `${label}: ${r.evalCount} tokens, done_reason=${r.doneReason || '?'}${r.thinking.trim() ? `, reasoning only: “${preview(r.thinking, 80)}”` : ''}`,
+      )
+      return null
+    }
+
+    // 1. normal chat request
+    const first = await attempt('chat', () => this.chat(text, images, limit))
+    if (first !== null) return first
+    // 2. "thinking" models that only reasoned: ask again with thinking off
+    if (tried[0].includes('reasoning only')) {
+      const noThink = await attempt('chat without thinking', () => this.chat(text, images, limit, false)).catch(() => null)
+      if (noThink) return noThink
+    }
+    // 3. some OCR models only answer through the plain /api/generate endpoint
+    const gen = await attempt('generate', () => this.plainGenerate(text, images, limit)).catch((e) => {
+      tried.push(`generate: ${(e as Error).message}`)
+      return null
+    })
+    if (gen) return gen
+
+    const noTokens = tried.every((t) => /^[^:]+: 0 tokens/.test(t))
+    log.info(`Ollama model ${this.agent.model} gave empty replies – ${tried.join('; ')}`)
+    throw new EmptyReplyError(
+      tried.join('; ') +
+        (noTokens && images.length
+          ? `. The model generated nothing at all, which usually means it can't read images – run “ollama show ${this.agent.model}” and check that Capabilities lists “vision”`
+          : ''),
+    )
   }
 
-  private async chat(message: object, maxTokens: number, think?: boolean): Promise<{ content: string; thinking: string }> {
-    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/api/chat', {
+  private async post(path: string, body: object): Promise<Record<string, unknown>> {
+    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(this.agent.timeoutSec * 1000),
-      body: JSON.stringify({
-        model: this.agent.model,
-        stream: false,
-        ...(think === undefined ? {} : { think }),
-        options: { num_predict: maxTokens, temperature: 0 },
-        messages: [message],
-      }),
+      body: JSON.stringify({ model: this.agent.model, stream: false, ...body }),
     })
     if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
-    const body = (await res.json()) as { message?: { content?: string; thinking?: string } }
-    return { content: body.message?.content ?? '', thinking: body.message?.thinking ?? '' }
+    return (await res.json()) as Record<string, unknown>
+  }
+
+  private async chat(text: string, images: string[], maxTokens: number, think?: boolean): Promise<OllamaReply> {
+    const body = await this.post('/api/chat', {
+      ...(think === undefined ? {} : { think }),
+      options: { num_predict: maxTokens, temperature: 0 },
+      messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
+    })
+    const m = (body.message ?? {}) as { content?: string; thinking?: string }
+    return { content: m.content ?? '', thinking: m.thinking ?? '', doneReason: String(body.done_reason ?? ''), evalCount: Number(body.eval_count ?? 0) }
+  }
+
+  private async plainGenerate(text: string, images: string[], maxTokens: number): Promise<OllamaReply> {
+    const body = await this.post('/api/generate', {
+      prompt: text,
+      ...(images.length ? { images } : {}),
+      options: { num_predict: maxTokens, temperature: 0 },
+    })
+    return {
+      content: String(body.response ?? ''),
+      thinking: String(body.thinking ?? ''),
+      doneReason: String(body.done_reason ?? ''),
+      evalCount: Number(body.eval_count ?? 0),
+    }
   }
 }
 

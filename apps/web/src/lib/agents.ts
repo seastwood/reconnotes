@@ -60,7 +60,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       method,
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(method === 'POST' && path.endsWith('/probe') ? 60_000 : 15_000),
+      // Testing can wait for a large local model to load into memory.
+      signal: AbortSignal.timeout(path.endsWith('/try-handwriting') ? 10 * 60_000 : path.endsWith('/probe') ? 60_000 : 15_000),
     })
   } catch (e) {
     throw new ApiError((e as Error).name === 'TimeoutError' ? 'The server took too long to answer.' : "Couldn't reach the server.", 0)
@@ -96,4 +97,6 @@ export const agentsApi = {
   remove: (id: string) => call<AgentsState>('DELETE', `/api/ai/agents/${id}`),
   updateSettings: (s: Partial<AiSettings>) => call<AgentsState>('PUT', '/api/ai/settings', s),
   probe: (a: AgentInput) => call<ProbeResult>('POST', '/api/ai/probe', a),
+  tryHandwriting: (a: AgentInput) =>
+    call<{ ok: boolean; text: string; message: string; seconds: number }>('POST', '/api/ai/try-handwriting', a),
 }

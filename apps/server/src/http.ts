@@ -6,13 +6,14 @@ import { noteDocName, noteToMarkdown, getStrokes, extractNote } from '@reconnote
 import type { Config } from './config'
 import type { Store } from './store'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
-import { Ai, renderDrawingPng } from './ai'
+import { Ai, renderDrawingPng, sampleHandwritingPng } from './ai'
 import {
   AI_TASKS,
   AgentValidationError,
   AllAgentsFailedError,
   NoAgentError,
   TASK_LABELS,
+  makeBackend,
   probeAgent,
   validateAgent,
   type AgentConfig,
@@ -232,6 +233,31 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const result = await probeAgent(agent)
     if (saved) ai.agents.recordProbe(saved.id, result)
     json(res, 200, result)
+  })
+
+  /** Ask an agent (saved or being edited) to read a sample handwritten word. */
+  route('POST', '/api/ai/try-handwriting', async (req, res) => {
+    const body = await readJson<Partial<AgentConfig>>(req)
+    const saved = body.id ? ai.agents.get(body.id) : undefined
+    const agent = validateAgent({ ...(saved ?? {}), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) })
+    const started = Date.now()
+    try {
+      const text = await ai.transcribeWith(makeBackend(agent), agent, sampleHandwritingPng(), { requireText: true })
+      const ok = /hello/i.test(text)
+      json(res, 200, {
+        ok,
+        text,
+        seconds: Math.round((Date.now() - started) / 100) / 10,
+        message: ok ? 'It read the sample word correctly.' : 'It answered, but didn’t read the sample word (HELLO) correctly.',
+      })
+    } catch (err) {
+      json(res, 200, { ok: false, text: '', seconds: Math.round((Date.now() - started) / 100) / 10, message: (err as Error).message })
+    }
+  })
+
+  route('GET', '/api/ai/sample-handwriting.png', (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'image/png' })
+    res.end(sampleHandwritingPng())
   })
 
   // --- Backups & export ---------------------------------------------------

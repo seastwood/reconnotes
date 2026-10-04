@@ -13,6 +13,7 @@ import {
   type AiTask,
   type ProbeResult,
 } from '../lib/agents'
+import { apiUrl, settings } from '../lib/settings'
 
 /**
  * Settings › AI agents: add Claude / Ollama / OpenAI-compatible endpoints,
@@ -242,7 +243,8 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
   )
   const [apiKey, setApiKey] = useState('')
   const [probe, setProbe] = useState<ProbeResult | null>(null)
-  const [busy, setBusy] = useState<'test' | 'save' | null>(null)
+  const [busy, setBusy] = useState<'test' | 'save' | 'try' | null>(null)
+  const [trial, setTrial] = useState<{ ok: boolean; text: string; message: string; seconds: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(Boolean(agent?.prompt))
 
@@ -264,6 +266,19 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
     setProbe(null)
     try {
       setProbe(await agentsApi.probe(payload()))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const tryHandwriting = async () => {
+    setBusy('try')
+    setError(null)
+    setTrial(null)
+    try {
+      setTrial(await agentsApi.tryHandwriting(payload()))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -420,11 +435,32 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
           ))}
         </div>
       )}
+      {trial && (
+        <div className={`probe ${trial.ok ? 'ok' : 'bad'}`}>
+          {trial.ok ? '✅ ' : '❌ '}
+          {trial.message} {trial.seconds ? `(${trial.seconds}s)` : ''}
+          {trial.text && (
+            <div className="probe-warn">
+              It answered: <q>{trial.text.length > 200 ? trial.text.slice(0, 200) + '…' : trial.text}</q>
+            </div>
+          )}
+          <div className="probe-warn">
+            <a href={apiUrl('/api/ai/sample-handwriting.png?token=' + encodeURIComponent(settings.get().token))} target="_blank" rel="noreferrer">
+              See the sample image
+            </a>
+          </div>
+        </div>
+      )}
       {error && <p className="status error-text">{error}</p>}
       <div className="row">
         <button onClick={test} disabled={busy !== null}>
           {busy === 'test' ? <Loader2 size={14} className="spin" /> : null} Test connection
         </button>
+        {(form.vision ?? true) && (
+          <button onClick={tryHandwriting} disabled={busy !== null || !form.model} title="Send a sample handwritten word and see what comes back">
+            {busy === 'try' ? <Loader2 size={14} className="spin" /> : null} Test reading handwriting
+          </button>
+        )}
         <button className="primary" onClick={save} disabled={busy !== null}>
           {busy === 'save' ? <Loader2 size={14} className="spin" /> : null} {agent ? 'Save' : 'Add agent'}
         </button>
