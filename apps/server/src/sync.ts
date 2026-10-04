@@ -1,0 +1,196 @@
+import crypto from 'node:crypto'
+import { Hocuspocus } from '@hocuspocus/server'
+import * as Y from 'yjs'
+import {
+  WORKSPACE_DOC,
+  extractNote,
+  getStrokes,
+  getTranscripts,
+  noteDocName,
+  noteIdFromDocName,
+  readNote,
+  getNotes,
+} from '@reconnotes/core'
+import type { Config } from './config'
+import type { Store } from './store'
+import { Ai, renderDrawingPng } from './ai'
+import { log } from './log'
+
+const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
+
+export function safeEqual(a: string, b: string): boolean {
+  const ha = crypto.createHash('sha256').update(a).digest()
+  const hb = crypto.createHash('sha256').update(b).digest()
+  return crypto.timingSafeEqual(ha, hb) && a.length > 0
+}
+
+/**
+ * The sync engine. Every device keeps a full local copy of every document and
+ * exchanges Yjs updates with the server over a WebSocket whenever it is
+ * online. The server merges updates (a CRDT merge never conflicts and never
+ * drops edits), persists them to SQLite and relays them to other devices.
+ */
+export class SyncEngine {
+  readonly hocuspocus: Hocuspocus
+  private hwTimers = new Map<string, NodeJS.Timeout>()
+  private queue: Promise<unknown> = Promise.resolve()
+
+  constructor(
+    private config: Config,
+    private store: Store,
+    private ai: Ai,
+  ) {
+    this.hocuspocus = new Hocuspocus({
+      quiet: true,
+      debounce: 1500,
+      maxDebounce: 10_000,
+      onAuthenticate: async ({ token, documentName }) => {
+        if (!safeEqual(token ?? '', config.token)) throw new Error('unauthorized')
+        if (!DOC_NAME.test(documentName)) throw new Error('invalid document name')
+      },
+      onLoadDocument: async ({ documentName, document }) => {
+        const state = store.loadDocument(documentName)
+        if (state) Y.applyUpdate(document, state)
+        return document
+      },
+      onStoreDocument: async ({ documentName, document }) => {
+        store.saveDocument(documentName, Y.encodeStateAsUpdate(document))
+        this.afterStore(documentName, document)
+      },
+    })
+  }
+
+  /** Read a document without opening a connection (memory first, then disk). */
+  getDoc(name: string): Y.Doc | null {
+    const live = this.hocuspocus.documents.get(name)
+    if (live) return live
+    const state = this.store.loadDocument(name)
+    if (!state) return null
+    const doc = new Y.Doc()
+    Y.applyUpdate(doc, state)
+    return doc
+  }
+
+  /** Apply a server-side change to a document; it syncs to every device. */
+  async change(name: string, fn: (doc: Y.Doc) => void) {
+    const conn = await this.hocuspocus.openDirectConnection(name, { server: true })
+    try {
+      await conn.transact(fn)
+    } finally {
+      await conn.disconnect()
+    }
+  }
+
+  /** Run background work one job at a time (AI calls are slow and cost money). */
+  enqueue<T>(job: () => Promise<T>): Promise<T> {
+    const p = this.queue.then(job, job)
+    this.queue = p.catch(() => undefined)
+    return p
+  }
+
+  private afterStore(name: string, doc: Y.Doc) {
+    const noteId = noteIdFromDocName(name)
+    if (!noteId) return
+    try {
+      this.indexNote(noteId, doc)
+    } catch (err) {
+      log.error('indexing failed', name, err)
+    }
+  }
+
+  indexNote(noteId: string, doc: Y.Doc) {
+    const ex = extractNote(doc)
+    const attTexts = this.store.attachmentTexts(ex.attachments)
+    const full = extractNote(doc, attTexts)
+    this.store.indexNote(noteId, full.title, full.text, full.attachments)
+
+    // Copy extracted attachment text into the note itself so it syncs to every
+    // device and offline search can find it too.
+    const transcripts = getTranscripts(doc)
+    const missing = Object.entries(attTexts).filter(([id, t]) => transcripts.get(`att:${id}`) !== t)
+    if (missing.length) {
+      void this.change(noteDocName(noteId), (d) => {
+        const tr = getTranscripts(d)
+        for (const [id, t] of missing) tr.set(`att:${id}`, t)
+      }).catch((err) => log.error('could not write attachment text', err))
+    }
+
+    if (this.config.autoHandwriting && this.ai.enabled) {
+      for (const drawingId of ex.drawings) this.maybeScheduleHandwriting(noteId, drawingId, doc)
+    }
+  }
+
+  reindexNotesFor(attachmentId: string) {
+    for (const noteId of this.store.notesReferencing(attachmentId)) {
+      const doc = this.getDoc(noteDocName(noteId))
+      if (doc) this.indexNote(noteId, doc)
+    }
+  }
+
+  /** Re-index every note (e.g. after an upgrade or restoring a backup). */
+  reindexAll() {
+    for (const name of this.store.listDocuments('note:')) {
+      const doc = this.getDoc(name)
+      if (doc) this.indexNote(noteIdFromDocName(name)!, doc)
+    }
+  }
+
+  // --- Automatic handwriting recognition ----------------------------------
+
+  private maybeScheduleHandwriting(noteId: string, drawingId: string, doc: Y.Doc) {
+    const strokes = getStrokes(doc, drawingId).toArray()
+    const hash = strokesHash(strokes)
+    if (this.store.drawingHash(noteId, drawingId) === hash) return
+    const key = `${noteId}/${drawingId}`
+    clearTimeout(this.hwTimers.get(key))
+    // Wait until the writer has paused so we don't recognise half a sentence.
+    this.hwTimers.set(
+      key,
+      setTimeout(() => {
+        this.hwTimers.delete(key)
+        void this.enqueue(() => this.recogniseDrawing(noteId, drawingId)).catch((err) =>
+          log.error('handwriting recognition failed', key, err),
+        )
+      }, this.config.handwritingDebounceMs),
+    )
+  }
+
+  /** Recognise handwriting in a drawing and store it as the drawing's transcript. */
+  async recogniseDrawing(noteId: string, drawingId: string): Promise<string> {
+    const doc = this.getDoc(noteDocName(noteId))
+    if (!doc) throw new Error('note not found')
+    const strokes = getStrokes(doc, drawingId).toArray()
+    const hash = strokesHash(strokes)
+    const png = renderDrawingPng(strokes)
+    const text = png ? await this.ai.transcribeHandwriting(png) : ''
+    this.store.setDrawingHash(noteId, drawingId, hash)
+    await this.change(noteDocName(noteId), (d) => {
+      const tr = getTranscripts(d)
+      if (text) tr.set(drawingId, text)
+      else tr.delete(drawingId)
+    })
+    log.info(`recognised handwriting in ${noteId}/${drawingId} (${text.length} chars)`)
+    return text
+  }
+
+  /** Live (non-trashed) note metadata, used to filter search results. */
+  noteMeta() {
+    const ws = this.getDoc(WORKSPACE_DOC)
+    const out = new Map<string, ReturnType<typeof readNote>>()
+    if (ws) getNotes(ws).forEach((m, id) => out.set(id, readNote(m)))
+    return out
+  }
+
+  async destroy() {
+    for (const t of this.hwTimers.values()) clearTimeout(t)
+    this.hocuspocus.flushPendingStores()
+    this.hocuspocus.closeConnections()
+  }
+}
+
+export function strokesHash(strokes: { id: string }[]): string {
+  return crypto
+    .createHash('sha1')
+    .update(strokes.map((s) => s.id).join(','))
+    .digest('hex')
+}

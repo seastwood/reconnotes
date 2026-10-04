@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+data/
+backups/
+apps/web/ios/App/Pods/
+apps/web/ios/App/App/public/
+apps/web/ios/DerivedData/
+.DS_Store
+coverage/
+test-results/
