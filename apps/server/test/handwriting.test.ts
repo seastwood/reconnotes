@@ -147,3 +147,69 @@ describe('testing an agent with a sample word', () => {
     expect(res.message).toMatch(/HELLO/)
   })
 })
+
+describe('converting a picture to text', () => {
+  it('runs a pasted photo through the handwriting agents with a photo prompt', async () => {
+    mode = 'answer'
+    requests.length = 0
+    const { sampleHandwritingPng } = await import('../src/ai')
+    const res = await fetch(`${base}/api/ai/image-to-text`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'image/png' },
+      body: new Uint8Array(sampleHandwritingPng()),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ text: 'Buy milk', agent: 'OCR' })
+    const sent = requests[0] as unknown as { messages: { content: string; images: string[] }[] }
+    expect(sent.messages[0].content).toMatch(/handwritten and printed/)
+    expect(sent.messages[0].images).toHaveLength(1)
+  })
+
+  it('rejects files that are not images', async () => {
+    const res = await fetch(`${base}/api/ai/image-to-text`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/pdf' },
+      body: 'x',
+    })
+    expect(res.status).toBe(415)
+  })
+})
+
+describe('compiling a note with pictures', () => {
+  it('sends drawings and pasted pictures to a vision agent in reading order', async () => {
+    mode = 'answer'
+    const noteId = 'notehwcompile0000001'
+    // an uploaded picture
+    const { sampleHandwritingPng } = await import('../src/ai')
+    const put = await fetch(`${base}/api/attachments/attcompile000000001`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'image/png' },
+      body: new Uint8Array(sampleHandwritingPng()),
+    })
+    expect(put.status).toBe(201)
+    const Y = await import('yjs')
+    const { getContent } = await import('@reconnotes/core')
+    await app.sync.change(noteDocName(noteId), (doc) => {
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText('Meeting notes')])
+      const d = new Y.XmlElement('drawing')
+      d.setAttribute('drawingId', 'drawinghw000000001')
+      const img = new Y.XmlElement('image')
+      img.setAttribute('attachmentId', 'attcompile000000001')
+      getContent(doc).insert(0, [p, d, img])
+      getStrokes(doc, 'drawinghw000000001').push([{ id: 's1', tool: 'pen', color: '#000000', size: 3, pts: [10, 10, 0.5, 90, 40, 0.5] }])
+    })
+    app.ai.agents.updateSettings({ routing: { ...app.ai.agents.settings().routing, compile: app.ai.agents.agents().map((a) => a.id) } })
+    requests.length = 0
+    const res = await fetch(`${base}/api/ai/compile`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId }),
+    })
+    expect(res.status).toBe(200)
+    const sent = requests[0] as unknown as { messages: { content: string; images: string[] }[] }
+    expect(sent.messages[0].images).toHaveLength(2) // the drawing and the picture
+    expect(sent.messages[0].content).toMatch(/Meeting notes/)
+    expect(sent.messages[0].content).toMatch(/picture attached to the note/)
+  })
+})

@@ -7,7 +7,12 @@ import { getContent, getTranscripts } from './schema'
  */
 export function noteToMarkdown(
   doc: Y.Doc,
-  opts: { attachmentUrl?: (id: string) => string; drawingPlaceholder?: (id: string) => string } = {},
+  opts: {
+    attachmentUrl?: (id: string) => string
+    drawingPlaceholder?: (id: string) => string
+    /** replaces the whole image line (used to splice real images into AI input) */
+    imagePlaceholder?: (id: string) => string
+  } = {},
 ): string {
   const transcripts = getTranscripts(doc)
   const out: string[] = []
@@ -78,6 +83,10 @@ export function noteToMarkdown(
       case 'image': {
         const id = el.getAttribute('attachmentId') as string
         const alt = (el.getAttribute('alt') as string) ?? ''
+        if (opts.imagePlaceholder) {
+          out.push(opts.imagePlaceholder(id))
+          break
+        }
         out.push(`![${alt}](${opts.attachmentUrl ? opts.attachmentUrl(id) : `attachment:${id}`})`)
         break
       }

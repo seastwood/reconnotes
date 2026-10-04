@@ -1,7 +1,8 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useState } from 'react'
-import { FileText, Loader2, Mic } from 'lucide-react'
+import { FileText, Loader2, Mic, ScanText } from 'lucide-react'
+import { convertImage } from '../lib/ai'
 import { getTranscripts } from '@reconnotes/core'
 import { addAttachment, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
@@ -48,8 +49,24 @@ function useAttachmentText(id: string) {
 
 // --- Image ------------------------------------------------------------------
 
-function ImageView({ node, selected, updateAttributes }: ReactNodeViewProps) {
+function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const convert = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await convertImage(editor, node.attrs.attachmentId, () => {
+        const pos = getPos()
+        return typeof pos === 'number' ? pos + node.nodeSize : undefined
+      })
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
   const width = node.attrs.width as number | null
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -80,6 +97,21 @@ function ImageView({ node, selected, updateAttributes }: ReactNodeViewProps) {
         </div>
       )}
       {selected && url && <div className="image-resize" onPointerDown={startResize} />}
+      {url && editor.isEditable && (
+        <div className={`image-actions${selected || busy ? ' show' : ''}`}>
+          <button onClick={convert} disabled={busy} title="Read the handwriting or text in this picture and add it below">
+            {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="drawing-error" role="alert">
+          {error}{' '}
+          <button className="link" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
     </NodeViewWrapper>
   )
 }

@@ -48,6 +48,20 @@ export function flushUploads(): Promise<void> {
   return flushing
 }
 
+/** The attachment's file, from this device or downloaded from the server. */
+export async function attachmentBlob(id: string): Promise<Blob | null> {
+  const db = await metaDb()
+  const rec = await db.get('blobs', id)
+  if (rec) return rec.blob
+  if (!isSyncConfigured()) return null
+  try {
+    const res = await fetch(apiUrl(`/api/attachments/${id}`), { headers: authHeaders() })
+    return res.ok ? await res.blob() : null
+  } catch {
+    return null
+  }
+}
+
 /** Get a displayable URL for an attachment, fetching and caching it if needed. */
 export async function attachmentUrl(id: string): Promise<string | null> {
   const cached = urlCache.get(id)

@@ -5,6 +5,7 @@ import { marked } from 'marked'
 import { createNote, getContent, noteDocName } from '@reconnotes/core'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
+import { attachmentBlob } from './attachments'
 
 /**
  * AI features run on the self-hosted server (which talks to Claude and/or a
@@ -67,6 +68,56 @@ export async function convertHandwriting(editor: Editor, noteId: string, drawing
   })
   if (at === null) throw new Error('Drawing no longer exists')
   editor.chain().focus().insertContentAt(at, markdownToHtml(text)).run()
+}
+
+/**
+ * Shrink a photo so its longest side is at most `max` pixels and re-encode
+ * it as JPEG (transparent areas become white). Handwriting stays perfectly
+ * legible at this size, and uploads/recognition are much faster.
+ */
+async function prepareImage(blob: Blob, max = 2048): Promise<Blob> {
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(blob)
+  } catch {
+    if (/^image\/(png|jpeg|gif|webp)$/.test(blob.type)) return blob // can't decode here; let the server try
+    throw new Error('This image format can’t be converted. Try a PNG or JPEG.')
+  }
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height))
+  if (scale === 1 && blob.type === 'image/jpeg' && blob.size < 4_000_000) return blob
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not prepare the image'))), 'image/jpeg', 0.9),
+  )
+}
+
+/**
+ * Read the text (handwritten or printed) in a picture and insert it right
+ * after the picture.
+ */
+export async function convertImage(editor: Editor, attachmentId: string, insertAt: () => number | undefined) {
+  if (!isSyncConfigured()) throw new Error('Connect a ReconNotes server in Settings to use AI features.')
+  const blob = await attachmentBlob(attachmentId)
+  if (!blob) throw new Error('This picture hasn’t been downloaded to this device yet.')
+  const image = await prepareImage(blob)
+  const res = await fetch(apiUrl('/api/ai/image-to-text'), {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': image.type || 'image/jpeg' },
+    body: image,
+  })
+  const json = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+  if (!res.ok) throw new Error(json.error ?? `Server error ${res.status}`)
+  if (!json.text?.trim()) throw new Error('The AI returned no text for this picture.')
+  const at = insertAt()
+  if (at === undefined) throw new Error('The picture no longer exists')
+  editor.chain().focus().insertContentAt(at, markdownToHtml(json.text)).run()
 }
 
 /**

@@ -6,7 +6,7 @@ import { noteDocName, noteToMarkdown, getStrokes, extractNote } from '@reconnote
 import type { Config } from './config'
 import type { Store } from './store'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
-import { Ai, renderDrawingPng, sampleHandwritingPng } from './ai'
+import { Ai, isAiImage, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
 import {
   AI_TASKS,
   AgentValidationError,
@@ -155,6 +155,19 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, { text, agent })
   })
 
+  /**
+   * Convert a picture (photo of notes, screenshot, whiteboard…) to text. The
+   * app sends the image itself, already downscaled, so this works even before
+   * the attachment has finished uploading.
+   */
+  route('POST', '/api/ai/image-to-text', async (req, res) => {
+    const mime = (req.headers['content-type'] ?? '').split(';')[0].trim()
+    if (!isAiImage(mime)) throw new HttpError(415, 'Send a PNG, JPEG, GIF or WebP image')
+    const data = await readBody(req, 25 * 1024 * 1024)
+    const { text, agent } = await sync.enqueue(() => ai.transcribePhoto(data, mime))
+    json(res, 200, { text, agent })
+  })
+
   /** The exact image sent to the AI for a drawing – handy when recognition goes wrong. */
   route('GET', '/api/ai/drawing-image', (_req, res, _p, url) => {
     const noteId = url.searchParams.get('noteId') ?? ''
@@ -171,15 +184,25 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { noteId } = await readJson<{ noteId: string }>(req)
     const doc = sync.getDoc(noteDocName(noteId))
     if (!doc) throw new HttpError(404, 'note not found')
-    const marker = (id: string) => `\u0000DRAWING:${id}\u0000`
-    const md = noteToMarkdown(doc, { drawingPlaceholder: marker })
-    const parts: ({ text: string } | { png: Buffer })[] = []
+    // Splice the real drawings and pictures into the note's text, in order.
+    const md = noteToMarkdown(doc, {
+      drawingPlaceholder: (id) => `\u0000DRAWING:${id}\u0000`,
+      imagePlaceholder: (id) => `\u0000IMAGE:${id}\u0000`,
+    })
+    const parts: CompilePart[] = []
     for (const piece of md.split(/\u0000/)) {
-      const m = /^DRAWING:([a-z0-9]+)$/.exec(piece)
-      if (m) {
-        const png = renderDrawingPng(getStrokes(doc, m[1]).toArray())
-        if (png) parts.push({ png })
-      } else parts.push({ text: piece })
+      const m = /^(DRAWING|IMAGE):([a-z0-9]+)$/.exec(piece)
+      if (!m) {
+        parts.push({ text: piece })
+      } else if (m[1] === 'DRAWING') {
+        const png = renderDrawingPng(getStrokes(doc, m[2]).toArray())
+        if (png) parts.push({ image: png, mime: 'image/png', kind: 'drawing' })
+      } else {
+        const att = store.getAttachment(m[2])
+        if (att && isAiImage(att.mime) && store.hasBlob(att.id)) {
+          parts.push({ image: fs.readFileSync(store.blobPath(att.id)), mime: att.mime, kind: 'photo' })
+        } else parts.push({ text: '\n[picture not available on the server yet]\n' })
+      }
     }
     const markdown = await sync.enqueue(() => ai.compile(parts))
     json(res, 200, { markdown, title: extractNote(doc).title })

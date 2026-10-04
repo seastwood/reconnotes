@@ -3,6 +3,7 @@ import { DRAWING_WIDTH, drawingToSvg, unionBounds, type Stroke } from '@reconnot
 import type { Config } from './config'
 import { EmptyReplyError, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
+import { fitForAi } from './images'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -67,6 +68,18 @@ export function sampleHandwritingPng(): Buffer {
 /** A minimal fallback instruction for OCR models that ignore long prompts. */
 const SHORT_HANDWRITING_PROMPT = 'Transcribe the handwritten text in this image.'
 
+/** For photos and screenshots, which may mix handwriting with printed text. */
+const PHOTO_PROMPT = `Transcribe all the text in this image – handwritten and printed – such as a photo of a notebook page, a whiteboard, a sticky note or a screenshot.
+
+- Preserve the words exactly; fix only obvious letter-recognition ambiguity.
+- Use Markdown for structure that is clearly intended: headings for titles, "- " for bullets, "- [ ]" / "- [x]" for checkboxes, numbered lists, and tables.
+- Ignore the background (paper texture, lines, shadows, the desk) and anything cut off at the edges.
+- Describe non-text content (diagrams, arrows, sketches, charts) briefly in square brackets.
+- If a word is illegible write [illegible].
+- Output only the transcription, with no preamble.`
+
+const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image.'
+
 const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce text that will make it findable by search:
 
 1. Transcribe all legible text in the image (signs, screenshots, documents, whiteboards, handwriting, chart labels and values).
@@ -74,10 +87,10 @@ const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce t
 
 Output only that text, with no preamble.`
 
-const COMPILE_PROMPT = `You will receive a personal note made of typed text and images of handwritten sections (in reading order). Compile it into one clean, well-structured Markdown document.
+const COMPILE_PROMPT = `You will receive a personal note made of typed text, images of handwritten sections and attached pictures such as photos of paper notes or screenshots (in reading order). Compile it into one clean, well-structured Markdown document.
 
 - Keep all information: every fact, number, name, task and idea from both the typed and handwritten parts.
-- Transcribe handwriting faithfully and merge it into the right place in the flow.
+- Transcribe handwriting faithfully and merge it into the right place in the flow, including text written or printed in attached pictures.
 - Organise with headings, bullet lists, checklists ("- [ ]" / "- [x]") and tables where it helps; fix spelling and obvious grammar slips.
 - Describe diagrams or sketches briefly in square brackets.
 - Do not add facts, commentary or a preamble. Output only the Markdown document.`
@@ -129,15 +142,25 @@ export class Ai {
   }
 
   /** Transcribe with one specific agent (used by the chain above and by "Test reading handwriting"). */
-  async transcribeWith(backend: Backend, agent: AgentConfig, png: Buffer, opts: { requireText?: boolean } = {}): Promise<string> {
+  async transcribeWith(
+    backend: Backend,
+    agent: AgentConfig,
+    png: Buffer,
+    opts: { requireText?: boolean; mime?: string; photo?: boolean } = {},
+  ): Promise<string> {
     // Try the agent's own prompt (or the detailed built-in one); if the model
     // returns nothing, try once more with a minimal instruction, which many
     // OCR models handle better.
-    const prompts = [...new Set([agent.prompt.trim() || HANDWRITING_PROMPT, SHORT_HANDWRITING_PROMPT])]
+    const prompts = [
+      ...new Set([
+        agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : HANDWRITING_PROMPT),
+        opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
+      ]),
+    ]
     const empties: string[] = []
     for (const [i, prompt] of prompts.entries()) {
       try {
-        const text = await backend.generate([{ image: png, mime: 'image/png' }, { text: prompt }], 16000)
+        const text = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], 16000)
         log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
         if (text.trim()) return text
         empties.push(`prompt ${i + 1}: empty reply`)
@@ -150,11 +173,25 @@ export class Ai {
     throw new Error(`returned no text (${empties.join(' | ')})`)
   }
 
+  /**
+   * A photo or screenshot (e.g. of handwritten notes) → Markdown, using the
+   * handwriting agents in priority order.
+   */
+  async transcribePhoto(data: Buffer, mime: string): Promise<{ text: string; agent: string }> {
+    if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
+    const fit = fitForAi(data, mime)
+    const { result, agent } = await this.agents.run('handwriting', (backend, agent) =>
+      this.transcribeWith(backend, agent, fit.data, { requireText: true, mime: fit.mime, photo: true }),
+    )
+    return { text: result, agent: agent.name }
+  }
+
   /** Image → searchable text (OCR + short description). */
   async imageText(data: Buffer, mime: string): Promise<string> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
+    const fit = fitForAi(data, mime)
     const { result } = await this.agents.run('images', (backend) =>
-      backend.generate([{ image: data, mime }, { text: IMAGE_TEXT_PROMPT }], 4000),
+      backend.generate([{ image: fit.data, mime: fit.mime }, { text: IMAGE_TEXT_PROMPT }], 4000),
     )
     return result
   }
@@ -179,16 +216,21 @@ export class Ai {
    * Compile a note into a clean document. `parts` is the note in reading
    * order: typed Markdown and rendered handwriting images interleaved.
    */
-  async compile(parts: ({ text: string } | { png: Buffer })[]): Promise<string> {
-    // For agents that can't read images, transcribe the drawings first (once,
-    // even if we fail over between several such agents).
+  async compile(parts: CompilePart[]): Promise<string> {
+    // For agents that can't read images, transcribe drawings and pictures
+    // first (once, even if we fail over between several such agents).
     let transcribed: Promise<string> | null = null
     const asText = () =>
       (transcribed ??= (async () => {
         let text = ''
         for (const p of parts) {
           if ('text' in p) text += p.text
-          else text += '\n[handwritten section]\n' + (await this.transcribeHandwriting(p.png)).text + '\n[end handwritten section]\n'
+          else if (p.kind === 'drawing')
+            text += '\n[handwritten section]\n' + (await this.transcribeHandwriting(p.image)).text + '\n[end handwritten section]\n'
+          else {
+            const t = await this.transcribePhoto(p.image, p.mime).then((r) => r.text, () => '(could not be read)')
+            text += '\n[picture, transcribed]\n' + t + '\n[end picture]\n'
+          }
         }
         return text
       })())
@@ -199,7 +241,11 @@ export class Ai {
         for (const p of parts) {
           if ('text' in p) {
             if (p.text.trim()) input.push({ text: p.text })
-          } else input.push({ image: p.png, mime: 'image/png' })
+          } else if (p.kind === 'drawing') input.push({ image: p.image, mime: p.mime })
+          else {
+            const fit = fitForAi(p.image, p.mime)
+            input.push({ text: '[picture attached to the note:]' }, { image: fit.data, mime: fit.mime })
+          }
         }
       } else input.push({ text: await asText() })
       input.push({ text: COMPILE_PROMPT })
@@ -208,6 +254,9 @@ export class Ai {
     return result
   }
 }
+
+/** The note in reading order: text, drawings (rendered) and pictures. */
+export type CompilePart = { text: string } | { image: Buffer; mime: string; kind: 'drawing' | 'photo' }
 
 /**
  * Speech-to-text through any OpenAI-compatible transcription endpoint, such

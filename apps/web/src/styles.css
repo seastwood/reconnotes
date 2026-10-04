@@ -758,6 +758,37 @@ button.text {
 .image-block.selected img {
   outline: 3px solid var(--accent);
 }
+.image-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.image-block:hover .image-actions,
+.image-actions.show {
+  opacity: 1;
+}
+@media (hover: none) {
+  .image-actions {
+    opacity: 1;
+  }
+}
+.image-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--accent-text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.image-block .drawing-error {
+  line-height: 1.4;
+}
 .image-resize {
   position: absolute;
   right: -6px;
