@@ -1,0 +1,83 @@
+name: CI
+
+# Every push and pull request: typecheck, unit tests, the web build, an
+# end-to-end run in a real browser, and a build of the iOS app (with its
+# extensions) for the simulator – so Swift mistakes show up here, not on
+# the Mac.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests, web build, end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests (core + server)
+        run: npm test
+      - name: Build web app and server
+        run: npm run build
+      - name: Browser for the end-to-end test
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end (server + two browser devices)
+        run: npm run e2e -- e2e-screenshots
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e-screenshots
+          if-no-files-found: ignore
+
+  ios:
+    name: iOS app builds
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build web app and copy it into the iOS project
+        run: npm run ios:sync -w @reconnotes/web
+      - name: Add the app extensions (as the Mac setup scripts do)
+        run: |
+          gem install --user-install xcodeproj
+          export PATH="$(ruby -e 'print Gem.user_dir')/bin:$PATH"
+          npm run ios:add-extensions -w @reconnotes/web
+      - name: Build for the simulator (no signing)
+        working-directory: apps/web/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee xcodebuild.log | grep -E '(error|warning: unused|BUILD (SUCCEEDED|FAILED))' || true
+          grep -q 'BUILD SUCCEEDED' xcodebuild.log
+      - name: Keep the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: apps/web/ios/App/xcodebuild.log
