@@ -33,6 +33,7 @@ import {
   WandSparkles,
   ScrollText,
   Link2,
+  History,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -55,6 +56,8 @@ interface Props {
   onFind?: () => void
   /** insert a link to another note */
   onLinkNote?: () => void
+  /** show earlier versions of the note */
+  onHistory?: () => void
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -95,7 +98,7 @@ function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | null>(null)
@@ -315,6 +318,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             >
               <ScanText size={16} /> Convert all handwriting to text
             </button>
+            {onHistory && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  onHistory()
+                }}
+              >
+                <History size={16} /> Version history…
+              </button>
+            )}
             <button onClick={exportMarkdown}>
               <Download size={16} /> Export Markdown
             </button>

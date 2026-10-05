@@ -1800,3 +1800,75 @@ button.link {
   padding: 6px 0;
   color: var(--accent-text);
 }
+
+/* ------------------------------------------------------ version history */
+.versions-dialog {
+  width: min(900px, calc(100vw - 32px));
+  max-width: none;
+}
+.versions-dialog h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.versions-body {
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  max-height: calc(100dvh - 180px);
+}
+.versions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 0 0;
+  width: 210px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+.versions-list button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-align: left;
+}
+.versions-list button.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.versions-list .hint {
+  font-size: 12px;
+}
+.versions-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.versions-preview .note-content {
+  flex: 1;
+  margin: 0;
+  align-self: stretch;
+  min-height: 220px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  max-width: none;
+}
+.versions-preview img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+@media (max-width: 699px) {
+  .versions-body {
+    flex-direction: column;
+  }
+  .versions-list {
+    width: auto;
+    max-height: 160px;
+  }
+}

@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
-import { noteDocName, noteToMarkdown, getStrokes, extractNote } from '@reconnotes/core'
+import { noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
+import { loadVersion, snapshotNow } from './versions'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
 import { Ai, isAiImage, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
 import {
@@ -352,6 +353,29 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('POST', '/api/backups', async (_req, res) => {
     const dir = await runBackup(config, store, sync)
     json(res, 201, { backup: path.basename(dir) })
+  })
+
+  // --- Version history ------------------------------------------------------
+  route('GET', `/api/notes/${ID}/versions`, (_req, res, [id]) => {
+    json(res, 200, { versions: store.listVersions(noteDocName(id)) })
+  })
+
+  /** One version as Markdown (with recognised handwriting and picture text) for the preview. */
+  route('GET', `/api/notes/${ID}/versions/([0-9]+)`, (_req, res, [id, vid]) => {
+    const doc = loadVersion(store, noteDocName(id), Number(vid))
+    if (!doc) throw new HttpError(404, 'version not found')
+    json(res, 200, { markdown: noteToMarkdown(doc, { attachmentText: true, attachmentUrl: (a) => `/api/attachments/${a}` }) })
+  })
+
+  /** Make the note look like this version again (the current state is kept as a version first). */
+  route('POST', `/api/notes/${ID}/versions/([0-9]+)/restore`, async (_req, res, [id, vid]) => {
+    const name = noteDocName(id)
+    const old = loadVersion(store, name, Number(vid))
+    const current = sync.getDoc(name)
+    if (!old || !current) throw new HttpError(404, 'version not found')
+    snapshotNow(store, name, current, 'Before restoring')
+    await sync.change(name, (doc) => restoreNoteContent(doc, old))
+    json(res, 200, { ok: true })
   })
 
   route('GET', `/api/notes/${ID}/markdown`, (_req, res, [id]) => {

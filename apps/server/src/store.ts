@@ -13,6 +13,14 @@ export interface AttachmentRow {
   text_status: 'pending' | 'done' | 'error' | 'skipped'
 }
 
+export interface VersionRow {
+  id: number
+  createdAt: number
+  title: string
+  chars: number
+  label: string
+}
+
 export interface SearchHit {
   noteId: string
   title: string
@@ -71,6 +79,16 @@ export class Store {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        chars INTEGER NOT NULL DEFAULT 0,
+        label TEXT NOT NULL DEFAULT '',
+        state BLOB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS versions_doc ON versions(doc_name, created_at);
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
         note_id UNINDEXED,
         title,
@@ -94,6 +112,30 @@ export class Store {
   }
 
   // --- Yjs documents -------------------------------------------------------
+
+  // --- Version history -------------------------------------------------
+
+  addVersion(docName: string, v: { createdAt: number; title: string; chars: number; label?: string; state: Uint8Array }) {
+    this.db
+      .prepare('INSERT INTO versions (doc_name, created_at, title, chars, label, state) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(docName, v.createdAt, v.title, v.chars, v.label ?? '', Buffer.from(v.state))
+  }
+
+  listVersions(docName: string): VersionRow[] {
+    return this.db
+      .prepare('SELECT id, created_at AS createdAt, title, chars, label FROM versions WHERE doc_name = ? ORDER BY created_at DESC, id DESC')
+      .all(docName) as VersionRow[]
+  }
+
+  getVersionState(docName: string, id: number): Uint8Array | null {
+    const r = this.db.prepare('SELECT state FROM versions WHERE doc_name = ? AND id = ?').get(docName, id) as { state: Buffer } | undefined
+    return r ? new Uint8Array(r.state) : null
+  }
+
+  deleteVersions(ids: number[]) {
+    const del = this.db.prepare('DELETE FROM versions WHERE id = ?')
+    this.db.transaction(() => ids.forEach((id) => del.run(id)))()
+  }
 
   loadDocument(name: string): Uint8Array | null {
     const row = this.db.prepare('SELECT state FROM documents WHERE name = ?').get(name) as { state: Buffer } | undefined

@@ -204,3 +204,33 @@ describe('#tags', () => {
     expect(extractTags('#start of line\n#Second line #second')).toEqual(['second', 'start'])
   })
 })
+
+describe('restoreNoteContent', () => {
+  it('brings back old text and ink as normal edits', async () => {
+    const Y = await import('yjs')
+    const { restoreNoteContent, getContent, getStrokes, extractNote } = await import('../src')
+    const live = new Y.Doc()
+    const para = (t: string) => {
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText(t)])
+      return p
+    }
+    getContent(live).insert(0, [para('Version one'), para('keep me')])
+    getStrokes(live, 'd1').push([{ id: 's1', tool: 'pen', color: '#000', size: 3, pts: [0, 0, 0.5] }])
+    const old = new Y.Doc()
+    Y.applyUpdate(old, Y.encodeStateAsUpdate(live))
+    // later edits
+    getContent(live).delete(0, 2)
+    getContent(live).insert(0, [para('Version two')])
+    getStrokes(live, 'd1').delete(0, 1)
+    // a second device that has the later state
+    const other = new Y.Doc()
+    Y.applyUpdate(other, Y.encodeStateAsUpdate(live))
+    restoreNoteContent(live, old)
+    expect(extractNote(live).text).toBe('Version one\nkeep me')
+    expect(getStrokes(live, 'd1').length).toBe(1)
+    // the restore syncs like any change
+    Y.applyUpdate(other, Y.encodeStateAsUpdate(live, Y.encodeStateVector(other)))
+    expect(extractNote(other).text).toBe('Version one\nkeep me')
+  })
+})

@@ -19,6 +19,7 @@ import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
+import { VersionHistory } from '../components/VersionHistory'
 
 interface Props {
   noteId: string
@@ -37,6 +38,7 @@ interface Props {
 
 export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
+  const [historyOpen, setHistoryOpen] = useState(false)
   const onOpenNoteRef = useRef(onOpenNote)
   onOpenNoteRef.current = onOpenNote
   /** the [[ link picker: where it is, and what it replaces */
@@ -201,6 +203,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             fullScreen={fullScreen}
             onFind={openFind}
             onLinkNote={() => openLinkPicker(null)}
+            onHistory={() => setHistoryOpen(true)}
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
@@ -241,6 +244,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
               }}
             />
           )}
+          {historyOpen && <VersionHistory noteId={noteId} onClose={() => setHistoryOpen(false)} />}
           <InkToolbar />
           <PencilPalette />
         </div>

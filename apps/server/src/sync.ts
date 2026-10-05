@@ -17,6 +17,7 @@ import type { Config } from './config'
 import type { Store } from './store'
 import { Ai, renderDrawingPng } from './ai'
 import { log } from './log'
+import { maybeSnapshot } from './versions'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -93,6 +94,11 @@ export class SyncEngine {
   private afterStore(name: string, doc: Y.Doc) {
     const noteId = noteIdFromDocName(name)
     if (!noteId) return
+    try {
+      maybeSnapshot(this.store, name, doc)
+    } catch (err) {
+      log.error('version snapshot failed', name, err)
+    }
     try {
       this.indexNote(noteId, doc)
     } catch (err) {
