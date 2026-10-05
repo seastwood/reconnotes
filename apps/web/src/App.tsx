@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
@@ -30,6 +30,59 @@ function useTheme() {
   }, [theme, systemDark])
 }
 
+/**
+ * Horizontal swipes with a finger: from the left screen edge (→ onOpen), or
+ * leftwards starting on a side panel (→ onClose). Pencil and mouse are
+ * ignored, and so are mostly-vertical moves (scrolling).
+ */
+function useEdgeSwipe(onOpen: () => void, onClose: () => void) {
+  const handlers = useRef({ onOpen, onClose })
+  handlers.current = { onOpen, onClose }
+  useEffect(() => {
+    const EDGE = 28
+    let start: { x: number; y: number; fromEdge: boolean; onPanel: boolean; t: number } | null = null
+    const touchType = (t: Touch) => (t as Touch & { touchType?: string }).touchType
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (e.touches.length !== 1 || touchType(t) === 'stylus') {
+        start = null
+        return
+      }
+      const target = e.target as Element
+      start = {
+        x: t.clientX,
+        y: t.clientY,
+        fromEdge: t.clientX <= EDGE,
+        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]'),
+        t: Date.now(),
+      }
+      if (!start.fromEdge && !start.onPanel) start = null
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (!start) return
+      const t = e.changedTouches[0]
+      const dx = t.clientX - start.x
+      const dy = t.clientY - start.y
+      const quick = Date.now() - start.t < 800
+      const horizontal = Math.abs(dx) > 60 && Math.abs(dy) < Math.abs(dx) * 0.6
+      if (quick && horizontal) {
+        if (start.fromEdge && dx > 0) handlers.current.onOpen()
+        else if (start.onPanel && dx < 0) handlers.current.onClose()
+      }
+      start = null
+    }
+    const onCancel = () => (start = null)
+    window.addEventListener('touchstart', onStart, { passive: true, capture: true })
+    window.addEventListener('touchend', onEnd, { passive: true, capture: true })
+    window.addEventListener('touchcancel', onCancel, { passive: true, capture: true })
+    return () => {
+      window.removeEventListener('touchstart', onStart, { capture: true })
+      window.removeEventListener('touchend', onEnd, { capture: true })
+      window.removeEventListener('touchcancel', onCancel, { capture: true })
+    }
+  }, [])
+}
+
 interface Nav {
   view: View
   noteId: string | null
@@ -40,7 +93,8 @@ export function App() {
   usePencilInteractions()
   const ws = useWorkspace()
   const narrow = useMedia('(max-width: 699px)')
-  const wide = useMedia('(min-width: 1100px)')
+  // room for folders + notes + the note side by side (iPad landscape, large iPad portrait, desktop)
+  const wide = useMedia('(min-width: 1000px)')
   const [nav, setNavState] = useState<Nav>(() => safeLocalGet<Nav>('reconnotes.nav', { view: { kind: 'all' }, noteId: null }))
   const [pane, setPane] = useState<'folders' | 'list' | 'note'>(nav.noteId ? 'note' : 'folders')
   /** iPad/desktop: 3 = folders + notes + note, 2 = notes + note, 1 = note only (full screen) */
@@ -84,6 +138,25 @@ export function App() {
     if (wide) setLayout(layout === 3 ? 2 : layout === 2 ? 1 : 3)
     else setLayout(layout >= 2 ? 1 : 2)
   }
+  /**
+   * Swipe in from the left edge: show the notes, then (swiping again) the
+   * folders. Swipe left on a panel to hide them again. Phones: the edge swipe
+   * goes back a screen.
+   */
+  const openNext = () => {
+    if (narrow) setPane(pane === 'note' ? 'list' : 'folders')
+    else if (layout === 1) setLayout(2)
+    else if (wide) setLayout(3)
+    else setOverlay(true)
+  }
+  const closeOne = () => {
+    if (narrow) return
+    if (overlay) setOverlay(false)
+    else if (sidebarInline) setLayout(2)
+    else if (layout >= 2 && nav.noteId) setLayout(1)
+  }
+  useEdgeSwipe(openNext, closeOne)
+
   /** Notes list's sidebar button: show/hide the folders. */
   const toggleFolders = () => {
     if (wide) setLayout(layout === 3 ? 2 : 3)

@@ -46,6 +46,8 @@ body,
 html,
 body {
   overflow: hidden;
+  /* no browser back/forward on an edge swipe: that swipe opens the panels */
+  overscroll-behavior: none;
 }
 body {
   position: fixed;
@@ -132,6 +134,15 @@ select {
   bottom: 0;
   left: 0;
   box-shadow: var(--shadow);
+}
+/* mid-size screens (e.g. 12.9" iPad portrait): slimmer columns leave the note room */
+@media (min-width: 700px) and (max-width: 1199px) {
+  .sidebar {
+    width: 240px;
+  }
+  .list-col {
+    width: 290px;
+  }
 }
 .sidebar-backdrop {
   position: fixed;
@@ -635,6 +646,24 @@ button.text {
     display: none;
   }
   .tb-label {
+    display: none;
+  }
+}
+/* note column squeezed next to both panels: compact buttons so ⋯ stays in view */
+@container (max-width: 560px) {
+  .editor-toolbar {
+    padding: 8px 4px;
+  }
+  .editor-toolbar .tb {
+    min-width: 34px;
+    padding: 0 4px;
+  }
+  .editor-toolbar .sep {
+    margin: 0 1px;
+  }
+}
+@container (max-width: 440px) {
+  .hide-xs {
     display: none;
   }
 }

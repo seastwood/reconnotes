@@ -168,7 +168,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className="tb undo" onClick={() => um?.undo()} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
         <Undo2 size={20} />
       </button>
-      <button className="tb" onClick={() => um?.redo()} disabled={!canRedo} aria-label="Redo" title="Redo (⇧⌘Z)">
+      <button className="tb hide-xs" onClick={() => um?.redo()} disabled={!canRedo} aria-label="Redo" title="Redo (⇧⌘Z)">
         <Redo2 size={20} />
       </button>
       <span className="sep" />
@@ -194,7 +194,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className={`tb${state.bold ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleBold().run()} aria-label="Bold">
         <Bold size={18} />
       </button>
-      <button className={`tb${state.italic ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleItalic().run()} aria-label="Italic">
+      <button className={`tb hide-xs${state.italic ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleItalic().run()} aria-label="Italic">
         <Italic size={18} />
       </button>
       <button className={`tb hide-sm${state.underline ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleUnderline().run()} aria-label="Underline">
