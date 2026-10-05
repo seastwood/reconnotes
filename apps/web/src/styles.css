@@ -2269,3 +2269,62 @@ li[data-checked='true'] .due-chip button {
 .menu button.danger {
   color: var(--danger, #d33);
 }
+
+/* Settings › Devices */
+.device-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.device-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-top: 1px solid var(--line);
+}
+.device-list li.revoked {
+  opacity: 0.6;
+}
+.device-list .device-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.device-list .muted {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.this-device {
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.danger-text {
+  color: var(--danger, #d33);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 14px;
+  padding: 4px 6px;
+}
+.device-added {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.device-key {
+  display: block;
+  word-break: break-all;
+  font-size: 13px;
+  padding: 8px;
+  margin: 6px 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  user-select: all;
+}

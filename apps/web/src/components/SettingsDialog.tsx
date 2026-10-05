@@ -5,6 +5,7 @@ import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
 import { BackupsSection } from './BackupsSection'
 import { ExportImportSection } from './ExportImportSection'
+import { DevicesSection } from './DevicesSection'
 import { deviceOcrAvailable } from '../lib/deviceOcr'
 import { deviceSpeechAvailable } from '../lib/speech'
 
@@ -101,6 +102,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </section>
+
+        {connected && (
+          <section>
+            <h3>Devices</h3>
+            <DevicesSection key={s.serverUrl + s.token} />
+          </section>
+        )}
 
         {connected && (
           <section>

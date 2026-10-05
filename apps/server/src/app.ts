@@ -7,12 +7,14 @@ import { AgentRegistry } from './agents'
 import { createHttpServer } from './http'
 import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
+import { Devices } from './devices'
 
 export interface App {
   config: Config
   store: Store
   sync: SyncEngine
   ai: Ai
+  devices: Devices
   server: http.Server
   close(): Promise<void>
 }
@@ -23,8 +25,9 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   }
   const store = new Store(config.dataDir)
   const ai = new Ai(new AgentRegistry(store, config), config)
-  const sync = new SyncEngine(config, store, ai)
-  const { server, closeSockets } = createHttpServer(config, store, sync, ai)
+  const devices = new Devices(store, config.token)
+  const sync = new SyncEngine(config, store, ai, devices)
+  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices)
   resumePendingAttachments(config, store, ai, sync)
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   return {
@@ -32,6 +35,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     store,
     sync,
     ai,
+    devices,
     server,
     async close() {
       stopBackups()

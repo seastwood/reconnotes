@@ -25,6 +25,7 @@ import {
 import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
 import { listBackups, runBackup } from './backup'
 import { exportZip } from './exportZip'
+import type { Caller, Devices } from './devices'
 import { importNotes, unpack } from './importNotes'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
@@ -83,7 +84,8 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 
 const ID = '([a-z0-9]{8,64})'
 
-export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai) {
+export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices) {
+  const callers = new WeakMap<http.IncomingMessage, Caller>()
   const routes: [string, RegExp, Handler][] = []
   const route = (method: string, pattern: string, handler: Handler) =>
     routes.push([method, new RegExp(`^${pattern}$`), handler])
@@ -98,7 +100,28 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     }),
   )
 
-  route('GET', '/api/auth/check', (_req, res) => json(res, 200, { ok: true }))
+  route('GET', '/api/auth/check', (req, res) => json(res, 200, { ok: true, caller: callers.get(req) }))
+
+  // --- Devices (a key per device, switched off on its own when lost) ------
+  route('GET', '/api/devices', (req, res) => json(res, 200, { devices: devices.list(), caller: callers.get(req) }))
+  route('POST', '/api/devices', async (req, res) => {
+    const { name } = await readJson<{ name?: string }>(req)
+    json(res, 201, devices.add(String(name ?? '')))
+  })
+  route('PUT', '/api/devices/([a-f0-9]{8,32})', async (req, res, [id]) => {
+    const { name } = await readJson<{ name?: string }>(req)
+    if (!devices.rename(id, String(name ?? ''))) throw new HttpError(404, 'device not found')
+    json(res, 200, { devices: devices.list() })
+  })
+  route('POST', '/api/devices/([a-f0-9]{8,32})/revoke', (_req, res, [id]) => {
+    if (!devices.revoke(id)) throw new HttpError(404, 'device not found')
+    sync.disconnectDevice(id)
+    json(res, 200, { devices: devices.list() })
+  })
+  route('DELETE', '/api/devices/([a-f0-9]{8,32})', (_req, res, [id]) => {
+    if (!devices.remove(id)) throw new HttpError(409, 'Switch the device off first')
+    json(res, 200, { devices: devices.list() })
+  })
 
   // --- Attachments (images, audio, files) ---------------------------------
   route('HEAD', `/api/attachments/${ID}`, (_req, res, [id]) => {
@@ -446,7 +469,9 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   const isAuthorized = (req: http.IncomingMessage, url: URL) => {
     const header = req.headers.authorization ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7) : (url.searchParams.get('token') ?? '')
-    return safeEqual(token, config.token)
+    const caller = devices.check(token)
+    if (caller) callers.set(req, caller)
+    return Boolean(caller)
   }
 
   const serveStatic = (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {

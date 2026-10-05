@@ -18,6 +18,7 @@ import type { Store } from './store'
 import { Ai, renderDrawingPng } from './ai'
 import { log } from './log'
 import { maybeSnapshot } from './versions'
+import type { Devices } from './devices'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -42,14 +43,18 @@ export class SyncEngine {
     private config: Config,
     private store: Store,
     private ai: Ai,
+    private devices?: Devices,
   ) {
     this.hocuspocus = new Hocuspocus({
       quiet: true,
       debounce: 1500,
       maxDebounce: 10_000,
       onAuthenticate: async ({ token, documentName }) => {
-        if (!safeEqual(token ?? '', config.token)) throw new Error('unauthorized')
+        const caller = this.devices ? this.devices.check(token ?? '') : safeEqual(token ?? '', config.token) ? { kind: 'main' as const } : null
+        if (!caller) throw new Error('unauthorized')
         if (!DOC_NAME.test(documentName)) throw new Error('invalid document name')
+        // remembered with the connection, so revoking a device can disconnect it
+        return { deviceId: caller.kind === 'device' ? caller.id : null }
       },
       onLoadDocument: async ({ documentName, document }) => {
         const state = store.loadDocument(documentName)
@@ -61,6 +66,23 @@ export class SyncEngine {
         this.afterStore(documentName, document)
       },
     })
+  }
+
+  /**
+   * Cut off a device whose key was revoked: its sockets are dropped (one
+   * socket carries all of a device's documents), so it reconnects, its key
+   * is refused, and it shows that it's no longer allowed to sync.
+   */
+  disconnectDevice(deviceId: string) {
+    for (const doc of this.hocuspocus.documents.values()) {
+      for (const conn of [...doc.connections.keys()]) {
+        if ((conn.context as { deviceId?: string } | undefined)?.deviceId !== deviceId) continue
+        conn.close({ code: 4401, reason: 'unauthorized' } as CloseEvent)
+        const ws = conn.webSocket as { terminate?: () => void; close?: (code?: number) => void }
+        if (ws.terminate) ws.terminate()
+        else ws.close?.(4401)
+      }
+    }
   }
 
   /** Read a document without opening a connection (memory first, then disk). */
