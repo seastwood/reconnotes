@@ -3,14 +3,16 @@ import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeV
 import { useContext, useEffect, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { getTranscripts, newId } from '@reconnotes/core'
-import { addAttachment, attachmentUrl } from '../lib/attachments'
+import { getTranscripts, newId, wordsKey } from '@reconnotes/core'
+import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
 import { DrawingCanvas } from '../drawing/DrawingCanvas'
 import { inkUi, useInkUi } from '../drawing/toolState'
 import { useUndoManager } from './undo'
 import { fileKind, formatSize, openFile, shareFile } from '../lib/files'
 import { findKey } from './find'
+import { useFindInNode, useInkMatches, usePictureMatches, useTranscript, WordHighlights } from './findHighlights'
+import { recognizeImageWords, useDeviceOcr } from '../lib/deviceOcr'
 
 function useAttachmentUrl(id: string | null) {
   const [url, setUrl] = useState<string | null>(null)
@@ -79,6 +81,31 @@ function tap(action: () => void) {
 
 // --- Image ------------------------------------------------------------------
 
+/** Pictures located by attachment id this session, so each is read at most once. */
+const wordBoxesTried = new Set<string>()
+
+/**
+ * iOS app: work out where each word of a picture is (Apple Vision), the first
+ * time a search matches its text. Kept with the note, so every device can
+ * then highlight the words.
+ */
+function usePictureWordBoxes(doc: import('yjs').Doc | undefined, attachmentId: string, wanted: boolean) {
+  useEffect(() => {
+    if (!doc || !wanted || !useDeviceOcr() || wordBoxesTried.has(attachmentId)) return
+    wordBoxesTried.add(attachmentId)
+    void (async () => {
+      try {
+        const blob = await attachmentBlob(attachmentId)
+        if (!blob) return wordBoxesTried.delete(attachmentId) // not downloaded yet: try again later
+        const words = await recognizeImageWords(blob)
+        getTranscripts(doc).set(wordsKey(attachmentId), JSON.stringify(words))
+      } catch {
+        /* best effort: the whole picture is still marked */
+      }
+    })()
+  }, [doc, attachmentId, wanted])
+}
+
 function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const ctx = useContext(NoteContext)
@@ -88,6 +115,12 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   const [aspect, setAspect] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Find in note: highlight matching words in the picture and in handwriting drawn on it
+  const find = useFindInNode(editor, getPos)
+  const inkMatches = useInkMatches(ctx?.doc, drawingId, find.query)
+  const picture = usePictureMatches(ctx?.doc, node.attrs.attachmentId, find.query)
+  const pictureText = useTranscript(ctx?.doc, `att:${node.attrs.attachmentId}`)
+  usePictureWordBoxes(ctx?.doc, node.attrs.attachmentId, Boolean(find.query && !picture.located && pictureText?.toLocaleLowerCase().includes(find.query.trim().toLocaleLowerCase())))
   const convert = async () => {
     setBusy(true)
     setError(null)
@@ -157,8 +190,16 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
               if (img.naturalWidth) setAspect(img.naturalHeight / img.naturalWidth)
             }}
           />
+          <WordHighlights rects={picture.rects} current={find.current} />
           {ctx && drawingId && aspect && (
-            <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} overlay={{ aspect }} />
+            <DrawingCanvas
+              doc={ctx.doc}
+              drawingId={drawingId}
+              undoManager={um}
+              editable={editor.isEditable}
+              overlay={{ aspect }}
+              highlights={{ rects: inkMatches, current: find.current }}
+            />
           )}
           {selected && editor.isEditable && !markingUp && (
             <div className="image-resize" onPointerDown={startResize} title="Drag to resize" aria-label="Resize image" />

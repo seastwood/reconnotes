@@ -23,6 +23,7 @@ import {
 import { DRAW_ORIGIN } from '../editor/undo'
 import { inkUi, toolState, useInkUi, useTools } from './toolState'
 import { settings } from '../lib/settings'
+import { WordHighlights } from '../editor/findHighlights'
 
 interface Props {
   doc: Y.Doc
@@ -41,6 +42,8 @@ interface Props {
    * input while open – otherwise touches reach the picture underneath.
    */
   overlay?: { aspect: number }
+  /** Find in note: words to highlight in the ink (drawing units) */
+  highlights?: { rects: Rect[]; current: boolean }
 }
 
 const ERASER_RADIUS = 10
@@ -70,7 +73,7 @@ function displayColor(c: string, dark: boolean) {
  *  - Eraser (whole stroke or pixel), lasso select/move, and an undo history
  *    shared with the typed text.
  */
-export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, overlay }: Props) {
+export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, overlay, highlights }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
   const liveRef = useRef<HTMLCanvasElement>(null)
@@ -590,6 +593,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         onPointerCancel={finish}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {highlights && <WordHighlights rects={highlights.rects} current={highlights.current} scale={scale} />}
     </div>
     {editable && footer && !overlay && (
       <div className="drawing-footer">

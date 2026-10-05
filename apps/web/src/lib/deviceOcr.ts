@@ -1,6 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import {
   linesToMarkdown,
+  type PictureWords,
   positionedLinesToMarkdown,
   recognitionStyle,
   segmentLines,
@@ -30,6 +31,8 @@ interface VisionLine {
   y: number
   w: number
   h: number
+  /** each word's box (same units); older app builds don't send these */
+  words?: { text: string; x: number; y: number; w: number; h: number }[]
 }
 
 interface TextRecognitionPlugin {
@@ -111,6 +114,33 @@ export async function recognizeDrawingOnDevice(strokes: Stroke[]): Promise<strin
 export async function recognizeImageOnDevice(blob: Blob): Promise<string> {
   const base64 = await blobToBase64(blob)
   return positionedLinesToMarkdown(await recognize(base64))
+}
+
+/**
+ * Where each word of a picture is (for highlighting search matches), in
+ * reading order. Vision sometimes gives handwriting words the whole line's
+ * box; then the line is shared out between its words by their length.
+ */
+export async function recognizeImageWords(blob: Blob): Promise<PictureWords> {
+  const found = await recognize(await blobToBase64(blob))
+  const r4 = (v: number) => Math.round(v * 10000) / 10000
+  const lines = [...found]
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((l) => {
+      const words = l.words?.length ? l.words : null
+      const sameAsLine = words?.every((w) => Math.abs(w.w - l.w) < 0.002 && Math.abs(w.x - l.x) < 0.002)
+      if (words && !(sameAsLine && words.length > 1)) return words.map((w) => ({ t: w.text, x: r4(w.x), y: r4(w.y), w: r4(w.w), h: r4(w.h) }))
+      const parts = l.text.split(/\s+/).filter(Boolean)
+      const total = parts.reduce((n, p) => n + p.length, 0) + parts.length - 1
+      let at = 0
+      return parts.map((t) => {
+        const w = { t, x: r4(l.x + (l.w * at) / total), y: r4(l.y), w: r4((l.w * t.length) / total), h: r4(l.h) }
+        at += t.length + 1
+        return w
+      })
+    })
+    .filter((l) => l.length)
+  return { v: 1, lines }
 }
 
 function blobToBase64(blob: Blob): Promise<string> {

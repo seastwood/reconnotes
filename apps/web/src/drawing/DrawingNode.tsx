@@ -10,6 +10,7 @@ import { inkUi, useInkUi } from './toolState'
 import { convertHandwriting, drawingImageUrl, recognizeDrawingLocally } from '../lib/ai'
 import { useDeviceOcr } from '../lib/deviceOcr'
 import { settings } from '../lib/settings'
+import { useFindInNode, useInkMatches } from '../editor/findHighlights'
 
 export interface NoteContextValue {
   doc: Y.Doc
@@ -76,6 +77,9 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
   const um = useUndoManager()
   const drawingId = node.attrs.drawingId as string
   const active = useInkUi((s) => s.activeDrawing === drawingId)
+  // Find in note: highlight the matching words in the handwriting
+  const find = useFindInNode(editor, getPos)
+  const inkMatches = useInkMatches(ctx?.doc, drawingId, find.query)
   const [transcript, setTranscript] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -288,7 +292,14 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
         if (!active) inkUi.set({ activeDrawing: drawingId })
       }}
     >
-      <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} footer={footer} />
+      <DrawingCanvas
+        doc={ctx.doc}
+        drawingId={drawingId}
+        undoManager={um}
+        editable={editor.isEditable}
+        footer={footer}
+        highlights={{ rects: inkMatches, current: find.current }}
+      />
       {error && (
         <div className="drawing-error" role="alert">
           {error}{' '}

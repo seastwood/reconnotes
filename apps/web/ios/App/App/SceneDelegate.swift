@@ -217,7 +217,7 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
 /// `TextRecognition` Capacitor plugin (see apps/web/src/lib/deviceOcr.ts).
 ///
 ///     TextRecognition.recognize({ image: <base64 PNG/JPEG>, languages?: ["en-US"] })
-///       → { lines: [{ text, confidence, x, y, w, h }], width, height }
+///       → { lines: [{ text, confidence, x, y, w, h, words: [{ text, x, y, w, h }] }], width, height }
 ///
 /// Boxes are normalised (0–1) with the origin at the top-left. Recognition
 /// runs on the device, works offline and handles handwriting.
@@ -248,7 +248,21 @@ public class TextRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
             let lines: [[String: Any]] = observations.compactMap { observation in
                 guard let best = observation.topCandidates(1).first else { return nil }
                 let box = observation.boundingBox // normalised, origin bottom-left
+                // each word's own box, for highlighting search matches in pictures
+                var words: [[String: Any]] = []
+                let text = best.string
+                text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .byWords) { word, range, _, _ in
+                    guard let word = word, let wordBox = (try? best.boundingBox(for: range))?.boundingBox else { return }
+                    words.append([
+                        "text": word,
+                        "x": Double(wordBox.minX),
+                        "y": Double(1 - wordBox.maxY),
+                        "w": Double(wordBox.width),
+                        "h": Double(wordBox.height),
+                    ])
+                }
                 return [
+                    "words": words,
                     "text": best.string,
                     "confidence": Double(best.confidence),
                     "x": Double(box.minX),

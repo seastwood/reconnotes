@@ -93,8 +93,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           transcriptOf: (node) => {
             const t = getTranscripts(doc)
             if (node.type.name === 'drawing') return t.get(node.attrs.drawingId) ?? null
-            if (node.attrs.attachmentId) return t.get(`att:${node.attrs.attachmentId}`) ?? null
-            return null
+            // a picture: its own text, and any handwriting drawn on it
+            const parts = [node.attrs.attachmentId && t.get(`att:${node.attrs.attachmentId}`), node.attrs.drawingId && t.get(node.attrs.drawingId)]
+            return parts.filter(Boolean).join('\n') || null
           },
         }),
         AudioNode,

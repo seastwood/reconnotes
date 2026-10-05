@@ -1683,6 +1683,23 @@ button.link {
   background: none;
   outline-color: var(--accent);
 }
+/* matching words inside handwriting and pictures */
+.word-highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.word-highlight {
+  position: absolute;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.word-highlight.current {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .menu-shortcut {
   margin-left: auto;
   padding-left: 16px;
