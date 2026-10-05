@@ -29,6 +29,24 @@ export interface ExtractedNote {
   attachments: string[]
   /** drawing ids embedded in the note */
   drawings: string[]
+  /** #tags in the note's text (including recognised handwriting), lower case, without # */
+  tags: string[]
+}
+
+/**
+ * #tags: a # followed by letters/digits/-/_ (at least one letter), at the
+ * start or after a space or bracket – so "C#", "#1" and URLs with #anchors
+ * don't count.
+ */
+const TAG = /(^|[\s(\[{,;:])#([\p{L}\p{N}_-]*\p{L}[\p{L}\p{N}_-]*)/gu
+
+export function extractTags(text: string): string[] {
+  const out = new Set<string>()
+  for (const m of text.matchAll(TAG)) {
+    const tag = m[2].replace(/[-_]+$/, '').toLocaleLowerCase()
+    if (tag && tag.length <= 40) out.add(tag)
+  }
+  return [...out].sort()
 }
 
 /**
@@ -95,5 +113,6 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
     .map((l) => l.replace(/^\[[ x]\] /, ''))
     .join(' ')
     .slice(0, 200)
-  return { title, snippet, text: nonEmpty.join('\n'), attachments, drawings }
+  const text = nonEmpty.join('\n')
+  return { title, snippet, text, attachments, drawings, tags: extractTags(text) }
 }

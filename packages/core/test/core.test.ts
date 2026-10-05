@@ -196,3 +196,11 @@ describe('ink geometry', () => {
     expect(strokeInLasso(stroke, [100, 100, 200, 100, 200, 200])).toBe(false)
   })
 })
+
+describe('#tags', () => {
+  it('finds tags but not C#, #1 or URL anchors', async () => {
+    const { extractTags } = await import('../src')
+    expect(extractTags('Plan #Robotics and #build-log, see https://x.com/a#top. C# rocks. Issue #1 (#FRC_2026)')).toEqual(['build-log', 'frc_2026', 'robotics'])
+    expect(extractTags('#start of line\n#Second line #second')).toEqual(['second', 'start'])
+  })
+})

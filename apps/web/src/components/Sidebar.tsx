@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   Settings as SettingsIcon,
   Trash2,
+  Hash,
 } from 'lucide-react'
 import {
   buildTree,
@@ -27,7 +28,12 @@ import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { SyncBadge } from './SyncBadge'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 
-export type View = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder'; folderId: string } | { kind: 'search'; query: string }
+export type View =
+  | { kind: 'all' }
+  | { kind: 'trash' }
+  | { kind: 'folder'; folderId: string }
+  | { kind: 'search'; query: string }
+  | { kind: 'tag'; tag: string }
 
 interface Props {
   /** shown floating over the notes list (medium screens) */
@@ -88,6 +94,12 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
   }, [ws.notes])
   const liveCount = ws.notes.filter((n) => !n.trashedAt).length
   const trashCount = ws.notes.filter((n) => n.trashedAt).length
+  // #tags used in notes, with how many notes use each
+  const tags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of ws.notes) if (!n.trashedAt) for (const t of n.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+    return [...counts].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [ws.notes])
 
   const toggle = (id: string) => {
     const next = { ...collapsed, [id]: !collapsed[id] }
@@ -278,6 +290,23 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
           {renderNodes(tree, 0)}
         </ul>
         {!tree.length && ws.loaded && <p className="empty-hint">No folders yet. Create one with the + button.</p>}
+        {tags.length > 0 && (
+          <>
+            <div className="section-label">Tags</div>
+            <ul className="tag-list">
+              {tags.map(([tag, count]) => (
+                <li
+                  key={tag}
+                  className={`folder-row tag-row${view.kind === 'tag' && view.tag === tag ? ' active' : ''}`}
+                  onClick={() => onView({ kind: 'tag', tag })}
+                >
+                  <Hash size={15} /> <span className="folder-name">{tag}</span>
+                  <span className="count">{count}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         <div
           className={`folder-row special${view.kind === 'trash' ? ' active' : ''}`}
           onClick={() => onView({ kind: 'trash' })}

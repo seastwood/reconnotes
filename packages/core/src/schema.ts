@@ -59,6 +59,8 @@ export interface NoteData {
   updatedAt: number
   pinned: boolean
   trashedAt: number | null
+  /** #tags found in the note (lower case, without #) */
+  tags: string[]
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -99,6 +101,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     updatedAt: (m.get('updatedAt') as number) ?? 0,
     pinned: Boolean(m.get('pinned')),
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
+    tags: (m.get('tags') as string[] | undefined) ?? [],
   }
 }
 

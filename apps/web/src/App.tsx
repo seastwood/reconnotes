@@ -212,6 +212,11 @@ export function App() {
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
               initialFind={findOnOpen?.noteId === nav.noteId ? findOnOpen : undefined}
+              onOpenTag={(tag) => {
+                setNav({ ...nav, view: { kind: 'tag', tag } })
+                if (narrow) setPane('list')
+                else if (layout === 1) setLayout(2)
+              }}
             />
           ) : (
             <div className="no-note">

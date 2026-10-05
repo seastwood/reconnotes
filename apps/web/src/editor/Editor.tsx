@@ -17,6 +17,7 @@ import { settings } from '../lib/settings'
 import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
 import { FindBar } from './FindBar'
+import { Hashtags } from './hashtags'
 
 interface Props {
   noteId: string
@@ -27,12 +28,26 @@ interface Props {
   /** iPad/desktop: cycle folders / notes / full-screen note */
   onTogglePanels?: () => void
   fullScreen?: boolean
+  /** show the notes with this #tag */
+  onOpenTag?: (tag: string) => void
   /** show the find bar with this text (a note opened from search results; `n` changes on every open) */
   initialFind?: { query: string; n: number }
 }
 
-export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind }: Props) {
+export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
+  /** a tapped #tag: offer to show the notes with it */
+  const [tagChip, setTagChip] = useState<{ tag: string; x: number; y: number } | null>(null)
+  useEffect(() => {
+    if (!tagChip) return
+    const hide = () => setTagChip(null)
+    const t = setTimeout(hide, 5000)
+    window.addEventListener('keydown', hide)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('keydown', hide)
+    }
+  }, [tagChip])
   useEffect(() => () => undoManager.destroy(), [undoManager])
   const ctx = useMemo(() => ({ doc, noteId }), [doc, noteId])
 
@@ -48,6 +63,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         TaskItem.configure({ nested: true }),
         DrawingNode,
         ImageNode,
+        Hashtags.configure({ onTagClick: (tag, rect) => setTagChip({ tag, x: rect.left, y: rect.bottom }) }),
         FindInNote.configure({
           // drawings, pictures and recordings are found by their recognised text
           transcriptOf: (node) => {
@@ -173,6 +189,19 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
           </div>
+          {tagChip && onOpenTag && (
+            <button
+              className="tag-chip-action"
+              style={{ left: Math.min(tagChip.x, window.innerWidth - 230), top: tagChip.y + 6 }}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setTagChip(null)
+                onOpenTag(tagChip.tag)
+              }}
+            >
+              Show notes tagged #{tagChip.tag}
+            </button>
+          )}
           <InkToolbar />
           <PencilPalette />
         </div>

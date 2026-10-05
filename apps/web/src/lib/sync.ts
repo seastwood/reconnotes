@@ -212,6 +212,8 @@ export class SyncManager {
       const meta = getNotes(ws).get(noteId)
       if (meta) {
         const patch: Record<string, unknown> = { title: ex.title, snippet: ex.snippet }
+        const oldTags = (meta.get('tags') as string[] | undefined) ?? []
+        if (oldTags.join('\u0000') !== ex.tags.join('\u0000')) patch.tags = ex.tags
         if (localChange) patch.updatedAt = Date.now()
         updateNote(ws, noteId, patch)
       }

@@ -68,11 +68,20 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
         sort === 'manual' ? 'manual' : sort,
       )
     if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt), sort)
+    if (view.kind === 'tag') return sortNotes(ws.notes.filter((n) => !n.trashedAt && n.tags.includes(view.tag)), 'updated')
     return []
   }, [ws.notes, view, sort, liveFolders])
 
   const title =
-    view.kind === 'all' ? 'All Notes' : view.kind === 'trash' ? 'Recently Deleted' : view.kind === 'search' ? 'Search' : (folder?.name ?? 'Folder')
+    view.kind === 'all'
+      ? 'All Notes'
+      : view.kind === 'trash'
+        ? 'Recently Deleted'
+        : view.kind === 'search'
+          ? 'Search'
+          : view.kind === 'tag'
+            ? `#${view.tag}`
+            : (folder?.name ?? 'Folder')
 
   const setSort = (m: SortMode) => {
     if (folder) updateFolder(workspaceDoc, folder.id, { sort: m })

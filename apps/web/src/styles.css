@@ -1666,3 +1666,32 @@ button.link {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ---------------------------------------------------------------- tags */
+.note-content .hashtag {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 5px;
+  padding: 0 3px;
+  margin: 0 -1px;
+}
+.tag-chip-action {
+  position: fixed;
+  z-index: 40;
+  padding: 7px 12px;
+  font-size: 14px;
+  color: var(--accent-text);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.tag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tag-row svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
