@@ -94,6 +94,42 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
             scrollView.contentOffset = .zero
         }
         webView.allowsLinkPreview = false
+        // No ˄ ˅ ✓ bar above the keyboard: it takes a lot of room and the app
+        // has its own Done/back buttons. WebKit can swap its content view, so
+        // check again whenever the keyboard is about to appear.
+        hideKeyboardAccessoryBar(in: webView)
+        NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let webView = self?.webView else { return }
+            self?.hideKeyboardAccessoryBar(in: webView)
+        }
+    }
+
+    // MARK: - Keyboard accessory bar
+
+    /// WebKit's content view supplies the form accessory bar through
+    /// `inputAccessoryView`. Give it a subclass that returns nil instead (the
+    /// same thing Capacitor's Keyboard plugin and Cordova do).
+    private func hideKeyboardAccessoryBar(in webView: WKWebView) {
+        for view in webView.scrollView.subviews where String(describing: type(of: view)).hasPrefix("WKContent") {
+            let base: AnyClass = type(of: view)
+            let baseName = String(cString: class_getName(base))
+            if baseName.hasSuffix("_NoAccessoryBar") { continue }
+            let name = baseName + "_NoAccessoryBar"
+            var subclass: AnyClass? = NSClassFromString(name)
+            if subclass == nil, let made = objc_allocateClassPair(base, name, 0) {
+                let selector = #selector(getter: UIResponder.inputAccessoryView)
+                let none: @convention(block) (AnyObject) -> AnyObject? = { _ in nil }
+                if let method = class_getInstanceMethod(base, selector) {
+                    class_addMethod(made, selector, imp_implementationWithBlock(none), method_getTypeEncoding(method))
+                }
+                objc_registerClassPair(made)
+                subclass = made
+            }
+            if let subclass = subclass {
+                object_setClass(view, subclass)
+                view.reloadInputViews()
+            }
+        }
     }
 
     // MARK: - Scribble

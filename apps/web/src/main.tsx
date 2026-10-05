@@ -20,9 +20,18 @@ pinToViewport()
  */
 function pinToViewport() {
   const vv = window.visualViewport
+  /** the tallest the visible area has been at this width (keyboard closed) */
+  const full = new Map<number, number>()
   const apply = () => {
     // not while pinch-zoomed: then the visible area is smaller on purpose
-    if (vv && Math.abs(vv.scale - 1) < 0.01) document.documentElement.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
+    if (vv && Math.abs(vv.scale - 1) < 0.01) {
+      document.documentElement.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
+      // the keyboard covers the home-indicator area, so bottom toolbars
+      // shouldn't keep their safe-area gap above it
+      const tallest = Math.max(full.get(window.innerWidth) ?? 0, vv.height, window.innerHeight)
+      full.set(window.innerWidth, tallest)
+      document.documentElement.classList.toggle('keyboard-open', tallest - vv.height > 150)
+    }
     if (window.scrollX || window.scrollY) window.scrollTo(0, 0)
   }
   vv?.addEventListener('resize', apply)

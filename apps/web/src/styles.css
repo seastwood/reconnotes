@@ -1161,6 +1161,9 @@ button.link {
   overflow-x: auto;
   scrollbar-width: none;
 }
+.keyboard-open .ink-toolbar {
+  bottom: 8px;
+}
 .ink-toolbar > button {
   width: 40px;
   height: 40px;
