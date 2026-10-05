@@ -2589,3 +2589,65 @@ li[data-checked='true'] .due-chip button {
   padding: 2px 4px;
   border-radius: 6px;
 }
+
+/* first-run tips */
+.tour {
+  position: relative;
+  width: min(440px, calc(100% - 32px));
+  padding: 28px 26px 20px;
+  border-radius: 20px;
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  text-align: center;
+  outline: none;
+}
+.tour h2 {
+  margin: 10px 0 12px;
+  font-size: 22px;
+}
+.tour p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.tour-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-text);
+}
+.tour-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.tour-dots {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin: 16px 0 14px;
+}
+.tour-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  cursor: pointer;
+}
+.tour-dots span.on {
+  background: var(--accent);
+}
+.tour-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tour-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

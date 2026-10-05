@@ -14,6 +14,7 @@ import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { CommandPalette } from './components/CommandPalette'
+import { Tour, shouldShowTour } from './components/Tour'
 import { registerCommands } from './lib/commands'
 import { createFolder, createNote, listNotes, updateNote } from '@reconnotes/core'
 import { pinNotes, trashNotes } from './lib/noteActions'
@@ -120,6 +121,7 @@ export function App() {
   const [overlay, setOverlay] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [tourOpen, setTourOpen] = useState(shouldShowTour)
   const [moving, setMoving] = useState<MoveTarget | null>(null)
 
   const setNav = (n: Nav) => {
@@ -290,6 +292,7 @@ export function App() {
       { id: 'due', label: 'Due items', section: G, keywords: 'reminders deadlines calendar', run: () => a().showView({ kind: 'due' }) },
       { id: 'templates', label: 'Templates', section: G, run: () => a().showView({ kind: 'templates' }) },
       { id: 'trash', label: 'Recently Deleted', section: G, keywords: 'trash bin', run: () => a().showView({ kind: 'trash' }) },
+      { id: 'tips', label: 'Show the tips again', section: 'App', keywords: 'help tour welcome how', run: () => setTourOpen(true) },
       { id: 'settings', label: 'Settings', section: 'App', keywords: 'preferences server backups devices export import', run: () => setSettingsOpen(true) },
       { id: 'theme-light', label: 'Light appearance', section: 'App', keywords: 'theme', run: () => a().setTheme('light') },
       { id: 'theme-dark', label: 'Dark appearance', section: 'App', keywords: 'theme night', run: () => a().setTheme('dark') },
@@ -388,6 +391,7 @@ export function App() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />
+      {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {paletteOpen && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}
