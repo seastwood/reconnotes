@@ -4,7 +4,6 @@ import StarterKit from '@tiptap/starter-kit'
 import Collaboration from '@tiptap/extension-collaboration'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
-import { Placeholder } from '@tiptap/extension-placeholder'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, newId } from '@reconnotes/core'
 import { DrawingNode, NoteContext } from '../drawing/DrawingNode'
@@ -15,6 +14,7 @@ import { AudioNode, FileNode, ImageNode, insertFiles } from './nodes'
 import { UndoContext, createUndoManager } from './undo'
 import { EditorToolbar } from './EditorToolbar'
 import { settings } from '../lib/settings'
+import { useInputDebugLog } from './debugInput'
 
 interface Props {
   noteId: string
@@ -42,7 +42,6 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
         TaskList,
         TaskItem.configure({ nested: true }),
-        Placeholder.configure({ placeholder: 'Start typing, or draw with Apple Pencil…' }),
         DrawingNode,
         ImageNode,
         AudioNode,
@@ -71,6 +70,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
   )
   const editorRef = useRef<TiptapEditor | null>(null)
   editorRef.current = editor
+  useInputDebugLog(editor)
 
   // Leave drawing mode when switching notes.
   useEffect(() => () => inkUi.set({ activeDrawing: null, palette: null }), [noteId])

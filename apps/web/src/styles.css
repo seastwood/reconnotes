@@ -690,8 +690,10 @@ button.text {
 .note-content ol {
   padding-left: 1.5em;
 }
-.note-content p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
+/* Placeholder for an empty note: pure CSS on the wrapper, so nothing in the
+   editable text changes when writing starts (that disturbs iPadOS Scribble). */
+.is-empty .note-content > p:first-child:last-child::before {
+  content: 'Start typing, or draw with Apple Pencil…';
   color: var(--muted);
   float: left;
   height: 0;

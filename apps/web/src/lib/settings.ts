@@ -18,6 +18,8 @@ export interface Settings {
   deviceOcrCleanup: boolean
   /** iOS app: quietly recognise drawings for search (never changes the note) */
   backgroundOcr: boolean
+  /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */
+  debugInput?: boolean
   /** settings format version, for one-off migrations */
   version?: number
 }

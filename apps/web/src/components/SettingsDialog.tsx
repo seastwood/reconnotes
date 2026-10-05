@@ -142,6 +142,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               toolbar.
             </p>
           )}
+          <label className="check">
+            <input type="checkbox" checked={Boolean(s.debugInput)} onChange={(e) => settings.set({ debugInput: e.target.checked })} />
+            Log typing and Scribble events (troubleshooting – shown in Xcode’s console as “[input]”)
+          </label>
           <p className="hint">
             Pencil double-tap follows your iPad setting (Settings › Apple Pencil). Squeezing an Apple Pencil Pro opens the tool palette with
             undo, tools and colours.
