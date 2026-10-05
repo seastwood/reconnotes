@@ -2495,3 +2495,97 @@ li[data-checked='true'] .due-chip button {
 .select-bar button.danger {
   color: var(--danger, #d33);
 }
+
+/* ⌘K command window */
+.palette-backdrop-k {
+  align-items: flex-start;
+  padding-top: max(10vh, calc(env(safe-area-inset-top) + 16px));
+}
+.command-palette {
+  width: min(620px, calc(100% - 24px));
+  max-height: min(70vh, calc(var(--app-height, 100vh) - 40px));
+  display: flex;
+  flex-direction: column;
+  background: var(--paper, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.cp-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.cp-input input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 17px;
+}
+.command-palette kbd {
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.cp-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+.cp-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.cp-list button.on {
+  background: var(--active);
+}
+.cp-icon {
+  flex: none;
+  color: var(--muted);
+}
+.cp-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-detail {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cp-empty {
+  padding: 14px;
+  color: var(--muted);
+}
+
+.search-commands {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: 6px;
+}

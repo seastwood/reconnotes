@@ -15,6 +15,7 @@ import {
   LayoutTemplate,
   CalendarDays,
   CloudDownload,
+  Command as CommandIcon,
 } from 'lucide-react'
 import {
   buildTree,
@@ -51,6 +52,8 @@ interface Props {
   view: View
   onView: (v: View) => void
   onSettings: () => void
+  /** open the ⌘K command window */
+  onCommands?: () => void
   onMoveFolder: (folderId: string) => void
 }
 
@@ -83,7 +86,7 @@ export function getDrag(e: React.DragEvent): DragPayload | null {
   }
 }
 
-export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFolder }: Props) {
+export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder }: Props) {
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
@@ -284,6 +287,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
             else if (view.kind === 'search') onView({ kind: 'all' })
           }}
         />
+        {onCommands && (
+          <button type="button" className="search-commands" onClick={onCommands} aria-label="Commands" title="Commands and quick jump (⌘K)">
+            <CommandIcon size={15} />
+          </button>
+        )}
       </form>
       <nav className="folders">
         <div className={`folder-row special${view.kind === 'all' ? ' active' : ''}`} onClick={() => onView({ kind: 'all' })}>

@@ -7,12 +7,18 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { MoveDialog, type MoveTarget } from './components/MoveDialog'
 import { NoteEditor } from './editor/Editor'
 import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
-import { useSettings } from './lib/settings'
+import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
+import { CommandPalette } from './components/CommandPalette'
+import { registerCommands } from './lib/commands'
+import { createFolder, createNote, listNotes, updateNote } from '@reconnotes/core'
+import { pinNotes, trashNotes } from './lib/noteActions'
+import { newNoteFromTemplate } from './lib/templates'
+import { isKeptOffline, setKeepOffline } from './lib/offline'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -113,6 +119,7 @@ export function App() {
   /** medium screens: the folder list slides over the notes */
   const [overlay, setOverlay] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [moving, setMoving] = useState<MoveTarget | null>(null)
 
   const setNav = (n: Nav) => {
@@ -240,6 +247,74 @@ export function App() {
     else setOverlay(!overlay)
   }
 
+  // ⌘K window: open it, and what it can do from anywhere
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const showView = (view: View) => {
+    setNav({ ...nav, view })
+    if (narrow) setPane('list')
+    else if (layout === 1) setLayout(2)
+  }
+  const appRef = useRef({ nav, showView, openNote, setTheme: (t: 'light' | 'dark' | 'system') => settings.set({ theme: t }) })
+  appRef.current = { nav, showView, openNote, setTheme: (t) => settings.set({ theme: t }) }
+  const templatesKey = ws.notes.filter((n) => n.template && !n.trashedAt).map((n) => `${n.id}:${n.title}`).join('|')
+  const openNoteMeta = note && !note.trashedAt ? note : null
+  useEffect(() => {
+    const a = () => appRef.current
+    const G = 'Go to'
+    const N = 'Notes'
+    const folderNow = () => (a().nav.view.kind === 'folder' ? (a().nav.view as { folderId: string }).folderId : null)
+    const commands = [
+      { id: 'new-note', label: 'New note', section: N, keywords: 'create add', run: () => a().openNote(createNote(workspaceDoc, { folderId: folderNow() })) },
+      {
+        id: 'new-folder',
+        label: 'New folder',
+        section: N,
+        run: () => {
+          const name = prompt('Folder name', 'New folder')
+          if (name) a().showView({ kind: 'folder', folderId: createFolder(workspaceDoc, { name }) })
+        },
+      },
+      ...listNotes(workspaceDoc)
+        .filter((n) => n.template && !n.trashedAt)
+        .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
+      { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
+      { id: 'due', label: 'Due items', section: G, keywords: 'reminders deadlines calendar', run: () => a().showView({ kind: 'due' }) },
+      { id: 'templates', label: 'Templates', section: G, run: () => a().showView({ kind: 'templates' }) },
+      { id: 'trash', label: 'Recently Deleted', section: G, keywords: 'trash bin', run: () => a().showView({ kind: 'trash' }) },
+      { id: 'settings', label: 'Settings', section: 'App', keywords: 'preferences server backups devices export import', run: () => setSettingsOpen(true) },
+      { id: 'theme-light', label: 'Light appearance', section: 'App', keywords: 'theme', run: () => a().setTheme('light') },
+      { id: 'theme-dark', label: 'Dark appearance', section: 'App', keywords: 'theme night', run: () => a().setTheme('dark') },
+      { id: 'theme-system', label: 'Match system appearance', section: 'App', keywords: 'theme auto', run: () => a().setTheme('system') },
+      { id: 'back', label: 'Back to the previous note', section: G, shortcut: '⌘[', run: () => void stepRef.current('back') },
+      { id: 'forward', label: 'Forward', section: G, shortcut: '⌘]', run: () => void stepRef.current('forward') },
+    ]
+    const vf = folderNow()
+    if (vf) {
+      const kept = isKeptOffline(vf)
+      if (kept !== 'parent')
+        commands.push({ id: 'offline', label: kept ? 'Stop keeping this folder offline' : 'Keep this folder offline on this device', section: N, keywords: 'download', run: () => setKeepOffline(vf, !kept) })
+    }
+    if (openNoteMeta) {
+      const id = openNoteMeta.id
+      commands.push(
+        { id: 'pin', label: openNoteMeta.pinned ? 'Unpin this note' : 'Pin this note', section: 'This note', keywords: 'top', run: () => pinNotes([id], !openNoteMeta.pinned) },
+        { id: 'move', label: 'Move this note to…', section: 'This note', keywords: 'folder', run: () => setMoving({ kind: 'note', id }) },
+        { id: 'delete', label: 'Delete this note', section: 'This note', keywords: 'trash remove', run: () => trashNotes([id]) },
+      )
+    }
+    return registerCommands('app', commands)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templatesKey, nav.view, openNoteMeta?.id, openNoteMeta?.pinned])
+
   return (
     <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}>
       {sidebarVisible && (
@@ -256,6 +331,7 @@ export function App() {
             }}
             onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
             onSettings={() => setSettingsOpen(true)}
+            onCommands={() => setPaletteOpen(true)}
             onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
           />
         </>
@@ -312,6 +388,19 @@ export function App() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />
+      {paletteOpen && (
+        <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          onOpenNote={openNote}
+          onOpenFolder={(folderId) => showView({ kind: 'folder', folderId })}
+          onOpenTag={(tag) => showView({ kind: 'tag', tag })}
+          onSearch={(query) => {
+            setNav({ ...nav, view: { kind: 'search', query } })
+            if (narrow) setPane('list')
+            else if (layout === 1) setLayout(2)
+          }}
+        />
+      )}
     </div>
   )
 }

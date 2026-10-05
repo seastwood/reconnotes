@@ -85,7 +85,7 @@ const TABLE_ACTIONS: ('-' | { label: string; run: (c: Chain) => Chain; danger?: 
   { label: 'Delete table', run: (c) => c.deleteTable(), danger: true, close: true },
 ]
 
-const STYLES: { key: StyleKey; label: string; className: string }[] = [
+export const STYLES: { key: StyleKey; label: string; className: string }[] = [
   { key: 'title', label: 'Title', className: 'st-title' },
   { key: 'heading', label: 'Heading', className: 'st-heading' },
   { key: 'subheading', label: 'Subheading', className: 'st-subheading' },
@@ -97,7 +97,7 @@ const STYLES: { key: StyleKey; label: string; className: string }[] = [
   { key: 'quote', label: '▍ Block quote', className: 'st-body' },
 ]
 
-function applyStyle(editor: Editor, key: StyleKey) {
+export function applyStyle(editor: Editor, key: StyleKey) {
   const c = editor.chain().focus()
   switch (key) {
     case 'title':

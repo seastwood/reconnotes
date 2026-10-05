@@ -13,7 +13,10 @@ import { PencilPalette } from '../drawing/PencilPalette'
 import { inkUi } from '../drawing/toolState'
 import { AudioNode, FileNode, ImageNode, insertFiles } from './nodes'
 import { UndoContext, createUndoManager } from './undo'
-import { EditorToolbar } from './EditorToolbar'
+import { EditorToolbar, STYLES, applyStyle } from './EditorToolbar'
+import { registerCommands } from '../lib/commands'
+import { compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
+import { saveAsTemplate } from '../lib/templates'
 import { settings } from '../lib/settings'
 import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
@@ -46,6 +49,8 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
   const [historyOpen, setHistoryOpen] = useState(false)
   const onFollowLinkRef = useRef(onFollowLink)
   onFollowLinkRef.current = onFollowLink
+  const onOpenNoteRef = useRef(onOpenNote)
+  onOpenNoteRef.current = onOpenNote
   /** the [[ link picker: where it is, and what it replaces */
   const [picker, setPicker] = useState<{ x: number; y: number; top: number; range: { from: number; to: number } | null } | null>(null)
   const editorForPicker = useRef<TiptapEditor | null>(null)
@@ -152,6 +157,31 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // ⌘K: what can be done to this note
+  const folderRef = useRef(folderId)
+  folderRef.current = folderId
+  useEffect(() => {
+    if (!editor) return
+    const c = () => editor.chain().focus()
+    const S = 'This note'
+    return registerCommands('editor', [
+      { id: 'find', label: 'Find in note', section: S, shortcut: '⌘F', keywords: 'search replace', run: () => openFindRef.current() },
+      { id: 'drawing', label: 'Add drawing', section: S, keywords: 'pen handwriting sketch ink', run: () => c().insertDrawing().run() },
+      { id: 'table', label: 'Insert table', section: S, keywords: 'grid rows columns', run: () => c().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
+      { id: 'checklist', label: 'Checklist', section: S, keywords: 'todo task list', run: () => c().toggleTaskList().run() },
+      { id: 'link', label: 'Link to another note', section: S, keywords: '[[ reference', run: () => openLinkPicker(null) },
+      ...STYLES.map((st) => ({ id: `style-${st.key}`, label: `Style: ${st.label.replace(/^[^A-Za-z0-9]+/, '')}`, section: S, run: () => applyStyle(editor, st.key) })),
+      { id: 'history', label: 'Version history', section: S, keywords: 'restore earlier undo', run: () => setHistoryOpen(true) },
+      { id: 'print', label: 'Print or save as PDF', section: S, keywords: 'share pdf export', run: () => void printNote(editor, doc, noteId) },
+      { id: 'convert', label: 'Convert all handwriting to text', section: S, keywords: 'ocr recognise', run: () => void convertAllHandwriting(editor, noteId) },
+      { id: 'summary', label: 'Summarise with AI', section: S, keywords: 'summary ai', run: () => void noteAction(editor, noteId, 'summary').catch((e) => alert((e as Error).message)) },
+      { id: 'todos', label: 'Extract to-dos with AI', section: S, keywords: 'tasks ai', run: () => void noteAction(editor, noteId, 'todos').catch((e) => alert((e as Error).message)) },
+      { id: 'compile', label: 'Compile into a clean document with AI', section: S, keywords: 'ai tidy', run: () => void compileNote(editor, noteId, folderRef.current).then((id) => onOpenNoteRef.current(id)).catch((e) => alert((e as Error).message)) },
+      { id: 'template', label: 'Save as template', section: S, run: () => void saveAsTemplate(noteId) },
+    ])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, noteId, doc])
 
   // Leave drawing mode when switching notes.
   useEffect(() => () => inkUi.set({ activeDrawing: null, palette: null }), [noteId])
