@@ -133,7 +133,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             When the Pencil touches typed text
             <select value={s.pencilInText} onChange={(e) => settings.set({ pencilInText: e.target.value as PencilInTextMode })}>
               <option value="draw">Start a drawing there</option>
-              <option value="scribble">Use iPadOS Scribble (writing on text becomes typed text; drawings stay ink)</option>
+              <option value="scribble">Use iPadOS Scribble (writing on text becomes typed text; off while editing a drawing)</option>
             </select>
           </label>
           <p className="hint">

@@ -86,6 +86,10 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
    * iPadOS Scribble, which turns handwriting into typed text).
    */
   const onPointerDownCapture = (e: React.PointerEvent) => {
+    // Touching the text (not a drawing) ends drawing mode, which also lets
+    // iPadOS Scribble work there again.
+    if (inkUi.get().activeDrawing && (e.target as HTMLElement).closest('.ProseMirror') && !(e.target as HTMLElement).closest('.drawing-block'))
+      inkUi.set({ activeDrawing: null, palette: null })
     if (e.pointerType !== 'pen' || !editor) return
     inkUi.set({ pencilSeen: true })
     const target = e.target as HTMLElement
