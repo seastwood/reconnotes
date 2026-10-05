@@ -19,6 +19,113 @@ export interface DueItem {
   text: string
   /** the checklist item is ticked */
   done: boolean
+  /** repeats: when ticked it moves to the next date instead (see Repeat) */
+  repeat?: Repeat | null
+}
+
+/** How a due date repeats. */
+export type Repeat = 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly' | 'yearly'
+
+export const REPEAT_LABELS: Record<Repeat, string> = {
+  daily: 'Every day',
+  weekdays: 'Every weekday',
+  weekly: 'Every week',
+  biweekly: 'Every 2 weeks',
+  monthly: 'Every month',
+  yearly: 'Every year',
+}
+
+/**
+ * "every monday", "every day", "daily", "weekly", "every 2 weeks",
+ * "monthly", "every month", "yearly", "every weekday": the first date and
+ * how it repeats. Null if it isn't a repeat.
+ */
+export function parseRepeat(word: string, now = new Date()): { date: string; repeat: Repeat } | null {
+  const w = word.trim().toLowerCase().replace(/\s+/g, ' ')
+  const today = isoDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
+  const simple: Record<string, Repeat> = {
+    daily: 'daily',
+    'every day': 'daily',
+    weekdays: 'weekdays',
+    'every weekday': 'weekdays',
+    weekly: 'weekly',
+    'every week': 'weekly',
+    biweekly: 'biweekly',
+    fortnightly: 'biweekly',
+    'every 2 weeks': 'biweekly',
+    'every other week': 'biweekly',
+    monthly: 'monthly',
+    'every month': 'monthly',
+    yearly: 'yearly',
+    annually: 'yearly',
+    'every year': 'yearly',
+  }
+  if (simple[w]) {
+    const repeat = simple[w]
+    // weekdays starting on a weekend: the next Monday
+    return { date: repeat === 'weekdays' ? nextDue(today, 'weekdays', addDays(today, -1)) : today, repeat }
+  }
+  const m = /^every (\S+)$/.exec(w)
+  if (m) {
+    const date = parseDue(m[1], now)
+    if (date && DAYS.some((d) => d.startsWith(m[1]) && m[1].length >= 3)) return { date, repeat: 'weekly' }
+  }
+  return null
+}
+
+function addDays(date: string, n: number): string {
+  const [y, m, d] = date.split('-').map(Number)
+  return isoDate(new Date(y, m - 1, d + n))
+}
+
+function addMonths(date: string, n: number, anchorDay: number): string {
+  const [y, m] = date.split('-').map(Number)
+  const first = new Date(y, m - 1 + n, 1)
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+  return isoDate(new Date(first.getFullYear(), first.getMonth(), Math.min(anchorDay, last)))
+}
+
+/** The date after `date` in the repeat. */
+function step(date: string, repeat: Repeat, anchorDay: number): string {
+  switch (repeat) {
+    case 'daily':
+      return addDays(date, 1)
+    case 'weekdays': {
+      let next = addDays(date, 1)
+      while ([0, 6].includes(new Date(next + 'T12:00').getDay())) next = addDays(next, 1)
+      return next
+    }
+    case 'weekly':
+      return addDays(date, 7)
+    case 'biweekly':
+      return addDays(date, 14)
+    case 'monthly':
+      return addMonths(date, 1, anchorDay)
+    case 'yearly':
+      return addMonths(date, 12, anchorDay)
+  }
+}
+
+/**
+ * The next date of a repeating item that is due on `date`: the first one
+ * after both `date` and `after` (normally today), so finishing late skips
+ * the dates already missed. Monthly/yearly keep the day of the month
+ * (the 31st becomes the last day of shorter months).
+ */
+export function nextDue(date: string, repeat: Repeat, after: string = isoDate(new Date())): string {
+  const anchor = Number(date.split('-')[2])
+  let next = step(date, repeat, anchor)
+  for (let i = 0; next <= after && i < 5000; i++) next = step(next, repeat, anchor)
+  return next
+}
+
+/** Dates of a repeating item that fall in [from, to] (for calendars). */
+export function occurrences(date: string, repeat: Repeat | null | undefined, from: string, to: string): string[] {
+  if (!repeat) return date >= from && date <= to ? [date] : []
+  const anchor = Number(date.split('-')[2])
+  const out: string[] = []
+  for (let d = date, i = 0; d <= to && i < 2000; d = step(d, repeat, anchor), i++) if (d >= from) out.push(d)
+  return out
 }
 
 const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
@@ -95,7 +202,9 @@ export function extractDue(doc: Y.Doc): DueItem[] {
       if (c.nodeName === 'dueDate') {
         const date = c.getAttribute('date') as string | undefined
         const id = c.getAttribute('id') as string | undefined
-        if (date && id) out.push({ id, date, done: item?.done ?? false, text: (item ? textOf(item.el) : textOf(el)).replace(/\s+/g, ' ').trim() })
+        const repeat = (c.getAttribute('repeat') as Repeat | undefined) ?? null
+        if (date && id)
+          out.push({ id, date, done: item?.done ?? false, text: (item ? textOf(item.el) : textOf(el)).replace(/\s+/g, ' ').trim(), ...(repeat ? { repeat } : {}) })
         continue
       }
       const checked = c.getAttribute('checked') as unknown
@@ -124,4 +233,32 @@ export function setDueDone(doc: Y.Doc, dueId: string, done: boolean): boolean {
   }
   doc.transact(() => walk(getContent(doc), null))
   return found
+}
+
+/**
+ * Finish a due item: a repeating one moves on to its next date (and stays
+ * unticked); any other is ticked. Returns the next date for a repeating item.
+ */
+export function completeDue(doc: Y.Doc, dueId: string, now = new Date()): string | null {
+  let next: string | null = null
+  const walk = (el: Y.XmlElement | Y.XmlFragment): boolean => {
+    for (const c of el.toArray()) {
+      if (!(c instanceof Y.XmlElement)) continue
+      if (c.nodeName === 'dueDate' && c.getAttribute('id') === dueId) {
+        const repeat = c.getAttribute('repeat') as Repeat | undefined
+        if (repeat) {
+          next = nextDue(c.getAttribute('date') as string, repeat, isoDate(now))
+          c.setAttribute('date', next)
+        }
+        return true
+      }
+      if (walk(c)) return true
+    }
+    return false
+  }
+  doc.transact(() => {
+    walk(getContent(doc))
+    if (!next) setDueDone(doc, dueId, true)
+  })
+  return next
 }

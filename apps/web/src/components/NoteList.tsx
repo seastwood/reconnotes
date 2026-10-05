@@ -387,7 +387,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             )}
           </NoteRow>
         ))}
-        {view.kind !== 'search' && !notes.length && !trashedFolders.length && (
+        {view.kind !== 'search' && view.kind !== 'due' && !notes.length && !trashedFolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
         )}
         {view.kind === 'folder' && notes.length > 0 && (
