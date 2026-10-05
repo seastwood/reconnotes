@@ -2328,3 +2328,170 @@ li[data-checked='true'] .due-chip button {
   background: color-mix(in srgb, var(--muted) 12%, transparent);
   user-select: all;
 }
+
+/* folders kept offline on this device */
+.offline-mark {
+  display: inline-flex;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.offline-mark.busy {
+  color: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* toast with Undo */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 16px;
+  border-radius: 14px;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  animation: toast-in 0.18s ease-out;
+}
+.toast .icon {
+  color: inherit;
+  opacity: 0.7;
+}
+.toast-undo {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 8px;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
+/* note rows: swipe actions and select mode */
+.note-row.swipe-row {
+  padding: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+.swipe-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  position: relative;
+  border-radius: inherit;
+}
+.note-row.active .swipe-content {
+  background: var(--active);
+}
+.swipe-content.settle {
+  transition: transform 0.2s ease;
+}
+.swipe-body {
+  flex: 1;
+  min-width: 0;
+}
+.swipe-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+}
+.swipe-actions button {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.swipe-move {
+  background: #5b6cf0;
+}
+.swipe-pin-btn {
+  background: #f0a020;
+}
+.swipe-delete {
+  background: #e5484d;
+}
+.swipe-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0a020;
+  color: #fff;
+}
+.select-tick {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.select-tick.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.note-row.selected .swipe-content {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+.list-head .icon.on {
+  color: var(--accent-text);
+}
+.note-list {
+  position: relative;
+}
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  overflow-x: auto;
+}
+.select-bar button.text {
+  white-space: nowrap;
+}
+.select-bar .spacer {
+  flex: 1;
+}
+.select-bar button:not(.text) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.select-bar button.danger {
+  color: var(--danger, #d33);
+}

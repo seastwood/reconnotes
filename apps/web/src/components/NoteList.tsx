@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -22,6 +22,8 @@ import { DueList } from './DueList'
 import { AskPanel } from './AskPanel'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
+import { NoteRow } from './NoteRow'
+import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 
 interface Props {
   view: View
@@ -31,6 +33,8 @@ interface Props {
   /** show/hide the folders panel (iPad and desktop) */
   onToggleFolders?: () => void
   onMoveNote: (id: string) => void
+  /** move several notes (pick a folder) */
+  onMoveNotes: (ids: string[]) => void
 }
 
 function formatDate(ts: number) {
@@ -42,7 +46,7 @@ function formatDate(ts: number) {
   return d.toLocaleDateString()
 }
 
-export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote }: Props) {
+export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote, onMoveNotes }: Props) {
   const ws = useWorkspace()
   const [results, setResults] = useState<SearchResult[] | null>(null)
   /** "Ask your notes" for the current search text */
@@ -50,6 +54,22 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
+  /** select mode: several notes at once */
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const lastPicked = useRef<string | null>(null)
+  const stopSelecting = () => {
+    setSelecting(false)
+    setSelected(new Set())
+  }
+  // a different list: start over
+  useEffect(() => stopSelecting(), [view.kind, view.kind === 'folder' ? view.folderId : view.kind === 'tag' ? view.tag : ''])
+  useEffect(() => {
+    if (!selecting) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && stopSelecting()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selecting])
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
   const folder = view.kind === 'folder' ? ws.folders.find((f) => f.id === view.folderId) : undefined
@@ -134,6 +154,37 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
   }
 
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
+  const canSelect = notes.length > 0 && view.kind !== 'search' && view.kind !== 'due'
+  const ids = [...selected].filter((id) => notes.some((n) => n.id === id))
+
+  const clickRow = (e: React.MouseEvent, n: NoteData) => {
+    const toggle = selecting || e.metaKey || e.ctrlKey
+    if (e.shiftKey && (selecting || noteId)) {
+      // a range, from the last picked (or open) note to this one
+      const from = notes.findIndex((x) => x.id === (lastPicked.current ?? noteId))
+      const to = notes.findIndex((x) => x.id === n.id)
+      if (from >= 0 && to >= 0) {
+        const next = new Set(selected)
+        for (const x of notes.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(x.id)
+        setSelected(next)
+        setSelecting(true)
+        lastPicked.current = n.id
+        return
+      }
+    }
+    if (toggle) {
+      const next = new Set(selected)
+      // ⌘-click with nothing selected yet: start from the open note too
+      if (!selecting && noteId && noteId !== n.id && notes.some((x) => x.id === noteId)) next.add(noteId)
+      if (next.has(n.id)) next.delete(n.id)
+      else next.add(n.id)
+      setSelected(next)
+      setSelecting(true)
+      lastPicked.current = n.id
+      return
+    }
+    if (view.kind !== 'trash') onOpen(n.id)
+  }
 
   return (
     <section
@@ -165,7 +216,17 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             <PanelLeft size={20} />
           </button>
         )}
-        <h2>{title}</h2>
+        <h2>{selecting ? (selected.size ? `${selected.size} selected` : 'Select notes') : title}</h2>
+        {canSelect && (
+          <button
+            className={`icon${selecting ? ' on' : ''}`}
+            onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+            aria-label={selecting ? 'Done selecting' : 'Select notes'}
+            title={selecting ? 'Done (Esc)' : 'Select several notes (or ⌘-click / Shift-click)'}
+          >
+            <CircleCheck size={19} />
+          </button>
+        )}
         {view.kind !== 'search' && view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && (
           <div className="menu-anchor">
             <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
@@ -267,20 +328,29 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
         ))}
 
         {notes.map((n, i) => (
-          <li
+          <NoteRow
             key={n.id}
-            className={`note-row${n.id === noteId ? ' active' : ''}${dropAt === n.id ? ' drop-before' : ''}`}
+            id={n.id}
+            className={`note-row${n.id === noteId && !selecting ? ' active' : ''}${dropAt === n.id ? ' drop-before' : ''}`}
+            pinned={n.pinned}
+            selecting={selecting}
+            selected={selected.has(n.id)}
             draggable={view.kind !== 'trash'}
-            onDragStart={(e) => setDrag(e, { kind: 'note', id: n.id })}
-            onDragOver={(e) => {
-              if (view.kind === 'folder') {
-                e.preventDefault()
-                setDropAt(n.id)
-              }
+            onClick={(e) => clickRow(e, n)}
+            onPin={() => pinNotes([n.id], !n.pinned)}
+            onMove={() => onMoveNote(n.id)}
+            onDelete={() => (view.kind === 'trash' ? confirm('Delete this note permanently?') && deleteNoteForever(workspaceDoc, n.id) : trashNotes([n.id]))}
+            liProps={{
+              onDragStart: (e) => setDrag(e, { kind: 'note', id: n.id, ids: selected.has(n.id) && selected.size > 1 ? ids : undefined }),
+              onDragOver: (e) => {
+                if (view.kind === 'folder') {
+                  e.preventDefault()
+                  setDropAt(n.id)
+                }
+              },
+              onDragLeave: () => setDropAt(null),
+              onDrop: (e) => onDropNote(e, n, i),
             }}
-            onDragLeave={() => setDropAt(null)}
-            onDrop={(e) => onDropNote(e, n, i)}
-            onClick={() => view.kind !== 'trash' && onOpen(n.id)}
           >
             <div className="note-title">
               {n.pinned && <Pin size={12} className="pin" />} {n.file && <FileText size={14} className="file-mark" />} {n.title || 'New Note'}
@@ -293,12 +363,12 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
                   : n.snippet || 'No additional text'}
               </span>
             </div>
-            {view.kind === 'trash' ? (
+            {selecting ? null : view.kind === 'trash' ? (
               <div className="row-actions">
-                <button onClick={() => updateNote(workspaceDoc, n.id, { trashedAt: null })}>
+                <button onClick={(e) => (e.stopPropagation(), restoreNotes([n.id]))}>
                   <RotateCcw size={14} /> Restore
                 </button>
-                <button className="danger" onClick={() => confirm('Delete this note permanently?') && deleteNoteForever(workspaceDoc, n.id)}>
+                <button className="danger" onClick={(e) => (e.stopPropagation(), confirm('Delete this note permanently?') && deleteNoteForever(workspaceDoc, n.id))}>
                   <Trash2 size={14} /> Delete
                 </button>
               </div>
@@ -307,15 +377,15 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
                 <button onClick={(e) => (e.stopPropagation(), onMoveNote(n.id))} aria-label="Move note">
                   <FolderInput size={14} />
                 </button>
-                <button onClick={(e) => (e.stopPropagation(), updateNote(workspaceDoc, n.id, { pinned: !n.pinned }))} aria-label="Pin">
+                <button onClick={(e) => (e.stopPropagation(), pinNotes([n.id], !n.pinned))} aria-label="Pin">
                   <Pin size={14} />
                 </button>
-                <button onClick={(e) => (e.stopPropagation(), updateNote(workspaceDoc, n.id, { trashedAt: Date.now() }))} aria-label="Delete">
+                <button onClick={(e) => (e.stopPropagation(), trashNotes([n.id]))} aria-label="Delete">
                   <Trash2 size={14} />
                 </button>
               </div>
             )}
-          </li>
+          </NoteRow>
         ))}
         {view.kind !== 'search' && !notes.length && !trashedFolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
@@ -324,6 +394,59 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
           <li className="drop-end" onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDropNote(e, notes[notes.length - 1], -1)} />
         )}
       </ul>
+      {selecting && (
+        <div className="select-bar">
+          <button className="text" onClick={() => setSelected(selected.size === notes.length ? new Set() : new Set(notes.map((n) => n.id)))}>
+            {selected.size === notes.length ? 'Select none' : 'Select all'}
+          </button>
+          <span className="spacer" />
+          {view.kind === 'trash' ? (
+            <>
+              <button disabled={!ids.length} onClick={() => (restoreNotes(ids), stopSelecting())}>
+                <RotateCcw size={16} /> Restore
+              </button>
+              <button
+                className="danger"
+                disabled={!ids.length}
+                onClick={() => {
+                  if (!confirm(`Permanently delete ${ids.length} note${ids.length === 1 ? '' : 's'}?`)) return
+                  ids.forEach((id) => deleteNoteForever(workspaceDoc, id))
+                  stopSelecting()
+                }}
+              >
+                <Trash2 size={16} /> Delete
+              </button>
+            </>
+          ) : (
+            <>
+              <button disabled={!ids.length} onClick={() => (onMoveNotes(ids), stopSelecting())} title="Move to a folder">
+                <FolderInput size={16} /> Move
+              </button>
+              <button
+                disabled={!ids.length}
+                onClick={() => {
+                  const allPinned = ids.every((id) => notes.find((n) => n.id === id)?.pinned)
+                  pinNotes(ids, !allPinned)
+                }}
+              >
+                <Pin size={16} /> {ids.length && ids.every((id) => notes.find((n) => n.id === id)?.pinned) ? 'Unpin' : 'Pin'}
+              </button>
+              <button
+                disabled={!ids.length}
+                onClick={() => {
+                  const tag = prompt('Add a tag to the selected notes', '')
+                  if (tag) void tagNotes(ids, tag)
+                }}
+              >
+                <Hash size={16} /> Tag
+              </button>
+              <button className="danger" disabled={!ids.length} onClick={() => (trashNotes(ids), stopSelecting())}>
+                <Trash2 size={16} /> Delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </section>
   )
 }

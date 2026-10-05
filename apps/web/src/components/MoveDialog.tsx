@@ -1,10 +1,13 @@
 import { useMemo } from 'react'
 import { Folder, Inbox, X } from 'lucide-react'
-import { buildTree, descendantFolderIds, moveFolder, moveNote, type TreeNode } from '@reconnotes/core'
+import { buildTree, descendantFolderIds, moveFolder, type TreeNode } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
+import { moveNotes } from '../lib/noteActions'
 
 /** Pick a destination folder (touch-friendly alternative to drag and drop). */
-export function MoveDialog({ target, onClose }: { target: { kind: 'note' | 'folder'; id: string }; onClose: () => void }) {
+export type MoveTarget = { kind: 'note' | 'folder'; id: string } | { kind: 'notes'; ids: string[] }
+
+export function MoveDialog({ target, onClose }: { target: MoveTarget; onClose: () => void }) {
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const blocked = useMemo(
@@ -12,7 +15,8 @@ export function MoveDialog({ target, onClose }: { target: { kind: 'note' | 'fold
     [ws.folders, target],
   )
   const choose = (folderId: string | null) => {
-    if (target.kind === 'note') moveNote(workspaceDoc, target.id, folderId)
+    if (target.kind === 'note') moveNotes([target.id], folderId)
+    else if (target.kind === 'notes') moveNotes(target.ids, folderId)
     else moveFolder(workspaceDoc, target.id, folderId)
     onClose()
   }
@@ -29,14 +33,14 @@ export function MoveDialog({ target, onClose }: { target: { kind: 'note' | 'fold
     <div className="dialog-backdrop" onClick={onClose}>
       <div className="dialog" onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2>Move {target.kind} to…</h2>
+          <h2>Move {target.kind === 'notes' ? `${target.ids.length} notes` : target.kind} to…</h2>
           <button className="icon" onClick={onClose} aria-label="Close">
             <X size={20} />
           </button>
         </header>
         <div className="move-list">
           <button className="move-row" onClick={() => choose(null)}>
-            <Inbox size={16} /> {target.kind === 'note' ? 'No folder' : 'Top level'}
+            <Inbox size={16} /> {target.kind === 'folder' ? 'Top level' : 'No folder'}
           </button>
           {render(tree, 0)}
         </div>

@@ -14,6 +14,7 @@ import {
   Hash,
   LayoutTemplate,
   CalendarDays,
+  CloudDownload,
 } from 'lucide-react'
 import {
   buildTree,
@@ -28,6 +29,8 @@ import {
   daysUntil,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
+import { isKeptOffline, setKeepOffline, useOffline } from '../lib/offline'
+import { moveNotes, trashNotes } from '../lib/noteActions'
 import { SyncBadge } from './SyncBadge'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 
@@ -63,6 +66,8 @@ const DND_TYPE = 'application/x-reconnotes'
 export interface DragPayload {
   kind: 'folder' | 'note'
   id: string
+  /** several selected notes dragged together */
+  ids?: string[]
 }
 
 export function setDrag(e: React.DragEvent, p: DragPayload) {
@@ -85,6 +90,8 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  const offlineFolders = useOffline((s) => s.folders)
+  const offlineProgress = useOffline((s) => s.progress)
   const menuAnchor = useRef<HTMLElement | null>(null)
   const openMenu = (id: string, el: HTMLElement) => {
     menuAnchor.current = el
@@ -127,7 +134,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
     setDropHint(null)
     const p = getDrag(e)
     if (!p) return
-    if (p.kind === 'note') return moveNote(workspaceDoc, p.id, node.folder.id)
+    if (p.kind === 'note') return moveNotes(p.ids ?? [p.id], node.folder.id)
     if (p.id === node.folder.id) return
     if (where === 'inside') return void moveFolder(workspaceDoc, p.id, node.folder.id)
     // reorder among siblings: switch the parent to manual sort
@@ -195,6 +202,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
                 {f.name}
               </span>
             )}
+            {offlineFolders.includes(f.id) && (
+              <span className={`offline-mark${offlineProgress ? ' busy' : ''}`} title={offlineProgress ? `Downloading for offline: ${offlineProgress.done} of ${offlineProgress.total}` : 'Kept offline on this device'}>
+                <CloudDownload size={13} />
+              </span>
+            )}
             <span className="count">{counts[f.id] ?? ''}</span>
             <button
               className="row-menu"
@@ -211,6 +223,18 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
                 <button onClick={() => newFolder(f.id)}>New subfolder</button>
                 <button onClick={() => setRenaming(f.id)}>Rename</button>
                 <button onClick={() => onMoveFolder(f.id)}>Move to…</button>
+                {isKeptOffline(f.id) !== 'parent' && (
+                  <button
+                    className={offlineFolders.includes(f.id) ? 'checked' : ''}
+                    title="Download every picture, recording and file in this folder to this device, so they open without a connection"
+                    onClick={() => {
+                      setKeepOffline(f.id, !offlineFolders.includes(f.id))
+                      setMenuFor(null)
+                    }}
+                  >
+                    Keep offline on this device
+                  </button>
+                )}
                 <div className="menu-label">Sort subfolders &amp; notes by</div>
                 {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
                   <button key={m} className={f.sort === m ? 'checked' : ''} onClick={() => updateFolder(workspaceDoc, f.id, { sort: m })}>
@@ -337,6 +361,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
           onDrop={(e) => {
             const p = getDrag(e)
             if (p?.kind === 'folder') trashFolder(workspaceDoc, p.id)
+            else if (p?.kind === 'note') trashNotes(p.ids ?? [p.id])
           }}
         >
           <Trash2 size={16} /> <span className="folder-name">Recently Deleted</span>

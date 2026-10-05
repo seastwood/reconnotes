@@ -45,6 +45,7 @@ import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
+import { trashNotes } from '../lib/noteActions'
 import { Capacitor } from '@capacitor/core'
 
 const isNativeApp = Capacitor.isNativePlatform()
@@ -400,7 +401,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             <button onClick={exportMarkdown}>
               <Download size={16} /> Export Markdown
             </button>
-            <button className="danger" onClick={() => updateNote(workspaceDoc, noteId, { trashedAt: Date.now() })}>
+            <button className="danger" onClick={() => trashNotes([noteId])}>
               <Trash2 size={16} /> Move to Trash
             </button>
         </Popover>

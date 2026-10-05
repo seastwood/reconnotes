@@ -4,7 +4,7 @@ import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
 import { NoteList } from './components/NoteList'
 import { SettingsDialog } from './components/SettingsDialog'
-import { MoveDialog } from './components/MoveDialog'
+import { MoveDialog, type MoveTarget } from './components/MoveDialog'
 import { NoteEditor } from './editor/Editor'
 import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { useSettings } from './lib/settings'
@@ -12,6 +12,7 @@ import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
+import { Toaster } from './components/Toaster'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -57,7 +58,7 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
         y: t.clientY,
         fromEdge: t.clientX <= EDGE,
         fromRight: t.clientX >= window.innerWidth - EDGE,
-        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]'),
+        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"], .swipe-row'),
         t: Date.now(),
       }
       if (!start.fromEdge && !start.fromRight && !start.onPanel) start = null
@@ -112,7 +113,7 @@ export function App() {
   /** medium screens: the folder list slides over the notes */
   const [overlay, setOverlay] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [moving, setMoving] = useState<{ kind: 'note' | 'folder'; id: string } | null>(null)
+  const [moving, setMoving] = useState<MoveTarget | null>(null)
 
   const setNav = (n: Nav) => {
     setNavState(n)
@@ -268,6 +269,7 @@ export function App() {
             onBack={narrow ? () => setPane('folders') : undefined}
             onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
+            onMoveNotes={(ids) => setMoving({ kind: 'notes', ids })}
           />
         </div>
       )}
@@ -309,6 +311,7 @@ export function App() {
       )}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
+      <Toaster />
     </div>
   )
 }
