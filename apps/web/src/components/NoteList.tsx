@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -20,6 +20,7 @@ import { searchNotes, type SearchResult } from '../lib/search'
 import { newNoteFromTemplate } from '../lib/templates'
 import { DueList } from './DueList'
 import { AskPanel } from './AskPanel'
+import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 
 interface Props {
@@ -103,6 +104,15 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
     if (view.kind === 'templates') updateNote(workspaceDoc, id, { template: true })
     onOpen(id)
   }
+  // Add files straight into the folder (each becomes an item holding the file)
+  const filesInput = useRef<HTMLInputElement>(null)
+  const canAddFiles = view.kind === 'folder' || view.kind === 'all'
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return
+    const ids = await addFilesToFolder(files, view.kind === 'folder' ? view.folderId : null)
+    if (ids.length === 1) onOpen(ids[0])
+  }
+  const [fileDrop, setFileDrop] = useState(false)
   const templates = useMemo(() => sortNotes(ws.notes.filter((n) => !n.trashedAt && n.template), 'title'), [ws.notes])
   const [templateMenu, setTemplateMenu] = useState(false)
   const templateBtn = useRef<HTMLButtonElement>(null)
@@ -126,7 +136,24 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
 
   return (
-    <section className="note-list">
+    <section
+      className={`note-list${fileDrop ? ' file-drop' : ''}`}
+      onDragOver={(e) => {
+        if (canAddFiles && e.dataTransfer.types.includes('Files')) {
+          e.preventDefault()
+          setFileDrop(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setFileDrop(false)
+      }}
+      onDrop={(e) => {
+        if (!canAddFiles || !e.dataTransfer.files.length) return
+        e.preventDefault()
+        setFileDrop(false)
+        void addFiles(Array.from(e.dataTransfer.files))
+      }}
+    >
       <header className="list-head">
         {onBack && (
           <button className="icon" onClick={onBack} aria-label="Back to folders">
@@ -183,6 +210,24 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
                 )}
               </div>
             )}
+            {canAddFiles && (
+              <>
+                <button className="icon" onClick={() => filesInput.current?.click()} aria-label="Add files" title="Add files (PDFs, documents, spreadsheets…)">
+                  <Paperclip size={19} />
+                </button>
+                <input
+                  ref={filesInput}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? [])
+                    e.target.value = ''
+                    void addFiles(files)
+                  }}
+                />
+              </>
+            )}
             <button className="icon primary" onClick={newNote} aria-label={view.kind === 'templates' ? 'New template' : 'New note'} title={view.kind === 'templates' ? 'New template' : 'New note'}>
               <SquarePen size={20} />
             </button>
@@ -238,10 +283,15 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             onClick={() => view.kind !== 'trash' && onOpen(n.id)}
           >
             <div className="note-title">
-              {n.pinned && <Pin size={12} className="pin" />} {n.title || 'New Note'}
+              {n.pinned && <Pin size={12} className="pin" />} {n.file && <FileText size={14} className="file-mark" />} {n.title || 'New Note'}
             </div>
             <div className="note-meta">
-              <span className="note-date">{formatDate(n.updatedAt)}</span> <span className="note-snippet">{n.snippet || 'No additional text'}</span>
+              <span className="note-date">{formatDate(n.updatedAt)}</span>{' '}
+              <span className="note-snippet">
+                {n.file
+                  ? [fileKind(n.file.name, n.file.mime), formatSize(n.file.size), n.snippet && n.snippet !== n.file.name ? n.snippet : ''].filter(Boolean).join(' · ')
+                  : n.snippet || 'No additional text'}
+              </span>
             </div>
             {view.kind === 'trash' ? (
               <div className="row-actions">

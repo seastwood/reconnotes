@@ -980,12 +980,10 @@ button.link {
   padding: 4px 0;
 }
 .file-block {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.file-block a {
-  color: var(--blue);
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 .file-indexed {
   margin-left: auto;
@@ -1753,6 +1751,8 @@ button.link {
 }
 .link-picker {
   position: fixed;
+  display: flex;
+  flex-direction: column;
   z-index: 50;
   width: 300px;
   max-width: calc(100vw - 16px);
@@ -1777,7 +1777,8 @@ button.link {
   list-style: none;
   margin: 6px 0 0;
   padding: 0;
-  max-height: 260px;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
 }
 .link-picker li button {
@@ -2030,4 +2031,102 @@ li[data-checked='true'] .due-chip button {
   padding: 4px 0;
   text-align: left;
   font-size: 14px;
+}
+
+.audio-transcript {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.audio-transcript-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.audio-transcript-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--accent-text);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  touch-action: manipulation;
+}
+
+/* ----------------------------------------------------------------- files */
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  line-height: 1.3;
+}
+.file-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+}
+.file-icon span {
+  position: absolute;
+  bottom: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.file-icon svg {
+  margin-bottom: 8px;
+}
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+.file-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+.file-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.file-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--accent-text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  touch-action: manipulation;
+}
+.note-row .file-mark {
+  color: var(--accent-text);
+  vertical-align: -2px;
+}
+.note-list.file-drop {
+  outline: 3px dashed var(--accent);
+  outline-offset: -6px;
 }

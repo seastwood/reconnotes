@@ -233,10 +233,16 @@ export async function convertImage(editor: Editor, attachmentId: string, insertA
  * and the only option in the web app. Returns the transcript (also kept with
  * the recording for search).
  */
-export async function transcribeAudio(editor: Editor, attachmentId: string, insertAt: () => number | undefined): Promise<string> {
-  let text = ''
+export async function transcribeAudio(
+  editor: Editor,
+  attachmentId: string,
+  insertAt: () => number | undefined,
+  /** a transcript the server already made (Whisper): usually the best one */
+  existing?: string | null,
+): Promise<string> {
+  let text = existing?.trim() ?? ''
   let deviceError: Error | null = null
-  if (useDeviceSpeech()) {
+  if (!text && useDeviceSpeech()) {
     const blob = await attachmentBlob(attachmentId)
     if (blob && deviceCanDecode(blob.type)) {
       try {

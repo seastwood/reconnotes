@@ -44,14 +44,14 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
   const onOpenNoteRef = useRef(onOpenNote)
   onOpenNoteRef.current = onOpenNote
   /** the [[ link picker: where it is, and what it replaces */
-  const [picker, setPicker] = useState<{ x: number; y: number; range: { from: number; to: number } | null } | null>(null)
+  const [picker, setPicker] = useState<{ x: number; y: number; top: number; range: { from: number; to: number } | null } | null>(null)
   const editorForPicker = useRef<TiptapEditor | null>(null)
   const openLinkPicker = (range: { from: number; to: number } | null) => {
     const ed = editorForPicker.current
     if (!ed) return
     const pos = range ? range.from : ed.state.selection.from
     const c = ed.view.coordsAtPos(pos)
-    setPicker({ x: c.left, y: c.bottom, range })
+    setPicker({ x: c.left, y: c.bottom, top: c.top, range })
   }
   /** a tapped #tag: offer to show the notes with it */
   const [tagChip, setTagChip] = useState<{ tag: string; x: number; y: number } | null>(null)

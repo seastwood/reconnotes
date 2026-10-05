@@ -115,7 +115,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     store.putAttachment(
       { id, mime, name, size: data.length, created_at: Date.now() },
       data,
-      initialTextStatus(config, ai, mime),
+      initialTextStatus(config, ai, mime, name),
     )
     queueAttachment(config, store, ai, sync, id)
     json(res, 201, { id })

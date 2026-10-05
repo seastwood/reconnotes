@@ -114,7 +114,8 @@ export function LinkPicker({
   onClose,
 }: {
   currentNoteId: string
-  at: { x: number; y: number }
+  /** the cursor: left edge, bottom and top (viewport coordinates) */
+  at: { x: number; y: number; top: number }
   onPick: (note: { id: string; title: string }) => void
   onClose: () => void
 }) {
@@ -136,7 +137,26 @@ export function LinkPicker({
     if (i < matches.length) onPick({ id: matches[i].id, title: matches[i].title })
     else if (canCreate) onPick({ id: await createTitledNote(q.trim()), title: q.trim() })
   }
-  const style = { left: Math.max(8, Math.min(at.x, window.innerWidth - 320)), top: Math.min(at.y + 8, window.innerHeight - 340) }
+  // Below the cursor if it fits in what's visible above the on-screen
+  // keyboard, otherwise above the cursor.
+  const [viewport, setViewport] = useState(() => visibleArea())
+  useEffect(() => {
+    const vv = window.visualViewport
+    const update = () => setViewport(visibleArea())
+    vv?.addEventListener('resize', update)
+    vv?.addEventListener('scroll', update)
+    return () => {
+      vv?.removeEventListener('resize', update)
+      vv?.removeEventListener('scroll', update)
+    }
+  }, [])
+  const height = Math.min(330, viewport.bottom - viewport.top - 16)
+  const below = at.y + 8 + height <= viewport.bottom - 8
+  const left = Math.max(8, Math.min(at.x, window.innerWidth - 320))
+  // above: pin its bottom edge just over the cursor line, whatever its height
+  const style = below
+    ? { left, top: at.y + 8, maxHeight: height }
+    : { left, bottom: window.innerHeight - (at.top - 8), maxHeight: Math.min(height, at.top - 8 - (viewport.top + 8)) }
   return (
     <>
       <div className="picker-backdrop" onPointerDown={onClose} />
@@ -176,6 +196,12 @@ export function LinkPicker({
       </div>
     </>
   )
+}
+
+/** The part of the window not covered by the on-screen keyboard. */
+function visibleArea() {
+  const vv = window.visualViewport
+  return vv ? { top: vv.offsetTop, bottom: vv.offsetTop + vv.height } : { top: 0, bottom: window.innerHeight }
 }
 
 /** "Linked from": notes that link to this one. */

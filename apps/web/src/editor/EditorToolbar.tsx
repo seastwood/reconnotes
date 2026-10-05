@@ -242,7 +242,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
         <Camera size={20} />
       </button>
       <AudioRecorder editor={editor} onError={setError} />
-      <button className="tb hide-sm" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
+      <button className="tb" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
         <Paperclip size={20} />
       </button>
       <input ref={photoRef} type="file" accept="image/*" multiple hidden onChange={onFiles} />

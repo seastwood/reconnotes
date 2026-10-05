@@ -3,6 +3,7 @@ import WebKit
 import Vision
 import Speech
 import UniformTypeIdentifiers
+import QuickLook
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -67,6 +68,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(PdfSharePlugin())
         // Things shared to ReconNotes (share sheet / Open in…), see ShareInboxPlugin below.
         bridge?.registerPluginInstance(ShareInboxPlugin())
+        // Open attached files in Quick Look / share them (see FilePreviewPlugin below).
+        bridge?.registerPluginInstance(FilePreviewPlugin())
         bridge?.registerPluginInstance(ScribblePlugin())
         Self.current = self
         guard let webView = webView else { return }
@@ -286,7 +289,10 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                     return
                 }
                 let request = SFSpeechURLRecognitionRequest(url: url)
-                request.shouldReportPartialResults = false
+                // Partial results are needed to keep the whole recording: on the
+                // device, recognition starts over after each pause and the final
+                // result only holds the last stretch.
+                request.shouldReportPartialResults = true
                 request.taskHint = .dictation
                 // On the device: private, works offline, and no 1-minute limit.
                 let onDevice = recognizer.supportsOnDeviceRecognition
@@ -294,18 +300,40 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                 if #available(iOS 16.0, *) { request.addsPunctuation = true }
 
                 var done = false
+                var finished: [String] = [] // stretches recognition has moved on from
+                var current = ""
+                var currentStart: TimeInterval = -1
+                let whole = { () -> String in (finished + [current]).filter { !$0.isEmpty }.joined(separator: " ") }
                 self.tasks[id] = recognizer.recognitionTask(with: request) { result, error in
                     if done { return }
-                    if let result = result, result.isFinal {
+                    if let result = result {
+                        let text = result.bestTranscription.formattedString
+                        let start = result.bestTranscription.segments.first?.timestamp ?? 0
+                        // A later stretch of the recording: keep the previous one. Seen
+                        // either by its start time (when the timings are known) or by
+                        // the text starting over shorter and with a different word.
+                        let firstWord = { (t: String) in t.split(separator: " ").first.map { $0.lowercased() } ?? "" }
+                        let movedOn = start > currentStart + 0.5 || (text.count < current.count && firstWord(text) != firstWord(current))
+                        if !current.isEmpty && movedOn && !text.hasPrefix(current) {
+                            finished.append(current)
+                        }
+                        current = text
+                        currentStart = start
+                        if result.isFinal {
+                            done = true
+                            cleanup()
+                            call.resolve(["text": whole(), "onDevice": onDevice])
+                            return
+                        }
+                    }
+                    if let error = error {
                         done = true
                         cleanup()
-                        call.resolve(["text": result.bestTranscription.formattedString, "onDevice": onDevice])
-                    } else if let error = error {
-                        done = true
-                        cleanup()
-                        // 1110: no speech found in the recording
-                        if (error as NSError).code == 1110 {
-                            call.resolve(["text": "", "onDevice": onDevice])
+                        let soFar = whole()
+                        if !soFar.isEmpty {
+                            call.resolve(["text": soFar, "onDevice": onDevice]) // keep what was recognised
+                        } else if (error as NSError).code == 1110 {
+                            call.resolve(["text": "", "onDevice": onDevice]) // no speech in the recording
                         } else {
                             call.reject(error.localizedDescription)
                         }
@@ -482,6 +510,75 @@ public class ShareInboxPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
         call.resolve()
+    }
+}
+
+/// Shows an attached file with Quick Look (PDF, Word, Excel, Pages, Numbers,
+/// Keynote, text, pictures…) or hands it to the share sheet:
+///     FilePreview.open({ data: <base64>, name })
+///     FilePreview.share({ data: <base64>, name })
+@objc(FilePreviewPlugin)
+public class FilePreviewPlugin: CAPPlugin, CAPBridgedPlugin, QLPreviewControllerDataSource {
+    public let identifier = "FilePreviewPlugin"
+    public let jsName = "FilePreview"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise),
+    ]
+    private var previewURL: URL?
+
+    /// Write the file to a temporary folder under its own name (Quick Look and other apps go by the extension).
+    private func temporaryFile(_ call: CAPPluginCall) -> URL? {
+        guard let b64 = call.getString("data"), let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters) else {
+            call.reject("Could not read the file")
+            return nil
+        }
+        let name = (call.getString("name") ?? "File").replacingOccurrences(of: "/", with: "-")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(name)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            call.reject("Could not save the file: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    @objc func open(_ call: CAPPluginCall) {
+        guard let url = temporaryFile(call) else { return }
+        DispatchQueue.main.async {
+            guard let presenter = self.bridge?.viewController else { return call.reject("Nothing to show the file on") }
+            self.previewURL = url
+            let preview = QLPreviewController()
+            preview.dataSource = self
+            presenter.present(preview, animated: true)
+            call.resolve()
+        }
+    }
+
+    @objc func share(_ call: CAPPluginCall) {
+        guard let url = temporaryFile(call) else { return }
+        DispatchQueue.main.async {
+            guard let presenter = self.bridge?.viewController else { return call.reject("Nothing to show the share sheet on") }
+            let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let popover = sheet.popoverPresentationController {
+                popover.sourceView = presenter.view
+                popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+                popover.permittedArrowDirections = []
+            }
+            sheet.completionWithItemsHandler = { _, _, _, _ in call.resolve() }
+            presenter.present(sheet, animated: true)
+        }
+    }
+
+    public func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        previewURL == nil ? 0 : 1
+    }
+
+    public func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+        (previewURL ?? URL(fileURLWithPath: "/")) as NSURL
     }
 }
 

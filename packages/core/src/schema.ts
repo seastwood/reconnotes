@@ -67,6 +67,8 @@ export interface NoteData {
   links: string[]
   /** due dates in the note (see due.ts) */
   due: { id: string; date: string; text: string; done: boolean }[]
+  /** set when the note was made from a file added to a folder: shown as that file */
+  file: { name: string; mime: string; size: number } | null
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -111,6 +113,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     template: Boolean(m.get('template')),
     links: (m.get('links') as string[] | undefined) ?? [],
     due: (m.get('due') as NoteData['due'] | undefined) ?? [],
+    file: (m.get('file') as NoteData['file'] | undefined) ?? null,
   }
 }
 

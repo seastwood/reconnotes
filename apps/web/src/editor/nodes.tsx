@@ -1,7 +1,7 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useState } from 'react'
-import { AudioLines, FileText, Loader2, Mic, PenLine, ScanText } from 'lucide-react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { getTranscripts, newId } from '@reconnotes/core'
 import { addAttachment, attachmentUrl } from '../lib/attachments'
@@ -9,6 +9,7 @@ import { NoteContext } from '../drawing/DrawingNode'
 import { DrawingCanvas } from '../drawing/DrawingCanvas'
 import { inkUi, useInkUi } from '../drawing/toolState'
 import { useUndoManager } from './undo'
+import { fileKind, formatSize, openFile, shareFile } from '../lib/files'
 import { findKey } from './find'
 
 function useAttachmentUrl(id: string | null) {
@@ -216,6 +217,20 @@ export const ImageNode = Node.create({
 
 // --- Audio ------------------------------------------------------------------
 
+/** Copy text, with a fallback for browsers without the async clipboard. */
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    ta.remove()
+  }
+}
+
 /** The transcript with the words being searched for (⌘F) marked. */
 function highlight(text: string, query: string) {
   const q = query.trim().toLocaleLowerCase()
@@ -236,6 +251,11 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const transcript = useAttachmentText(node.attrs.attachmentId)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+  const flash = (msg: string) => {
+    setCopied(msg)
+    setTimeout(() => setCopied(null), 1500)
+  }
   // Find (⌘F) landed on this recording because its transcript matches: show the transcript
   const findHere = useEditorState({
     editor,
@@ -255,10 +275,15 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     setBusy(true)
     setError(null)
     try {
-      await transcribeAudio(editor, node.attrs.attachmentId, () => {
-        const pos = getPos()
-        return typeof pos === 'number' ? pos + node.nodeSize : undefined
-      })
+      await transcribeAudio(
+        editor,
+        node.attrs.attachmentId,
+        () => {
+          const pos = getPos()
+          return typeof pos === 'number' ? pos + node.nodeSize : undefined
+        },
+        transcript,
+      )
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -289,7 +314,34 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
           {open ? 'Hide transcript' : 'Show transcript'}
         </button>
       )}
-      {open && transcript && <div className="audio-transcript">{highlight(transcript, findQuery)}</div>}
+      {open && transcript && (
+        <>
+          <div className="audio-transcript">{highlight(transcript, findQuery)}</div>
+          <div className="audio-transcript-actions">
+            <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>
+              <Copy size={14} /> {copied ?? 'Copy'}
+            </button>
+            {editor.isEditable && (
+              <button
+                {...tap(() => {
+                  const pos = getPos()
+                  if (typeof pos !== 'number') return
+                  editor
+                    .chain()
+                    .focus()
+                    .insertContentAt(
+                      pos + node.nodeSize,
+                      transcript.split(/\n+/).filter(Boolean).map((t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })),
+                    )
+                    .run()
+                })}
+              >
+                <TextQuote size={14} /> Insert into note
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </NodeViewWrapper>
   )
 }
@@ -310,7 +362,7 @@ export const AudioNode = Node.create({
   },
   addNodeView() {
     return ReactNodeViewRenderer(AudioView, {
-      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button, audio')),
+      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button, audio, .audio-transcript')),
     })
   },
 })
@@ -318,19 +370,43 @@ export const AudioNode = Node.create({
 // --- Generic file (PDF, documents, …) -----------------------------------------
 
 function FileView({ node }: ReactNodeViewProps) {
-  const { url } = useAttachmentUrl(node.attrs.attachmentId)
+  const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const text = useAttachmentText(node.attrs.attachmentId)
+  const [error, setError] = useState<string | null>(null)
+  const name = (node.attrs.name as string) || 'Attachment'
+  const mime = (node.attrs.mime as string) || ''
+  const size = Number(node.attrs.size) || 0
+  const run = (fn: () => Promise<unknown>) => () => {
+    setError(null)
+    fn().catch((e) => setError((e as Error).message))
+  }
   return (
     <NodeViewWrapper className="file-block" data-drag-handle="">
-      <FileText size={20} />
-      {url ? (
-        <a href={url} download={node.attrs.name || 'file'} target="_blank" rel="noreferrer">
-          {node.attrs.name || 'Attachment'}
-        </a>
-      ) : (
-        <span>{node.attrs.name || 'Attachment'} (not downloaded yet)</span>
+      <div className="file-card">
+        <div className="file-icon" aria-hidden="true">
+          <FileText size={22} />
+          <span>{fileKind(name, mime).slice(0, 4)}</span>
+        </div>
+        <div className="file-info">
+          <div className="file-name">{name}</div>
+          <div className="file-meta">
+            {[fileKind(name, mime), formatSize(size), !url && missing ? 'not downloaded yet' : '', text ? 'searchable' : ''].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <div className="file-actions">
+          <button {...tap(run(() => openFile(node.attrs.attachmentId, name, mime)))} title="Open">
+            <Eye size={16} /> Open
+          </button>
+          <button {...tap(run(() => shareFile(node.attrs.attachmentId, name)))} title="Share or save a copy" aria-label="Share or save">
+            <Share size={16} />
+          </button>
+        </div>
+      </div>
+      {error && (
+        <div className="drawing-error" role="alert">
+          {error}
+        </div>
       )}
-      {text && <span className="file-indexed" title="Contents are searchable">searchable</span>}
     </NodeViewWrapper>
   )
 }
@@ -341,7 +417,7 @@ export const FileNode = Node.create({
   atom: true,
   draggable: true,
   addAttributes() {
-    return { attachmentId: { default: null }, name: { default: '' }, mime: { default: '' } }
+    return { attachmentId: { default: null }, name: { default: '' }, mime: { default: '' }, size: { default: 0 } }
   },
   parseHTML() {
     return [{ tag: 'div[data-file-id]', getAttrs: (el) => ({ attachmentId: (el as HTMLElement).dataset.fileId }) }]
@@ -350,7 +426,9 @@ export const FileNode = Node.create({
     return ['div', mergeAttributes({ 'data-file-id': HTMLAttributes.attachmentId })]
   },
   addNodeView() {
-    return ReactNodeViewRenderer(FileView)
+    return ReactNodeViewRenderer(FileView, {
+      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button')),
+    })
   },
 })
 
@@ -361,7 +439,7 @@ export async function insertFiles(editor: Editor, files: File[], pos?: number) {
     const attachmentId = await addAttachment(f, f.name)
     if (f.type.startsWith('image/')) nodes.push({ type: 'image', attrs: { attachmentId, alt: f.name.replace(/\.[^.]+$/, '') } })
     else if (f.type.startsWith('audio/')) nodes.push({ type: 'audio', attrs: { attachmentId, name: f.name } })
-    else nodes.push({ type: 'file', attrs: { attachmentId, name: f.name, mime: f.type } })
+    else nodes.push({ type: 'file', attrs: { attachmentId, name: f.name, mime: f.type, size: f.size } })
   }
   if (!nodes.length) return
   const chain = editor.chain().focus()

@@ -4,12 +4,13 @@ import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, isAiImage } from './ai'
 import { log } from './log'
+import { isOfficeFile, officeText } from './office'
 
 const TEXT_MIMES = /^(text\/|application\/(json|xml|x-markdown))/
 
 /** Decide up front whether an uploaded file will get text extracted. */
-export function initialTextStatus(config: Config, ai: Ai, mime: string): AttachmentRow['text_status'] {
-  if (TEXT_MIMES.test(mime)) return 'pending'
+export function initialTextStatus(config: Config, ai: Ai, mime: string, name = ''): AttachmentRow['text_status'] {
+  if (TEXT_MIMES.test(mime) || isOfficeFile(mime, name)) return 'pending'
   if (isAiImage(mime)) return ai.canImages && ai.autoImageText ? 'pending' : 'skipped'
   if (mime === 'application/pdf') return ai.canPdf && ai.autoImageText ? 'pending' : 'skipped'
   if (mime.startsWith('audio/') || mime.startsWith('video/')) return ai.autoAudio ? 'pending' : 'skipped'
@@ -25,6 +26,7 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
   let text: string
   try {
     if (TEXT_MIMES.test(att.mime)) text = data.toString('utf8').slice(0, 200_000)
+    else if (isOfficeFile(att.mime, att.name)) text = officeText(data, att.name)
     else if (isAiImage(att.mime)) text = await ai.imageText(data, att.mime)
     else if (att.mime === 'application/pdf') text = await ai.pdfText(data)
     else text = (await ai.transcribeAudio(data, att.mime, att.name)).text
@@ -55,7 +57,7 @@ export function resumePendingAttachments(config: Config, store: Store, ai: Ai, s
  */
 export function retryAttachments(config: Config, store: Store, ai: Ai, sync: SyncEngine) {
   for (const att of store.attachmentsWithStatus(['skipped', 'error'])) {
-    const status = initialTextStatus(config, ai, att.mime)
+    const status = initialTextStatus(config, ai, att.mime, att.name)
     if (status !== 'pending') continue
     store.setAttachmentText(att.id, null, 'pending')
     queueAttachment(config, store, ai, sync, att.id)
