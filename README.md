@@ -80,7 +80,8 @@ Open the app, go to **Settings**, enter `http://<your-machine>:8787` and the tok
 
 ## Running the server on Linux
 
-You need Node.js 20 or newer (or Docker).
+You need Node.js 20 or newer (or Docker), and `ffmpeg` if you'll transcribe recordings with a
+Wyoming (Home Assistant) Whisper server: `sudo apt install ffmpeg`.
 
 ### Option A: Docker
 
@@ -170,6 +171,11 @@ Then add an **Ollama** agent with the address `http://<ollama-machine-ip>:11434`
 *Advanced › Handwriting prompt*.
 
 ### Audio to text
+
+**Already running Home Assistant's Whisper (`wyoming-faster-whisper`)?** Use it: add an agent of
+kind **Wyoming speech-to-text**, address `tcp://<whisper-ip>:10300` (find the port with
+`ss -tlnp` on that machine) and press **Test connection**. The ReconNotes server converts
+recordings with `ffmpeg` (`sudo apt install ffmpeg`), and Home Assistant keeps working as before.
 
 Every recording and audio file has a **Transcribe** button that puts the spoken words into the
 note below it. In the iPhone/iPad app Apple's speech recognition does this on the device. The

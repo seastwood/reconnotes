@@ -3,6 +3,8 @@ import { newId } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { log } from './log'
+import { parseWyomingUri, toPcm, wyomingDescribe, wyomingTranscribe } from './wyoming'
+import { spawn } from 'node:child_process'
 
 /**
  * AI agents
@@ -18,7 +20,7 @@ import { log } from './log'
  * (unreachable, timeout, bad model name, refusal, …).
  */
 
-export type AgentKind = 'anthropic' | 'ollama' | 'openai'
+export type AgentKind = 'anthropic' | 'ollama' | 'openai' | 'wyoming'
 export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
 export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'audio']
 
@@ -85,6 +87,7 @@ export const DEFAULT_URLS: Record<AgentKind, string> = {
   anthropic: 'https://api.anthropic.com',
   ollama: 'http://localhost:11434',
   openai: 'http://localhost:1234/v1',
+  wyoming: 'tcp://localhost:10300',
 }
 
 // ---------------------------------------------------------------------------
@@ -302,8 +305,31 @@ function audioFileName(mime: string): string {
   return `audio.${ext}`
 }
 
+/**
+ * A Wyoming speech-to-text server (Home Assistant's wyoming-faster-whisper
+ * and friends). Audio only; recordings are converted to raw 16 kHz audio.
+ */
+class WyomingBackend implements Backend {
+  constructor(private agent: AgentConfig) {}
+
+  async generate(): Promise<string> {
+    throw new Error('Wyoming servers only transcribe audio')
+  }
+
+  async transcribe(audio: Buffer, mime: string): Promise<string> {
+    const pcm = await toPcm(audio, mime)
+    return wyomingTranscribe(this.agent.baseUrl, pcm, {
+      model: this.agent.model || undefined,
+      // a long recording takes a while, especially without a GPU
+      timeoutMs: Math.max(this.agent.timeoutSec, 900) * 1000,
+    })
+  }
+}
+
 export function makeBackend(agent: AgentConfig): Backend {
   switch (agent.kind) {
+    case 'wyoming':
+      return new WyomingBackend(agent)
     case 'anthropic':
       return new AnthropicBackend(agent)
     case 'ollama':
@@ -311,6 +337,15 @@ export function makeBackend(agent: AgentConfig): Backend {
     case 'openai':
       return new OpenAiBackend(agent)
   }
+}
+
+/** Is ffmpeg installed (needed to send recordings to Wyoming servers)? */
+function hasFfmpeg(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const p = spawn('ffmpeg', ['-version'])
+    p.on('error', () => resolve(false))
+    p.on('close', (code) => resolve(code === 0))
+  })
 }
 
 /** Shorten model output for error messages. */
@@ -382,6 +417,13 @@ export interface ModelInfo {
 /** List the models an agent's server offers, for the model picker. */
 export async function listModels(agent: AgentConfig): Promise<{ models: ModelInfo[]; error: string | null }> {
   try {
+    if (agent.kind === 'wyoming') {
+      const info = await wyomingDescribe(agent.baseUrl)
+      const models = info.asr.flatMap((a) =>
+        a.models.map((m) => ({ id: m.name, detail: [a.name, m.languages.length > 3 ? `${m.languages.length} languages` : m.languages.join(', ')].filter(Boolean).join(' · '), vision: false })),
+      )
+      return { models, error: models.length ? null : "This Wyoming server doesn't offer speech to text." }
+    }
     if (agent.kind === 'ollama') {
       const base = trimSlash(agent.baseUrl)
       const res = await fetchWithHints(base + '/api/tags', { signal: AbortSignal.timeout(10_000) })
@@ -449,6 +491,15 @@ export async function probeAgent(agent: AgentConfig): Promise<ProbeResult> {
   const warnings: string[] = []
   const timeout = AbortSignal.timeout(Math.min(agent.timeoutSec, 20) * 1000)
   try {
+    if (agent.kind === 'wyoming') {
+      const info = await wyomingDescribe(agent.baseUrl, Math.min(agent.timeoutSec, 20) * 1000)
+      const models = info.asr.flatMap((a) => a.models.map((m) => m.name))
+      if (!info.asr.length)
+        return { ok: false, message: "Connected, but this Wyoming server doesn't offer speech to text (it may be a text-to-speech or wake-word server).", models, warnings }
+      if (!(await hasFfmpeg())) warnings.push('ffmpeg isn\'t installed on the ReconNotes server, so only WAV files can be transcribed. Install it: sudo apt install ffmpeg')
+      if (agent.model && models.length && !models.includes(agent.model)) warnings.push(`The server offers ${models.join(', ')} – "${agent.model}" will be ignored.`)
+      return { ok: true, message: `Connected to ${info.asr.map((a) => a.name).join(', ')}${models.length ? ` (${models.join(', ')})` : ''}.`, models, warnings }
+    }
     if (agent.kind === 'ollama') {
       const base = trimSlash(agent.baseUrl)
       const res = await fetchWithHints(base + '/api/tags', { signal: timeout })
@@ -537,7 +588,7 @@ export const TASK_LABELS: Record<AiTask, string> = {
 /** Tasks a new agent of this kind can do (where it is added by default). */
 function defaultTasks(a: AgentConfig): AiTask[] {
   // a speech-to-text server (e.g. Whisper) does only that
-  if (a.kind === 'openai' && SPEECH_MODEL.test(a.model)) return ['audio']
+  if (a.kind === 'wyoming' || (a.kind === 'openai' && SPEECH_MODEL.test(a.model))) return ['audio']
   const t: AiTask[] = []
   if (a.vision) t.push('handwriting', 'images')
   if (a.kind === 'anthropic') t.push('format', 'pdf')
@@ -564,11 +615,12 @@ export class AgentRegistry {
   private adoptTranscribeEnv(c: Config) {
     if (!c.transcribeUrl || this.store.getSetting('ai.transcribeEnvAdopted')) return
     this.store.setSetting('ai.transcribeEnvAdopted', true)
+    const wyoming = /^tcp:\/\//.test(c.transcribeUrl)
     const agent = withDefaults({
       id: newId(),
       name: 'Speech to text',
-      kind: 'openai',
-      baseUrl: trimSlash(c.transcribeUrl).replace(/\/v1$/, '') + '/v1',
+      kind: wyoming ? 'wyoming' : 'openai',
+      baseUrl: wyoming ? c.transcribeUrl : trimSlash(c.transcribeUrl).replace(/\/v1$/, '') + '/v1',
       apiKey: c.transcribeApiKey ?? '',
       model: c.transcribeModel,
       vision: false,
@@ -735,16 +787,16 @@ function effortOf(e: string): AgentConfig['effort'] {
 }
 
 function withDefaults(a: Partial<AgentConfig>): AgentConfig {
-  const kind: AgentKind = a.kind === 'ollama' || a.kind === 'openai' ? a.kind : 'anthropic'
+  const kind: AgentKind = a.kind === 'ollama' || a.kind === 'openai' || a.kind === 'wyoming' ? a.kind : 'anthropic'
   return {
     id: a.id ?? newId(),
-    name: a.name || (kind === 'anthropic' ? 'Claude' : kind === 'ollama' ? 'Ollama' : 'OpenAI-compatible'),
+    name: a.name || (kind === 'anthropic' ? 'Claude' : kind === 'ollama' ? 'Ollama' : kind === 'wyoming' ? 'Whisper (Wyoming)' : 'OpenAI-compatible'),
     kind,
     baseUrl: a.baseUrl || DEFAULT_URLS[kind],
     apiKey: a.apiKey ?? '',
     model: a.model ?? (kind === 'anthropic' ? 'claude-opus-5-5' : ''),
     enabled: a.enabled ?? true,
-    vision: a.vision ?? true,
+    vision: a.vision ?? kind !== 'wyoming',
     timeoutSec: a.timeoutSec ?? (kind === 'anthropic' ? 300 : 300),
     prompt: a.prompt ?? '',
     effort: effortOf(a.effort ?? 'medium'),
@@ -760,15 +812,24 @@ export class AgentValidationError extends Error {}
 
 export function validateAgent(input: Partial<AgentConfig>): AgentConfig {
   const a = withDefaults(input)
-  if (!['anthropic', 'ollama', 'openai'].includes(String(input.kind ?? a.kind))) throw new AgentValidationError('unknown agent type')
+  if (!['anthropic', 'ollama', 'openai', 'wyoming'].includes(String(input.kind ?? a.kind))) throw new AgentValidationError('unknown agent type')
   a.name = String(a.name).trim().slice(0, 80) || 'Agent'
   a.model = String(a.model).trim().slice(0, 200)
   a.baseUrl = String(a.baseUrl).trim()
-  try {
-    const u = new URL(a.baseUrl)
-    if (!/^https?:$/.test(u.protocol)) throw new Error()
-  } catch {
-    throw new AgentValidationError('The address must start with http:// or https://')
+  if (a.kind === 'wyoming') {
+    try {
+      const { host, port } = parseWyomingUri(a.baseUrl)
+      a.baseUrl = `tcp://${host}:${port}`
+    } catch (err) {
+      throw new AgentValidationError((err as Error).message)
+    }
+  } else {
+    try {
+      const u = new URL(a.baseUrl)
+      if (!/^https?:$/.test(u.protocol)) throw new Error()
+    } catch {
+      throw new AgentValidationError('The address must start with http:// or https://')
+    }
   }
   a.apiKey = String(a.apiKey ?? '').trim()
   a.prompt = String(a.prompt ?? '').slice(0, 4000)

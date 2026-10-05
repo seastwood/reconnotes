@@ -156,7 +156,7 @@ export class Ai {
   async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string }> {
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
       if (!backend.transcribe)
-        throw new Error(`${agent.name} can't transcribe audio – use an OpenAI-compatible speech-to-text server (e.g. Whisper) or OpenAI`)
+        throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
       const text = collapseRepeats(await backend.transcribe(data, mime, filename))
       return text
     })

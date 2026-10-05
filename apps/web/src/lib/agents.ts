@@ -2,7 +2,7 @@ import { apiUrl, authHeaders } from './settings'
 
 /** Client for the server's AI agent management API (see apps/server/src/agents.ts). */
 
-export type AgentKind = 'anthropic' | 'ollama' | 'openai'
+export type AgentKind = 'anthropic' | 'ollama' | 'openai' | 'wyoming'
 export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
 export type ReadingMode = 'auto' | 'page' | 'lines'
 
@@ -84,12 +84,14 @@ export const DEFAULT_URLS: Record<AgentKind, string> = {
   anthropic: 'https://api.anthropic.com',
   ollama: '',
   openai: 'http://localhost:1234/v1',
+  wyoming: '',
 }
 
 export const KIND_LABELS: Record<AgentKind, string> = {
   anthropic: 'Claude (Anthropic API)',
   ollama: 'Ollama (local model)',
   openai: 'OpenAI-compatible (LM Studio, vLLM, OpenRouter, Whisper servers…)',
+  wyoming: 'Wyoming speech-to-text (Home Assistant Whisper)',
 }
 
 export const TASK_HELP: Record<AiTask, string> = {
@@ -100,7 +102,7 @@ export const TASK_HELP: Record<AiTask, string> = {
   pdf: 'Extracts text from attached PDFs for search. Only Claude agents can read PDFs.',
   compile: 'Turns a whole note into a clean document. A general model works best; OCR-only models do poorly here.',
   audio:
-    '“Transcribe” on recordings and audio files, and background transcripts for search. Needs an OpenAI-compatible speech-to-text server – e.g. Speaches/faster-whisper or whisper.cpp on your server, or OpenAI (model whisper-1). Ollama and Claude can’t transcribe audio. The iPad app uses Apple’s recognition first.',
+    '“Transcribe” on recordings and audio files, and background transcripts for search. Needs a speech-to-text server: a Home Assistant Wyoming Whisper server (e.g. wyoming-faster-whisper, port 10300), an OpenAI-compatible one (Speaches, whisper.cpp) or OpenAI (model whisper-1). Ollama and Claude can’t transcribe audio. The iPad app uses Apple’s recognition first.',
 }
 
 export const agentsApi = {

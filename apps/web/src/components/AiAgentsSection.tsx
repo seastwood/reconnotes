@@ -102,12 +102,13 @@ export function AiAgentsSection() {
               <StatusDot agent={a} />
               <div className="agent-main">
                 <div className="agent-name">
-                  {a.name} <span className="agent-kind">{a.kind === 'anthropic' ? 'Claude' : a.kind === 'ollama' ? 'Ollama' : 'OpenAI-compatible'}</span>
+                  {a.name} <span className="agent-kind">{a.kind === 'anthropic' ? 'Claude' : a.kind === 'ollama' ? 'Ollama' : a.kind === 'wyoming' ? 'Wyoming' : 'OpenAI-compatible'}</span>
                 </div>
                 <div className="agent-sub">
                   {a.model || 'no model chosen'}
                   {a.kind !== 'anthropic' && <> · {a.baseUrl}</>}
-                  {!a.vision && <> · text only</>}
+                  {!a.vision && a.kind !== 'wyoming' && <> · text only</>}
+                  {a.kind === 'wyoming' && <> · speech to text</>}
                 </div>
                 {a.status.lastError && (a.status.lastErrorAt ?? 0) >= (a.status.lastOkAt ?? 0) && (
                   <div className="agent-error">{a.status.lastError}</div>
@@ -173,7 +174,8 @@ export function AiAgentsSection() {
                           {a.name}
                           {!a.enabled && ' (disabled)'}
                           {!a.vision && (t.id === 'handwriting' || t.id === 'images') && <em> – can't read images</em>}
-                          {t.id === 'audio' && a.kind !== 'openai' && <em> – can't transcribe audio</em>}
+                          {t.id === 'audio' && a.kind !== 'openai' && a.kind !== 'wyoming' && <em> – can't transcribe audio</em>}
+                          {t.id !== 'audio' && a.kind === 'wyoming' && <em> – only transcribes audio</em>}
                         </span>
                         <button className="icon" disabled={i === 0} onClick={() => moveInTask(t.id, id, -1)} aria-label="Move up">
                           <ArrowUp size={15} />
@@ -284,6 +286,8 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
       baseUrl: DEFAULT_URLS[k],
       model: k === 'anthropic' ? 'claude-opus-5-5' : '',
       name: form.name,
+      // a speech-to-text server doesn't read images
+      vision: k !== 'wyoming',
     })
 
   const canList = kind === 'anthropic' ? Boolean(apiKey || agent?.hasApiKey) : Boolean(form.baseUrl)
@@ -297,6 +301,8 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
       const r = await agentsApi.models(payload())
       setModels(r.models)
       setModelsError(r.error)
+      // a Wyoming Whisper server usually has exactly one model: use it
+      if (kind === 'wyoming' && r.models.length === 1 && !form.model) set({ model: r.models[0].id })
     } catch (e) {
       setModels(null)
       setModelsError((e as Error).message)
@@ -376,14 +382,16 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
           <input
             value={form.baseUrl ?? ''}
             onChange={(e) => set({ baseUrl: e.target.value.trim() })}
-            placeholder={kind === 'ollama' ? 'http://192.168.1.50:11434' : DEFAULT_URLS[kind]}
+            placeholder={kind === 'ollama' ? 'http://192.168.1.50:11434' : kind === 'wyoming' ? 'tcp://192.168.1.50:10300' : DEFAULT_URLS[kind]}
             autoCapitalize="off"
             autoCorrect="off"
           />
           <span className="hint">
             {kind === 'ollama'
               ? 'The Ollama machine, e.g. http://192.168.1.50:11434. Use the IP address if the name doesn’t work.'
-              : 'Usually ends in /v1, e.g. http://192.168.1.50:1234/v1 or https://openrouter.ai/api/v1'}
+              : kind === 'wyoming'
+                ? 'The Wyoming Whisper server, e.g. tcp://192.168.1.50:10300 (10300 is the usual port). The ReconNotes server needs ffmpeg to send it recordings.'
+                : 'Usually ends in /v1, e.g. http://192.168.1.50:1234/v1 or https://openrouter.ai/api/v1'}
           </span>
         </label>
       )}
@@ -412,7 +420,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
                 if (m) set({ model: m.id, ...(m.vision !== null ? { vision: m.vision } : {}) })
               }}
             >
-              {!form.model && <option value="">Choose a model…</option>}
+              {!form.model && <option value="">{kind === 'wyoming' ? 'The server’s model' : 'Choose a model…'}</option>}
               {form.model && !models.some((m) => m.id === form.model) && (
                 <option value="__missing">{form.model} (not found on the server)</option>
               )}
@@ -429,7 +437,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
             <input
               value={form.model ?? ''}
               onChange={(e) => set({ model: e.target.value.trim() })}
-              placeholder={kind === 'ollama' ? 'e.g. qwen3-vl:4b' : kind === 'anthropic' ? 'claude-opus-5-5' : 'model id'}
+              placeholder={kind === 'ollama' ? 'e.g. qwen3-vl:4b' : kind === 'anthropic' ? 'claude-opus-5-5' : kind === 'wyoming' ? 'optional – the server’s own model is used' : 'model id'}
               autoCapitalize="off"
               autoCorrect="off"
             />
@@ -460,11 +468,13 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
           )}
         </span>
       </label>
-      <label className="check">
-        <input type="checkbox" checked={form.vision ?? true} onChange={(e) => set({ vision: e.target.checked })} />
-        Reads images (needed for handwriting and image text)
-      </label>
-      {(form.vision ?? true) && (
+      {kind !== 'wyoming' && (
+        <label className="check">
+          <input type="checkbox" checked={form.vision ?? true} onChange={(e) => set({ vision: e.target.checked })} />
+          Reads images (needed for handwriting and image text)
+        </label>
+      )}
+      {kind !== 'wyoming' && (form.vision ?? true) && (
         <label>
           Reading style for drawings
           <select value={form.reading ?? 'auto'} onChange={(e) => set({ reading: e.target.value as ReadingMode })}>
@@ -504,6 +514,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
             />
             <span className="hint">Large local models can take a while to load the first time.</span>
           </label>
+          {kind !== 'wyoming' && (
           <label>
             Handwriting prompt (optional)
             <textarea
@@ -513,6 +524,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
               placeholder="Leave empty for the built-in prompt. OCR models often work better with something short, like: Transcribe the handwritten text in this image."
             />
           </label>
+          )}
           {kind === 'anthropic' && (
             <label>
               API address
@@ -554,7 +566,7 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
         <button onClick={test} disabled={busy !== null}>
           {busy === 'test' ? <Loader2 size={14} className="spin" /> : null} Test connection
         </button>
-        {(form.vision ?? true) && (
+        {kind !== 'wyoming' && (form.vision ?? true) && (
           <button onClick={tryHandwriting} disabled={busy !== null || !form.model} title="Send a sample handwritten word and see what comes back">
             {busy === 'try' ? <Loader2 size={14} className="spin" /> : null} Test reading handwriting
           </button>
@@ -574,6 +586,7 @@ function defaultName(kind: AgentKind, model: string) {
   const short = model.split('/').pop()?.split(':')[0]
   if (kind === 'anthropic') return 'Claude'
   if (kind === 'ollama') return short ? `Ollama · ${short}` : 'Ollama'
+  if (kind === 'wyoming') return 'Whisper (Wyoming)'
   return short || 'OpenAI-compatible'
 }
 
