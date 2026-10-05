@@ -4,7 +4,7 @@ import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
-import { collapseRepeats } from './text'
+import { cleanOcrLine, cleanOcrText, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
 export { stripThinking } from './agents'
 
@@ -192,7 +192,7 @@ export class Ai {
     for (const [i, prompt] of prompts.entries()) {
       try {
         const raw = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], maxTokens)
-        const text = collapseRepeats(raw)
+        const text = opts.line ? cleanOcrLine(raw) : cleanOcrText(raw)
         if (text.length < raw.length) log.info(`"${agent.name}" repeated itself; collapsed ${raw.length} → ${text.length} chars`)
         log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
         if (text.trim()) return text
@@ -238,10 +238,10 @@ export class Ai {
   private async readLines(backend: Backend, agent: AgentConfig, lines: PictureLine[]): Promise<string | null> {
     const texts: string[] = []
     for (const line of lines) {
-      const key = `${agent.id}|${agent.model}|${agent.prompt}|${createHash('sha1').update(line.png).digest('hex')}`
+      const key = `v2|${agent.id}|${agent.model}|${agent.prompt}|${createHash('sha1').update(line.png).digest('hex')}`
       let text = this.lineCache.get(key)
       if (text === undefined) {
-        text = (await this.transcribeWith(backend, agent, line.png, { line: true })).replace(/\s*\n\s*/g, ' ').trim()
+        text = await this.transcribeWith(backend, agent, line.png, { line: true })
         this.lineCache.set(key, text)
         if (this.lineCache.size > 5000) this.lineCache.delete(this.lineCache.keys().next().value!)
       }
@@ -274,11 +274,11 @@ export class Ai {
       if (readingMode(agent) === 'page' || lines.length < 2) return this.transcribeWith(backend, agent, page, opts)
       const texts: string[] = []
       for (const line of lines) {
-        const key = `${agent.id}|${agent.model}|${agent.prompt}|${line.strokes.map((s) => s.id).join(',')}`
+        const key = `v2|${agent.id}|${agent.model}|${agent.prompt}|${line.strokes.map((s) => s.id).join(',')}`
         let text = this.lineCache.get(key)
         if (text === undefined) {
           const png = renderDrawingPng(line.strokes)
-          text = png ? (await this.transcribeWith(backend, agent, png, { line: true })).replace(/\s*\n\s*/g, ' ').trim() : ''
+          text = png ? await this.transcribeWith(backend, agent, png, { line: true }) : ''
           this.lineCache.set(key, text)
           if (this.lineCache.size > 5000) this.lineCache.delete(this.lineCache.keys().next().value!)
         }
@@ -311,7 +311,7 @@ export class Ai {
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
         return backend.generate(agent.vision ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
       })
-      const raw = stripFences(result)
+      const raw = unwrapModelOutput(result)
       const tidied = collapseRepeats(raw)
       log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${raw.length} chars)`)
       // Reject clean-ups that wander off: much longer than the input (before
@@ -402,11 +402,6 @@ export type CompilePart =
   | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[] }
   | { image: Buffer; mime: string; kind: 'photo' }
 
-/** Models sometimes wrap Markdown in a ```markdown fence; unwrap it. */
-function stripFences(s: string): string {
-  const m = /^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/.exec(s)
-  return (m ? m[1] : s).trim()
-}
 
 /**
  * Speech-to-text through any OpenAI-compatible transcription endpoint, such

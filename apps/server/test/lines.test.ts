@@ -123,7 +123,13 @@ describe('guarding against repetition loops', () => {
   it('collapses a looping line, caps tokens per line and uses a repetition penalty', async () => {
     const strokes = [...word(40, 40, 4), ...word(40, 200, 5), ...word(40, 360, 1), ...word(120, 360, 2), ...word(240, 360, 5)]
     await app.sync.change(noteDocName('noteloop000000000001'), (doc) => getStrokes(doc, 'drawingloop0000001').push(strokes))
-    ocrAnswers.splice(0, ocrAnswers.length, Array(300).fill('Seth').join(' '), 'Hello', 'I am groot')
+    ocrAnswers.splice(
+      0,
+      ocrAnswers.length,
+      Array(300).fill('Seth').join(' '),
+      '```markdown\nHello\n```\n' + Array(30).fill('Hello\n```\n').join(''),
+      'I am groot',
+    )
     ocrIndex = 0
     calls.length = 0
     tidyAnswer = ''

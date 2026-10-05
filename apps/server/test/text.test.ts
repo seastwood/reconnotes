@@ -16,3 +16,31 @@ describe('collapseRepeats', () => {
     expect(collapseRepeats(t)).toBe(t)
   })
 })
+
+import { cleanOcrLine, cleanOcrText, unwrapModelOutput } from '../src/text'
+
+describe('cleaning OCR model output', () => {
+  // what GLM-OCR actually returned for the line "Seth"
+  const looped = '```markdown\nSeth\n```\n' + Array(20).fill('Seh\n```\n').join('')
+
+  it('takes the first fenced answer and ignores the loop after it', () => {
+    expect(cleanOcrLine(looped)).toBe('Seth')
+    expect(cleanOcrLine('Seh ```markdown Seth ``` Seh ```Seh``` Seh ```Seh```')).toBe('Seth')
+  })
+
+  it('strips labels, chat tokens and quotes from a line', () => {
+    expect(cleanOcrLine('markdown\nHello<|im_end|>')).toBe('Hello')
+    expect(cleanOcrLine('"I am groot"')).toBe('I am groot')
+    expect(cleanOcrLine('Hello Hello Hello Hello Hello')).toBe('Hello')
+  })
+
+  it('collapses loops that alternate between lines', () => {
+    expect(cleanOcrText('Seh\n---\nSeh\n---\nSeh\n---\nSeh\n---')).toBe('Seh\n---')
+  })
+
+  it('keeps normal multi-line answers intact', () => {
+    const md = '# Leadership Meeting\n\n- Sprint goals\n  - how?'
+    expect(cleanOcrText(md)).toBe(md)
+    expect(unwrapModelOutput('```markdown\n' + md + '\n```')).toBe(md)
+  })
+})
