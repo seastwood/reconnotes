@@ -18,6 +18,8 @@ export interface Settings {
   deviceOcrCleanup: boolean
   /** iOS app: quietly recognise drawings for search (never changes the note) */
   backgroundOcr: boolean
+  /** settings format version, for one-off migrations */
+  version?: number
 }
 
 const KEY = 'reconnotes.settings'
@@ -36,7 +38,7 @@ function defaults(): Settings {
     token: '',
     // phones have no Pencil: draw with a finger there; on iPad/computer fingers scroll
     fingerDrawing: isPhone(),
-    pencilInText: 'draw',
+    pencilInText: 'scribble',
     theme: 'system',
     deviceOcr: true,
     deviceOcrCleanup: false,
@@ -44,7 +46,19 @@ function defaults(): Settings {
   }
 }
 
-export const settings = new Store<Settings>(safeLocalGet(KEY, defaults()))
+const SETTINGS_VERSION = 2
+
+function load(): Settings {
+  const s = safeLocalGet(KEY, defaults())
+  // v2: Scribble became the default for Pencil writing on typed text
+  // (handwriting there becomes text; drawings stay ink).
+  if ((s.version ?? 1) < 2) s.pencilInText = 'scribble'
+  s.version = SETTINGS_VERSION
+  return s
+}
+
+export const settings = new Store<Settings>(load())
+safeLocalSet(KEY, settings.get())
 settings.subscribe(() => safeLocalSet(KEY, settings.get()))
 
 export const useSettings = <S,>(select: (s: Settings) => S) => useStore(settings, select)

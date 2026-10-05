@@ -132,10 +132,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <label>
             When the Pencil touches typed text
             <select value={s.pencilInText} onChange={(e) => settings.set({ pencilInText: e.target.value as PencilInTextMode })}>
-              <option value="draw">Start a drawing there</option>
               <option value="scribble">Use iPadOS Scribble (writing on text becomes typed text; off while editing a drawing)</option>
+              <option value="draw">Start a drawing there</option>
             </select>
           </label>
+          {s.pencilInText === 'scribble' && (
+            <p className="hint">
+              Scribble must also be on in the iPad's Settings › Apple Pencil › Scribble. To start a drawing, use the pen button in the
+              toolbar.
+            </p>
+          )}
           <p className="hint">
             Pencil double-tap follows your iPad setting (Settings › Apple Pencil). Squeezing an Apple Pencil Pro opens the tool palette with
             undo, tools and colours.
