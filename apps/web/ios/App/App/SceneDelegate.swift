@@ -55,14 +55,14 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
 
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
-        send(kind: "tap", action: Self.name(of: interaction.preferredTapAction), location: tap.hoverPose?.location, in: interaction.view)
+        send(kind: "tap", action: Self.name(of: UIPencilInteraction.preferredTapAction), location: tap.hoverPose?.location, in: interaction.view)
     }
 
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
         // Fire once, when the squeeze completes (like Apple Notes).
         guard squeeze.phase == .ended else { return }
-        send(kind: "squeeze", action: Self.name(of: interaction.preferredSqueezeAction), location: squeeze.hoverPose?.location, in: interaction.view)
+        send(kind: "squeeze", action: Self.name(of: UIPencilInteraction.preferredSqueezeAction), location: squeeze.hoverPose?.location, in: interaction.view)
     }
 
     /// Pre-iOS 17.5 double-tap callback.
