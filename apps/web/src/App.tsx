@@ -124,7 +124,10 @@ export function App() {
 
   const noteDoc = useNoteDoc(note && !note.trashedAt ? nav.noteId : null)
 
+  /** a note opened from search results opens with the find bar on the search text */
+  const [findOnOpen, setFindOnOpen] = useState<{ noteId: string; query: string; n: number } | null>(null)
   const openNote = (id: string) => {
+    setFindOnOpen((f) => (nav.view.kind === 'search' && nav.view.query.trim() ? { noteId: id, query: nav.view.query.trim(), n: (f?.n ?? 0) + 1 } : null))
     setNav({ ...nav, noteId: id })
     setPane('note')
   }
@@ -208,6 +211,7 @@ export function App() {
               onBack={narrow ? () => setPane('list') : undefined}
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
+              initialFind={findOnOpen?.noteId === nav.noteId ? findOnOpen : undefined}
             />
           ) : (
             <div className="no-note">

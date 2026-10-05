@@ -1611,3 +1611,58 @@ button.link {
   flex: 1;
   min-width: 0;
 }
+
+/* ---------------------------------------------------------------- find */
+.find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.find-bar .find-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.find-bar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 16px; /* no zoom-on-focus on iOS */
+  color: var(--text);
+  padding: 6px 4px;
+  outline: none;
+}
+.find-count {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.find-match {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 2px;
+}
+.find-match.current {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+.find-block.find-match {
+  background: none;
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.find-block.find-match.current {
+  background: none;
+  outline-color: var(--accent);
+}
+.menu-shortcut {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}

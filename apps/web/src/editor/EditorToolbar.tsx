@@ -27,6 +27,7 @@ import {
   Undo2,
   ImagePlus,
   Download,
+  Search,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -44,6 +45,8 @@ interface Props {
   onBack?: () => void
   onTogglePanels?: () => void
   fullScreen?: boolean
+  /** open the find bar */
+  onFind?: () => void
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -84,7 +87,7 @@ function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | null>(null)
@@ -244,6 +247,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       </button>
       {menu === 'more' && (
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
+            {onFind && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  onFind()
+                }}
+              >
+                <Search size={16} /> Find in note <span className="menu-shortcut">⌘F</span>
+              </button>
+            )}
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>
               {pinned ? <PinOff size={16} /> : <Pin size={16} />} {pinned ? 'Unpin' : 'Pin to top'}
             </button>

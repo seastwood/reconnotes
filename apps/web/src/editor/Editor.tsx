@@ -5,7 +5,7 @@ import Collaboration from '@tiptap/extension-collaboration'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import type * as Y from 'yjs'
-import { CONTENT_FIELD, newId } from '@reconnotes/core'
+import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
 import { DrawingNode, NoteContext } from '../drawing/DrawingNode'
 import { InkToolbar } from '../drawing/InkToolbar'
 import { PencilPalette } from '../drawing/PencilPalette'
@@ -15,6 +15,8 @@ import { UndoContext, createUndoManager } from './undo'
 import { EditorToolbar } from './EditorToolbar'
 import { settings } from '../lib/settings'
 import { useInputDebugLog } from './debugInput'
+import { FindInNote } from './find'
+import { FindBar } from './FindBar'
 
 interface Props {
   noteId: string
@@ -25,9 +27,11 @@ interface Props {
   /** iPad/desktop: cycle folders / notes / full-screen note */
   onTogglePanels?: () => void
   fullScreen?: boolean
+  /** show the find bar with this text (a note opened from search results; `n` changes on every open) */
+  initialFind?: { query: string; n: number }
 }
 
-export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen }: Props) {
+export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   useEffect(() => () => undoManager.destroy(), [undoManager])
   const ctx = useMemo(() => ({ doc, noteId }), [doc, noteId])
@@ -44,6 +48,15 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         TaskItem.configure({ nested: true }),
         DrawingNode,
         ImageNode,
+        FindInNote.configure({
+          // drawings, pictures and recordings are found by their recognised text
+          transcriptOf: (node) => {
+            const t = getTranscripts(doc)
+            if (node.type.name === 'drawing') return t.get(node.attrs.drawingId) ?? null
+            if (node.attrs.attachmentId) return t.get(`att:${node.attrs.attachmentId}`) ?? null
+            return null
+          },
+        }),
         AudioNode,
         FileNode,
       ],
@@ -71,6 +84,30 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
   const editorRef = useRef<TiptapEditor | null>(null)
   editorRef.current = editor
   useInputDebugLog(editor)
+
+  // Find in note: ⌘F / Ctrl+F, the ⋯ menu, or opened from search results
+  const [find, setFind] = useState<{ text: string; n: number; focus: boolean } | null>(null)
+  useEffect(() => {
+    // from search results: show the matches, but don't pop up the keyboard
+    if (initialFind?.query.trim()) setFind((f) => ({ text: initialFind.query, n: (f?.n ?? 0) + 1, focus: false }))
+  }, [initialFind?.n, initialFind?.query])
+  const openFind = () => {
+    const sel = editor && !editor.state.selection.empty ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ').slice(0, 100) : ''
+    // a new key so the bar refocuses (and takes the selection) even if it's open
+    setFind((f) => ({ text: sel || f?.text || '', n: (f?.n ?? 0) + 1, focus: true }))
+  }
+  const openFindRef = useRef(openFind)
+  openFindRef.current = openFind
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        openFindRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Leave drawing mode when switching notes.
   useEffect(() => () => inkUi.set({ activeDrawing: null, palette: null }), [noteId])
@@ -128,7 +165,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             onBack={onBack}
             onTogglePanels={onTogglePanels}
             fullScreen={fullScreen}
+            onFind={openFind}
           />
+          {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
             {/* The blank space below the text is part of the editable area (padding),
                 so writing there with Scribble or tapping there behaves like the text. */}
