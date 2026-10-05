@@ -127,7 +127,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <h3>Apple Pencil &amp; drawing</h3>
           <label className="check">
             <input type="checkbox" checked={s.fingerDrawing} onChange={(e) => settings.set({ fingerDrawing: e.target.checked })} />
-            Draw with finger (otherwise fingers scroll once a Pencil has been used)
+            Draw with finger (otherwise only Apple Pencil and mouse draw, and fingers scroll the page)
           </label>
           <label>
             When the Pencil touches typed text

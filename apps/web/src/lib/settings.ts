@@ -22,6 +22,11 @@ export interface Settings {
 
 const KEY = 'reconnotes.settings'
 
+function isPhone(): boolean {
+  if (typeof matchMedia === 'undefined' || typeof screen === 'undefined') return false
+  return matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600
+}
+
 function defaults(): Settings {
   // When the web app is served by the ReconNotes server itself, sync with it.
   const sameOrigin =
@@ -29,7 +34,8 @@ function defaults(): Settings {
   return {
     serverUrl: sameOrigin,
     token: '',
-    fingerDrawing: false,
+    // phones have no Pencil: draw with a finger there; on iPad/computer fingers scroll
+    fingerDrawing: isPhone(),
     pencilInText: 'draw',
     theme: 'system',
     deviceOcr: true,

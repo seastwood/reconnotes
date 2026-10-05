@@ -189,8 +189,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     if (!editable) return false
     if (e.pointerType === 'pen') return true
     if (e.pointerType === 'mouse') return e.button === 0 || e.buttons === 1
-    // touch: draw only if the user allows finger drawing, or no pencil yet
-    return settings.get().fingerDrawing || !inkUi.get().pencilSeen
+    // touch: fingers scroll the page unless the user lets them draw
+    return settings.get().fingerDrawing
   }
 
   // iOS: stop the pencil from scrolling the page, but let fingers scroll.
@@ -198,7 +198,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     const el = liveRef.current!
     const onTouch = (e: TouchEvent) => {
       const t = e.touches[0] as Touch & { touchType?: string }
-      if (t?.touchType === 'stylus' || settings.get().fingerDrawing || !inkUi.get().pencilSeen) {
+      if (t?.touchType === 'stylus' || settings.get().fingerDrawing) {
         if (editable) e.preventDefault()
       }
     }

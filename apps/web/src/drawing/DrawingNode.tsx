@@ -253,7 +253,14 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     <NodeViewWrapper
       className={`drawing-block${active ? ' active' : ''}${selected ? ' selected' : ''}`}
       contentEditable={false}
-      onPointerDownCapture={() => inkUi.set({ activeDrawing: drawingId })}
+      // Pencil/mouse open the drawing at once; a finger only on a tap, so
+      // scrolling past a drawing doesn't open it.
+      onPointerDownCapture={(e: React.PointerEvent) => {
+        if (e.pointerType !== 'touch' || settings.get().fingerDrawing) inkUi.set({ activeDrawing: drawingId })
+      }}
+      onClickCapture={() => {
+        if (!active) inkUi.set({ activeDrawing: drawingId })
+      }}
     >
       <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} footer={footer} />
       {error && (
