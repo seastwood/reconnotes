@@ -35,6 +35,7 @@ beforeAll(async () => {
     let body = ''
     for await (const c of req) body += c
     const j = JSON.parse(body)
+    if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'vision'] }))
     const m = j.messages?.[0] ?? { content: j.prompt, images: j.images }
     calls.push({ model: j.model, prompt: m.content, images: m.images?.length ?? 0, options: j.options })
     res.writeHead(200, { 'Content-Type': 'application/json' })

@@ -139,8 +139,14 @@ class AnthropicBackend implements Backend {
 
 /** A model answered, but with nothing usable. `details` says what it did. */
 export class EmptyReplyError extends Error {
-  constructor(readonly details: string) {
-    super(`returned an empty reply (${details})`)
+  constructor(
+    readonly details: string,
+    /** a plain explanation of what went wrong, when it's clear */
+    readonly summary?: string,
+    /** why, when known: another prompt won't help a model that can't stop thinking */
+    readonly reason?: 'thinking' | 'no-vision',
+  ) {
+    super(summary ? `${summary} (Details: ${details})` : `returned an empty reply (${details})`)
   }
 }
 
@@ -157,42 +163,98 @@ interface OllamaReply {
  */
 const SAMPLING = { temperature: 0, repeat_penalty: 1.15, repeat_last_n: 64 }
 
+/** What Ollama says about a model (cached per server + model). */
+interface OllamaModelInfo {
+  thinking: boolean
+  /** the model's own context window, if Ollama reports it */
+  contextLength: number | null
+}
+const ollamaInfo = new Map<string, { at: number; info: Promise<OllamaModelInfo> }>()
+
+/** Room for a thinking model's reasoning, on top of its answer. */
+const THINK_ROOM = 6144
+
+/** Thinking was cut off by the token limit (in the thinking field, or an unclosed <think> in the text). */
+const ranOutThinking = (r: OllamaReply) =>
+  r.doneReason === 'length' && (Boolean(r.thinking.trim()) || (/<think>/i.test(r.content) && !/<\/think>/i.test(r.content)))
+
 class OllamaBackend implements Backend {
   constructor(private agent: AgentConfig) {}
+
+  /** Can it think, and how long is its context? Asked once an hour; unknown if Ollama doesn't say. */
+  private info(): Promise<OllamaModelInfo> {
+    const key = `${trimSlash(this.agent.baseUrl)}|${this.agent.model}`
+    const hit = ollamaInfo.get(key)
+    if (hit && Date.now() - hit.at < 3600_000) return hit.info
+    const info = this.post('/api/show', {})
+      .then((body) => {
+        const caps = (body.capabilities as string[] | undefined) ?? []
+        const modelInfo = (body.model_info ?? {}) as Record<string, unknown>
+        const ctxKey = Object.keys(modelInfo).find((k) => k.endsWith('.context_length'))
+        return { thinking: caps.includes('thinking'), contextLength: ctxKey ? Number(modelInfo[ctxKey]) || null : null }
+      })
+      .catch(() => ({ thinking: false, contextLength: null }))
+    ollamaInfo.set(key, { at: Date.now(), info })
+    return info
+  }
 
   async generate(parts: Part[], maxTokens: number): Promise<string> {
     if (parts.some((p) => 'pdf' in p)) throw new Error('Ollama models cannot read PDFs')
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
-    // Generous but bounded: very large values can exceed small context windows.
+    const info = await this.info()
+    // room for the answer itself (callers size it to the job, e.g. small per handwritten line)
     const limit = Math.min(maxTokens, 8192)
+    // Ollama's default context (often 4K) silently cuts long jobs short:
+    // ask for one that fits the prompt, the pictures and the reply.
+    const inputTokens = Math.ceil(text.length / 3) + images.length * 1500
+    const ctxFor = (predict: number) => {
+      const need = inputTokens + predict + 512
+      const cap = Math.min(info.contextLength ?? 32768, 32768)
+      return Math.min(cap, [8192, 16384, 32768].find((b) => b >= need) ?? 32768)
+    }
     const tried: string[] = []
+    let thoughtTooLong = 0
 
     const attempt = async (label: string, run: () => Promise<OllamaReply>): Promise<string | null> => {
       const r = await run()
-      const answer = stripThinking(r.content)
+      const answer = answerOf(r.content)
       if (answer) return answer
+      if (ranOutThinking(r)) thoughtTooLong = Math.max(thoughtTooLong, r.evalCount)
       tried.push(
-        `${label}: ${r.evalCount} tokens, done_reason=${r.doneReason || '?'}${r.thinking.trim() ? `, reasoning only: “${preview(r.thinking, 80)}”` : ''}`,
+        `${label}: ${r.evalCount} tokens, done_reason=${r.doneReason || '?'}${r.thinking.trim() || /<think>/i.test(r.content) ? `, reasoning only: “${preview(r.thinking || r.content.replace(/<\/?think>/gi, ''), 80)}”` : ''}`,
       )
       return null
     }
+    // Qwen's "/no_think" switch, which some models honour instead of think:false
+    const noThinkText = `${text}\n\n/no_think`
 
-    // 1. normal chat request
-    const first = await attempt('chat', () => this.chat(text, images, limit))
-    if (first !== null) return first
-    // 2. "thinking" models that only reasoned: ask again with thinking off
-    //    (plus Qwen's "/no_think" switch, which some models honour instead),
-    //    and with enough room to finish if they reason anyway.
-    if (tried[0].includes('reasoning only')) {
-      const roomy = Math.min(8192, Math.max(limit * 4, 2048))
-      const noThink = await attempt('chat without thinking', () => this.chat(`${text}\n\n/no_think`, images, roomy, false)).catch(
-        () => null,
-      )
-      if (noThink) return noThink
+    if (info.thinking) {
+      // 1. thinking models: these jobs don't need reasoning – ask for the answer straight away
+      const quick = await attempt('chat without thinking', () => this.chat(noThinkText, images, limit, ctxFor(limit), false))
+      if (quick !== null) return quick
+      // 2. it thought anyway (some only can): give it room to think *and* answer
+      const roomy = limit + THINK_ROOM
+      const full = await attempt('chat with room to think', () => this.chat(text, images, roomy, ctxFor(roomy), true)).catch((e) => {
+        tried.push(`chat with room to think: ${(e as Error).message}`)
+        return null
+      })
+      if (full !== null) return full
+      // still thinking when it ran out of room: other ways of asking won't help
+      if (thoughtTooLong >= roomy - 64) throw new EmptyReplyError(tried.join('; '), this.thinkingSummary(thoughtTooLong), 'thinking')
+    } else {
+      // 1. normal chat request
+      const first = await attempt('chat', () => this.chat(text, images, limit, ctxFor(limit)))
+      if (first !== null) return first
+      // 2. it reasoned without saying it could: again with thinking off, and room to finish if it reasons anyway
+      if (tried[0].includes('reasoning only')) {
+        const roomy = limit + THINK_ROOM
+        const again = await attempt('chat without thinking', () => this.chat(noThinkText, images, roomy, ctxFor(roomy), false)).catch(() => null)
+        if (again !== null) return again
+      }
     }
     // 3. some OCR models only answer through the plain /api/generate endpoint
-    const gen = await attempt('generate', () => this.plainGenerate(text, images, limit)).catch((e) => {
+    const gen = await attempt('generate', () => this.plainGenerate(text, images, limit, ctxFor(limit))).catch((e) => {
       tried.push(`generate: ${(e as Error).message}`)
       return null
     })
@@ -200,11 +262,20 @@ class OllamaBackend implements Backend {
 
     const noTokens = tried.every((t) => /^[^:]+: 0 tokens/.test(t))
     log.info(`Ollama model ${this.agent.model} gave empty replies – ${tried.join('; ')}`)
-    throw new EmptyReplyError(
-      tried.join('; ') +
-        (noTokens && images.length
-          ? `. The model generated nothing at all, which usually means it can't read images – run “ollama show ${this.agent.model}” and check that Capabilities lists “vision”`
-          : ''),
+    if (thoughtTooLong) throw new EmptyReplyError(tried.join('; '), this.thinkingSummary(thoughtTooLong), 'thinking')
+    if (noTokens && images.length)
+      throw new EmptyReplyError(
+        tried.join('; '),
+        `The model generated nothing at all, which usually means it can't read images – run “ollama show ${this.agent.model}” and check that Capabilities lists “vision”.`,
+        'no-vision',
+      )
+    throw new EmptyReplyError(tried.join('; '))
+  }
+
+  private thinkingSummary(tokens: number): string {
+    return (
+      `“${this.agent.model}” is a thinking model: it spent all ${tokens} tokens it was given reasoning and never wrote an answer, ` +
+      `even when asked not to think. Choose a version of it that doesn't think (often tagged “instruct”, e.g. ${suggestInstruct(this.agent.model)}) or another model for this job.`
     )
   }
 
@@ -219,21 +290,21 @@ class OllamaBackend implements Backend {
     return (await res.json()) as Record<string, unknown>
   }
 
-  private async chat(text: string, images: string[], maxTokens: number, think?: boolean): Promise<OllamaReply> {
+  private async chat(text: string, images: string[], maxTokens: number, numCtx: number, think?: boolean): Promise<OllamaReply> {
     const body = await this.post('/api/chat', {
       ...(think === undefined ? {} : { think }),
-      options: { num_predict: maxTokens, ...SAMPLING },
+      options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
       messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
     })
     const m = (body.message ?? {}) as { content?: string; thinking?: string }
     return { content: m.content ?? '', thinking: m.thinking ?? '', doneReason: String(body.done_reason ?? ''), evalCount: Number(body.eval_count ?? 0) }
   }
 
-  private async plainGenerate(text: string, images: string[], maxTokens: number): Promise<OllamaReply> {
+  private async plainGenerate(text: string, images: string[], maxTokens: number, numCtx: number): Promise<OllamaReply> {
     const body = await this.post('/api/generate', {
       prompt: text,
       ...(images.length ? { images } : {}),
-      options: { num_predict: maxTokens, ...SAMPLING },
+      options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
     })
     return {
       content: String(body.response ?? ''),
@@ -242,6 +313,21 @@ class OllamaBackend implements Backend {
       evalCount: Number(body.eval_count ?? 0),
     }
   }
+}
+
+/** The answer in a reply: without reasoning, including reasoning that was cut off mid-way. */
+function answerOf(content: string): string {
+  const open = content.search(/<think>/i)
+  // an unclosed <think>: everything after it is unfinished reasoning
+  if (open >= 0 && !/<\/think>/i.test(content.slice(open))) return stripThinking(content.slice(0, open))
+  return stripThinking(content)
+}
+
+/** "qwen3-vl:4b" → "qwen3-vl:4b-instruct" (a guess to show people what to look for). */
+function suggestInstruct(model: string): string {
+  const [name, tag = 'latest'] = model.split(':')
+  const base = tag.replace(/-(thinking|think)$/i, '')
+  return `${name}:${base === 'latest' ? 'instruct' : `${base}-instruct`}`
 }
 
 class OpenAiBackend implements Backend {
@@ -518,6 +604,10 @@ export async function probeAgent(agent: AgentConfig): Promise<ProbeResult> {
           signal: AbortSignal.timeout(10_000),
         })
         const info = (await show.json()) as { capabilities?: string[] }
+        if (info.capabilities?.includes('thinking'))
+          warnings.push(
+            `"${agent.model}" is a thinking model. ReconNotes asks it to answer without thinking, and gives it extra room when it thinks anyway – but that is slower, and small thinking models sometimes never finish. If it does, use a version that doesn't think (often tagged "instruct", e.g. ${suggestInstruct(agent.model)}).`,
+          )
         if (info.capabilities && !info.capabilities.includes('vision') && agent.vision)
           warnings.push(`Ollama reports that "${agent.model}" can't read images, so it won't work for handwriting or images. Turn off "Reads images" or pick a vision model.`)
       } catch {

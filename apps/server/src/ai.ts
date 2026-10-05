@@ -261,6 +261,7 @@ export class Ai {
     // A single line can't need many tokens; a low cap also stops runaway loops quickly.
     const maxTokens = opts.line ? 200 : 4096
     const empties: string[] = []
+    let explanation: string | undefined
     for (const [i, prompt] of prompts.entries()) {
       try {
         const raw = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], maxTokens)
@@ -271,11 +272,14 @@ export class Ai {
         empties.push(`prompt ${i + 1}: empty reply`)
       } catch (err) {
         if (!(err instanceof EmptyReplyError)) throw err
+        explanation ??= err.summary
         empties.push(prompts.length > 1 ? `prompt ${i + 1}: ${err.details}` : err.details)
+        if (err.reason === 'thinking') break // asking differently won't stop it thinking
       }
     }
     if (!opts.requireText) return ''
-    throw new Error(`returned no text (${empties.join(' | ')})`)
+    // the plain explanation first (when there is one), the details after it
+    throw new Error(explanation ? `${explanation} (returned no text: ${empties.join(' | ')})` : `returned no text (${empties.join(' | ')})`)
   }
 
   /**

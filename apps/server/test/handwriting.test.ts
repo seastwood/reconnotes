@@ -23,8 +23,13 @@ beforeAll(async () => {
     let body = ''
     for await (const c of req) body += c
     const json = JSON.parse(body || '{}')
-    requests.push({ ...json, url: req.url })
     res.writeHead(200, { 'Content-Type': 'application/json' })
+    if (req.url === '/api/show') {
+      // what Ollama says about a model: "qwen3-vl" models say they think
+      const thinks = /qwen3-vl/.test(json.model)
+      return res.end(JSON.stringify({ capabilities: ['completion', 'vision', ...(thinks ? ['thinking'] : [])], model_info: { 'qwen3vl.context_length': 262144 } }))
+    }
+    requests.push({ ...json, url: req.url })
     const isGenerate = req.url === '/api/generate'
     const prompt: string = isGenerate ? json.prompt : json.messages?.[0]?.content ?? ''
     const reply = (content: string, thinking = '', evalCount = content ? 5 : 0) =>
@@ -51,6 +56,13 @@ beforeAll(async () => {
         return /\/no_think$/.test(prompt) && json.options?.num_predict >= 2048
           ? reply('Buy milk')
           : res.end(JSON.stringify({ message: { content: '', thinking: 'Got it, let me look carefully…' }, done_reason: 'length', eval_count: 527 }))
+      case 'thinker':
+        // a thinking model that ignores think:false and needs ~3000 tokens of reasoning
+        if (json.think === true && json.options?.num_predict >= 3500)
+          return res.end(JSON.stringify({ message: { content: 'Buy milk', thinking: 'Long careful look…' }, done_reason: 'stop', eval_count: 3100 }))
+        return res.end(JSON.stringify({ message: { content: '<think>Okay, let me tackle this…', thinking: '' }, done_reason: 'length', eval_count: json.options?.num_predict ?? 0 }))
+      case 'endless-thinker':
+        return res.end(JSON.stringify({ message: { content: '', thinking: 'Okay, let me tackle this query…' }, done_reason: 'length', eval_count: json.options?.num_predict ?? 0 }))
       case 'short-prompt':
         return prompt.length < 80 ? reply('Buy milk') : reply('', '', 3)
     }
@@ -119,7 +131,7 @@ describe('handwriting conversion troubleshooting', () => {
     mode = 'empty'
     const r = await convert()
     expect(r.status).toBe(502)
-    expect(r.body.error).toMatch(/OCR: returned no text/)
+    expect(r.body.error).toMatch(/OCR: .*returned no text/)
     expect(r.body.error).toMatch(/0 tokens/)
     expect(r.body.error).toMatch(/ollama show strike-ocr/)
   })
@@ -216,6 +228,46 @@ describe('compiling a note with pictures', () => {
     expect(sent.messages[0].images).toHaveLength(2) // the drawing and the picture
     expect(sent.messages[0].content).toMatch(/Meeting notes/)
     expect(sent.messages[0].content).toMatch(/picture attached to the note/)
+  })
+})
+
+describe('thinking models', () => {
+  const useModel = (model: string) => {
+    const a = app.ai.agents.agents().find((x) => x.name === 'OCR')!
+    app.ai.agents.save({ ...a, model })
+  }
+
+  it('asks a thinking model for the answer straight away, then gives it room to think, with a context that fits', async () => {
+    useModel('qwen3-vl:4b')
+    mode = 'thinker'
+    requests.length = 0
+    try {
+      const r = await convert()
+      expect(r.status).toBe(200)
+      expect(r.body.text).toBe('Buy milk')
+      const sent = requests as unknown as { think?: boolean; options: { num_predict: number; num_ctx: number } }[]
+      expect(sent[0].think).toBe(false)
+      expect(sent[1].think).toBe(true)
+      expect(sent[1].options.num_predict).toBeGreaterThan(sent[0].options.num_predict)
+      expect(sent[1].options.num_ctx).toBeGreaterThanOrEqual(sent[1].options.num_predict + 1500)
+    } finally {
+      useModel('strike-ocr')
+    }
+  })
+
+  it('explains a thinking model that never gets to an answer', async () => {
+    useModel('qwen3-vl:4b')
+    mode = 'endless-thinker'
+    try {
+      const r = await convert()
+      expect(r.status).toBe(502)
+      expect(r.body.error).toMatch(/thinking model/)
+      expect(r.body.error).toMatch(/qwen3-vl:4b-instruct/)
+      // gave up once it couldn't finish even with room to think – no more attempts, no second prompt
+      expect(r.body.error).not.toMatch(/generate:|prompt 2/)
+    } finally {
+      useModel('strike-ocr')
+    }
   })
 })
 
