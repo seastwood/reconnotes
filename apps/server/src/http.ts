@@ -170,6 +170,24 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   /**
+   * One-tap note actions: summary / to-dos of a note (by id), or cleaned-up
+   * wording of some text the app sends.
+   */
+  route('POST', '/api/ai/note-action', async (req, res) => {
+    const { action, noteId, text } = await readJson<{ action: string; noteId?: string; text?: string }>(req)
+    if (action !== 'summary' && action !== 'todos' && action !== 'clean') throw new HttpError(400, 'unknown action')
+    let markdown = String(text ?? '')
+    if (action !== 'clean') {
+      const doc = /^[a-z0-9]{8,64}$/.test(noteId ?? '') ? sync.getDoc(noteDocName(noteId!)) : null
+      if (!doc) throw new HttpError(404, 'note not found')
+      markdown = noteToMarkdown(doc, { attachmentText: true })
+    }
+    if (!markdown.trim()) throw new HttpError(400, 'There is no text to work with.')
+    const result = await sync.enqueue(() => ai.noteAction(action, markdown))
+    json(res, 200, result)
+  })
+
+  /**
    * Transcribe a recording or audio file that has been uploaded. Reuses the
    * transcript when the server already made one (for search).
    */

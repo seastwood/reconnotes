@@ -29,12 +29,15 @@ import {
   Download,
   Search,
   LayoutTemplate,
+  ListTodo,
+  WandSparkles,
+  ScrollText,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
 import { addAttachment } from '../lib/attachments'
-import { compileNote, convertAllHandwriting } from '../lib/ai'
+import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
@@ -250,6 +253,17 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       </button>
       {menu === 'more' && (
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
+            <div className="menu-label">AI</div>
+            <button onClick={() => (setMenu(null), void run('Summarising…', () => noteAction(editor, noteId, 'summary')))}>
+              <ScrollText size={16} /> Summarise note
+            </button>
+            <button onClick={() => (setMenu(null), void run('Finding to-dos…', () => noteAction(editor, noteId, 'todos')))}>
+              <ListTodo size={16} /> Extract to-dos
+            </button>
+            <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor)))} title="Fix spelling, grammar and clarity of the selected text">
+              <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
+            </button>
+            <div className="menu-sep" />
             {onFind && (
               <button
                 onClick={() => {

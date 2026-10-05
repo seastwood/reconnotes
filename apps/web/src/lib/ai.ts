@@ -297,3 +297,72 @@ export async function serverInfo(url: string, token: string): Promise<ServerInfo
   const auth = await fetch(`${base}/api/auth/check`, { headers: { Authorization: `Bearer ${token}` } })
   return { ...info, authorized: auth.ok }
 }
+
+// --- One-tap note actions --------------------------------------------------
+
+/**
+ * Summarise a note (inserted under its title) or pull out its to-dos (added
+ * at the end as a checklist). Both are ordinary edits, so Undo removes them.
+ */
+export async function noteAction(editor: Editor, noteId: string, action: 'summary' | 'todos') {
+  await flushNote(noteId)
+  const { text } = await post<{ text: string }>('/api/ai/note-action', { action, noteId })
+  if (!text.trim()) throw new Error(action === 'todos' ? 'No to-dos found in this note.' : 'The AI returned nothing.')
+  const doc = editor.state.doc
+  if (action === 'summary') {
+    const at = doc.childCount > 1 ? doc.child(0).nodeSize : doc.content.size
+    insertConverted(editor, at, `**Summary**\n\n${text}\n`)
+  } else {
+    insertConverted(editor, doc.content.size, `**To-dos**\n\n${text.replace(/^\s*[-*]\s+(?!\[)/gm, '- [ ] ')}\n`)
+  }
+}
+
+/** Improve the wording of the selected text (replaces it; Undo restores it). */
+export async function cleanUpSelection(editor: Editor) {
+  const { from, to, empty } = editor.state.selection
+  if (empty) throw new Error('Select the text you want cleaned up, then choose “Clean up wording” again.')
+  const markdown = sliceToMarkdown(editor, from, to)
+  if (!markdown.trim()) throw new Error('The selection has no text to clean up.')
+  const { text } = await post<{ text: string }>('/api/ai/note-action', { action: 'clean', text: markdown })
+  if (!text.trim()) throw new Error('The AI returned nothing.')
+  editor.chain().focus().insertContentAt({ from, to }, markdownToHtml(text)).run()
+}
+
+/** The selected part of the note as simple Markdown (text, lists, checkboxes, headings). */
+function sliceToMarkdown(editor: Editor, from: number, to: number): string {
+  const lines: string[] = []
+  const inline = (node: import('@tiptap/pm/model').Node) => {
+    let s = ''
+    node.forEach((child) => {
+      if (child.isText) {
+        let t = child.text ?? ''
+        if (child.marks.some((m) => m.type.name === 'bold')) t = `**${t}**`
+        if (child.marks.some((m) => m.type.name === 'italic')) t = `*${t}*`
+        s += t
+      } else if (child.type.name === 'hardBreak') s += '\n'
+    })
+    return s
+  }
+  const walk = (node: import('@tiptap/pm/model').Node, indent: string, marker?: string) => {
+    const name = node.type.name
+    if (node.isText) lines.push(indent + (node.text ?? ''))
+    else if (name === 'paragraph') lines.push(indent + (marker ?? '') + inline(node))
+    else if (name === 'heading') lines.push('#'.repeat(node.attrs.level ?? 1) + ' ' + inline(node))
+    else if (name === 'bulletList' || name === 'orderedList' || name === 'taskList') {
+      let n = 1
+      node.forEach((item) => {
+        const m = name === 'orderedList' ? `${n++}. ` : name === 'taskList' ? (item.attrs.checked ? '- [x] ' : '- [ ] ') : '- '
+        let first = true
+        item.forEach((c) => {
+          walk(c, first ? indent : indent + '  ', first ? m : undefined)
+          first = false
+        })
+      })
+      lines.push('')
+    } else if (node.isTextblock) lines.push(indent + inline(node))
+    else node.forEach((c) => walk(c, indent))
+  }
+  editor.state.doc.slice(from, to).content.forEach((n) => walk(n, ''))
+  const md = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return md || editor.state.doc.textBetween(from, to, '\n', ' ').trim()
+}

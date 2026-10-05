@@ -461,6 +461,11 @@ button.text {
   margin-left: auto;
   color: var(--accent-text);
 }
+.menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line);
+}
 .menu-label {
   font-size: 12px;
   color: var(--muted);

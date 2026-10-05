@@ -94,6 +94,36 @@ const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image. Output only t
 /** One line of a drawing, for line-by-line recognition. */
 const LINE_PROMPT = 'Transcribe the handwritten text in this image. It is a single line of handwriting: output only that line as plain text – no description of the image, no explanation, no LaTeX, no quotes.'
 
+/** One-tap note actions (⋯ menu). */
+const NOTE_ACTION_PROMPTS = {
+  summary: `Summarise the note below in 2 to 6 short bullet points: the key points, decisions and outcomes. Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings – use them too.
+
+- Write in the same language as the note.
+- Output only the bullet points as Markdown ("- …"), with no heading, preamble or closing remark.
+
+Note:
+`,
+  todos: `List every action item in the note below – tasks, things someone has to do, follow-ups, deadlines. Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings – use them too.
+
+- One Markdown checkbox per item: "- [ ] …". Keep names and dates that are mentioned. Leave out items already marked done ([x]).
+- Write in the same language as the note.
+- If there are no action items, output exactly: NONE
+- Output only the checklist, with no heading, preamble or closing remark.
+
+Note:
+`,
+  clean: `Improve the wording of the text below: fix spelling, grammar and punctuation and make awkward sentences clear and concise.
+
+- Keep the meaning, every fact, name and number, and the writer's voice; don't add anything.
+- Keep the structure exactly: headings, lists, checkboxes ("- [ ]" / "- [x]"), line breaks between items.
+- Write in the same language as the text.
+- Output only the improved Markdown.
+
+Text:
+`,
+} as const
+export type NoteAction = keyof typeof NOTE_ACTION_PROMPTS
+
 /** Second pass: tidy OCR output into well-structured Markdown. */
 const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritten notes{IMAGE}. Clean it up:
 
@@ -150,6 +180,22 @@ export class Ai {
   }
   get enabled() {
     return this.canHandwriting || this.canImages || this.canPdf || this.canCompile || this.canAudio
+  }
+
+  /**
+   * Summarise / extract to-dos from a note, or clean up the wording of some
+   * text. Uses the "Compile notes" agents (general models); clean-up prefers
+   * the "Clean up converted text" agents when there are any.
+   */
+  async noteAction(action: NoteAction, markdown: string): Promise<{ text: string; agent: string }> {
+    const task = action === 'clean' && this.agents.available('format') ? 'format' : 'compile'
+    const limit = action === 'clean' ? Math.min(8192, Math.ceil(markdown.length / 2) + 512) : 1500
+    const { result, agent } = await this.agents.run(task, async (backend) => {
+      const raw = await backend.generate([{ text: NOTE_ACTION_PROMPTS[action] + markdown.slice(0, 60_000) }], limit)
+      return collapseRepeats(unwrapModelOutput(raw)).trim()
+    })
+    log.info(`note action "${action}" via "${agent.name}" (${markdown.length} → ${result.length} chars)`)
+    return { text: /^NONE\.?$/i.test(result) ? '' : result, agent: agent.name }
   }
 
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */

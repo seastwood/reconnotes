@@ -12,6 +12,8 @@ export function noteToMarkdown(
     drawingPlaceholder?: (id: string) => string
     /** replaces the whole image line (used to splice real images into AI input) */
     imagePlaceholder?: (id: string) => string
+    /** add the text recognised in pictures and recordings (for AI input) */
+    attachmentText?: boolean
   } = {},
 ): string {
   const transcripts = getTranscripts(doc)
@@ -38,6 +40,11 @@ export function noteToMarkdown(
       }
     }
     return s
+  }
+
+  const attText = (id: string, label: string) => {
+    const t = opts.attachmentText ? transcripts.get(`att:${id}`) : undefined
+    if (t?.trim()) out.push(`> ${label} ${t.trim().slice(0, 20000).replace(/\n/g, '\n> ')}`)
   }
 
   const block = (el: Y.XmlElement, indent: string, listMarker?: string) => {
@@ -88,6 +95,7 @@ export function noteToMarkdown(
           break
         }
         out.push(`![${alt}](${opts.attachmentUrl ? opts.attachmentUrl(id) : `attachment:${id}`})`)
+        attText(id, '📷 Text in this picture:')
         break
       }
       case 'audio':
@@ -95,6 +103,7 @@ export function noteToMarkdown(
         const id = el.getAttribute('attachmentId') as string
         const label = (el.getAttribute('name') as string) ?? name
         out.push(`[${label}](${opts.attachmentUrl ? opts.attachmentUrl(id) : `attachment:${id}`})`)
+        attText(id, name === 'audio' ? '🎙️ Transcript of this recording:' : '📄 Text of this file:')
         break
       }
       case 'drawing': {
