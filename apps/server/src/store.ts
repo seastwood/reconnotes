@@ -247,6 +247,16 @@ export class Store {
     return rows.map((r) => ({ noteId: r.note_id, title: r.title, snippet: r.snippet, rank: r.rank }))
   }
 
+  /** Notes matching ANY of the words (best first) – for "Ask your notes". */
+  searchAny(words: string[], limit = 8): { noteId: string; rank: number }[] {
+    const terms = words.map((w) => w.normalize('NFKC').replace(/[^\p{L}\p{N}_]+/gu, '')).filter(Boolean).slice(0, 16)
+    if (!terms.length) return []
+    const rows = this.db
+      .prepare(`SELECT note_id, bm25(notes_fts, 4.0, 1.0) AS rank FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?`)
+      .all(terms.map((t) => `"${t}"*`).join(' OR '), limit) as { note_id: string; rank: number }[]
+    return rows.map((r) => ({ noteId: r.note_id, rank: r.rank }))
+  }
+
   // --- Handwriting recognition bookkeeping --------------------------------
 
   drawingHash(noteId: string, drawingId: string): string | null {

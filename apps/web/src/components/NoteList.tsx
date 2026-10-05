@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -19,6 +19,7 @@ import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { searchNotes, type SearchResult } from '../lib/search'
 import { newNoteFromTemplate } from '../lib/templates'
 import { DueList } from './DueList'
+import { AskPanel } from './AskPanel'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 
 interface Props {
@@ -43,6 +44,8 @@ function formatDate(ts: number) {
 export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote }: Props) {
   const ws = useWorkspace()
   const [results, setResults] = useState<SearchResult[] | null>(null)
+  /** "Ask your notes" for the current search text */
+  const [asked, setAsked] = useState<string | null>(null)
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -188,6 +191,15 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
       </header>
 
       <ul className="notes">
+        {view.kind === 'search' && view.query.trim().length > 2 && asked !== view.query.trim() && (
+          <li className="note-row ask-row" onClick={() => setAsked(view.query.trim())}>
+            <div className="note-title">
+              <Sparkles size={15} /> Ask your notes
+            </div>
+            <div className="note-snippet">“{view.query.trim()}” – an answer from your notes, with sources</div>
+          </li>
+        )}
+        {view.kind === 'search' && asked === view.query.trim() && <AskPanel question={asked} onOpen={onOpen} />}
         {view.kind === 'search' &&
           results?.filter((r) => !ws.notes.find((n) => n.id === r.noteId)?.template).map((r) => (
             <li key={r.noteId} className={`note-row${r.noteId === noteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>

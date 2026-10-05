@@ -1951,3 +1951,66 @@ li[data-checked='true'] .due-chip button {
 .due-row > div {
   min-width: 0;
 }
+
+/* ---------------------------------------------------- ask your notes */
+.ask-row .note-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-text);
+}
+.ask-panel {
+  list-style: none;
+  margin: 4px 8px 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper));
+  border: 1px solid var(--line);
+}
+.ask-q {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ask-answer {
+  font-size: 15px;
+  line-height: 1.5;
+}
+.ask-answer p,
+.ask-answer ul {
+  margin: 0 0 8px;
+}
+.ask-answer ul {
+  padding-left: 18px;
+}
+.cite {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin: 0 1px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 9px;
+  vertical-align: 1px;
+}
+.ask-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.ask-sources button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  text-align: left;
+  font-size: 14px;
+}

@@ -6,6 +6,7 @@ import { noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteConten
 import type { Config } from './config'
 import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
+import { askNotes } from './ask'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
 import { Ai, isAiImage, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
 import {
@@ -168,6 +169,14 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const data = await readBody(req, 25 * 1024 * 1024)
     const { text, agent } = await sync.enqueue(() => ai.transcribePhoto(data, mime))
     json(res, 200, { text, agent })
+  })
+
+  /** "Ask your notes": an answer from your notes, with the notes it used. */
+  route('POST', '/api/ai/ask', async (req, res) => {
+    const { question } = await readJson<{ question: string }>(req)
+    if (!String(question ?? '').trim()) throw new HttpError(400, 'Ask a question')
+    const result = await sync.enqueue(() => askNotes(store, sync, ai, String(question).trim().slice(0, 1000)))
+    json(res, 200, result)
   })
 
   /**

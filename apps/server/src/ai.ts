@@ -198,6 +198,16 @@ export class Ai {
     return { text: /^NONE\.?$/i.test(result) ? '' : result, agent: agent.name }
   }
 
+  /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
+  async ask(prompt: string): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run('compile', async (backend) => {
+      const raw = await backend.generate([{ text: prompt }], 2000)
+      return collapseRepeats(unwrapModelOutput(raw)).trim()
+    })
+    log.info(`answered a question via "${agent.name}" (${prompt.length} chars of notes → ${result.length})`)
+    return { text: result, agent: agent.name }
+  }
+
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
   async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string }> {
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
