@@ -63,6 +63,8 @@ export interface NoteData {
   tags: string[]
   /** a template for new notes (listed under Templates, not with the notes) */
   template: boolean
+  /** ids of the notes this note links to */
+  links: string[]
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -105,6 +107,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
     tags: (m.get('tags') as string[] | undefined) ?? [],
     template: Boolean(m.get('template')),
+    links: (m.get('links') as string[] | undefined) ?? [],
   }
 }
 

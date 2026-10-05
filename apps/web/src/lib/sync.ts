@@ -214,6 +214,8 @@ export class SyncManager {
         const patch: Record<string, unknown> = { title: ex.title, snippet: ex.snippet }
         const oldTags = (meta.get('tags') as string[] | undefined) ?? []
         if (oldTags.join('\u0000') !== ex.tags.join('\u0000')) patch.tags = ex.tags
+        const oldLinks = (meta.get('links') as string[] | undefined) ?? []
+        if (oldLinks.join('\u0000') !== ex.links.join('\u0000')) patch.links = ex.links
         if (localChange) patch.updatedAt = Date.now()
         updateNote(ws, noteId, patch)
       }

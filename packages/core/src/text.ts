@@ -31,6 +31,8 @@ export interface ExtractedNote {
   drawings: string[]
   /** #tags in the note's text (including recognised handwriting), lower case, without # */
   tags: string[]
+  /** ids of the notes this note links to ([[…]] links) */
+  links: string[]
 }
 
 /**
@@ -58,6 +60,7 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
   const lines: string[] = []
   const attachments: string[] = []
   const drawings: string[] = []
+  const links = new Set<string>()
   const transcripts = getTranscripts(doc)
   let cur = ''
 
@@ -90,6 +93,13 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
         const alt = (node.getAttribute('alt') as string | undefined) ?? (node.getAttribute('name') as string | undefined)
         if (alt) cur += (cur ? ' ' : '') + alt
       }
+      if (name === 'noteLink') {
+        const id = node.getAttribute('noteId') as string | undefined
+        if (id) links.add(id)
+        const title = node.getAttribute('title') as string | undefined
+        if (title) cur += title
+        return
+      }
       if (name === 'drawing') {
         const id = node.getAttribute('drawingId') as string | undefined
         if (id) {
@@ -114,5 +124,5 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
     .join(' ')
     .slice(0, 200)
   const text = nonEmpty.join('\n')
-  return { title, snippet, text, attachments, drawings, tags: extractTags(text) }
+  return { title, snippet, text, attachments, drawings, tags: extractTags(text), links: [...links] }
 }

@@ -18,6 +18,7 @@ import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
+import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 
 interface Props {
   noteId: string
@@ -36,6 +37,18 @@ interface Props {
 
 export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
+  const onOpenNoteRef = useRef(onOpenNote)
+  onOpenNoteRef.current = onOpenNote
+  /** the [[ link picker: where it is, and what it replaces */
+  const [picker, setPicker] = useState<{ x: number; y: number; range: { from: number; to: number } | null } | null>(null)
+  const editorForPicker = useRef<TiptapEditor | null>(null)
+  const openLinkPicker = (range: { from: number; to: number } | null) => {
+    const ed = editorForPicker.current
+    if (!ed) return
+    const pos = range ? range.from : ed.state.selection.from
+    const c = ed.view.coordsAtPos(pos)
+    setPicker({ x: c.left, y: c.bottom, range })
+  }
   /** a tapped #tag: offer to show the notes with it */
   const [tagChip, setTagChip] = useState<{ tag: string; x: number; y: number } | null>(null)
   useEffect(() => {
@@ -63,6 +76,10 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         TaskItem.configure({ nested: true }),
         DrawingNode,
         ImageNode,
+        NoteLink.configure({
+          onOpen: (id) => onOpenNoteRef.current(id),
+          onTrigger: (range) => openLinkPicker(range),
+        }),
         Hashtags.configure({ onTagClick: (tag, rect) => setTagChip({ tag, x: rect.left, y: rect.bottom }) }),
         FindInNote.configure({
           // drawings, pictures and recordings are found by their recognised text
@@ -99,6 +116,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
   )
   const editorRef = useRef<TiptapEditor | null>(null)
   editorRef.current = editor
+  editorForPicker.current = editor
   useInputDebugLog(editor)
 
   // Find in note: ⌘F / Ctrl+F, the ⋯ menu, or opened from search results
@@ -182,12 +200,14 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             onTogglePanels={onTogglePanels}
             fullScreen={fullScreen}
             onFind={openFind}
+            onLinkNote={() => openLinkPicker(null)}
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
             {/* The blank space below the text is part of the editable area (padding),
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
+            <LinkedFrom noteId={noteId} onOpen={onOpenNote} />
           </div>
           {tagChip && onOpenTag && (
             <button
@@ -201,6 +221,25 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             >
               Show notes tagged #{tagChip.tag}
             </button>
+          )}
+          {picker && (
+            <LinkPicker
+              currentNoteId={noteId}
+              at={picker}
+              onClose={() => {
+                setPicker(null)
+                editor.commands.focus()
+              }}
+              onPick={(n) => {
+                const range = picker.range ?? { from: editor.state.selection.from, to: editor.state.selection.to }
+                setPicker(null)
+                editor
+                  .chain()
+                  .focus()
+                  .insertContentAt(range, [{ type: 'noteLink', attrs: { noteId: n.id, title: n.title } }, { type: 'text', text: ' ' }])
+                  .run()
+              }}
+            />
           )}
           <InkToolbar />
           <PencilPalette />

@@ -32,6 +32,7 @@ import {
   ListTodo,
   WandSparkles,
   ScrollText,
+  Link2,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -52,6 +53,8 @@ interface Props {
   fullScreen?: boolean
   /** open the find bar */
   onFind?: () => void
+  /** insert a link to another note */
+  onLinkNote?: () => void
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -92,7 +95,7 @@ function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | null>(null)
@@ -264,6 +267,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
             </button>
             <div className="menu-sep" />
+            {onLinkNote && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  onLinkNote()
+                }}
+              >
+                <Link2 size={16} /> Link to note… <span className="menu-shortcut">[[</span>
+              </button>
+            )}
             {onFind && (
               <button
                 onClick={() => {

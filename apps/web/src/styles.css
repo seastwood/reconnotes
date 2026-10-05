@@ -1700,3 +1700,103 @@ button.link {
   color: var(--muted);
   flex-shrink: 0;
 }
+
+/* ---------------------------------------------------------- note links */
+.note-link button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  margin: 0 1px;
+  font: inherit;
+  line-height: 1.35;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 6px;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+.note-link button svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.note-link.gone button {
+  color: var(--muted);
+  text-decoration: line-through;
+  cursor: default;
+}
+.ProseMirror-selectednode.note-link button,
+.note-link.ProseMirror-selectednode button {
+  outline: 2px solid var(--accent);
+}
+.picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}
+.link-picker {
+  position: fixed;
+  z-index: 50;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+.link-picker input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+.link-picker ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.link-picker li button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.link-picker li button.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.link-picker li.hint {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.linked-from {
+  max-width: 820px;
+  margin: -30vh auto 0;
+  padding: 16px 28px 40px;
+  position: relative;
+}
+.linked-from h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.linked-from button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  color: var(--accent-text);
+}
