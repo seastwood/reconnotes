@@ -16,6 +16,8 @@ import type { Rect } from './ink'
 export interface InkLine {
   /** strokes of the line's text, left to right (bullet mark excluded) */
   strokes: Stroke[]
+  /** every stroke of the line, bullet mark included */
+  allStrokes: Stroke[]
   /** the line starts with a bullet mark (dash, dot, tilde…) */
   bullet: boolean
   /** outline depth, 0 = leftmost */
@@ -38,6 +40,8 @@ export interface InkBox {
 /** Like InkLine, for boxes: which boxes form the line's text. */
 export interface BoxLine {
   ids: string[]
+  /** all boxes of the line, bullet mark included */
+  allIds: string[]
   bullet: boolean
   level: number
   bounds: Rect
@@ -81,6 +85,7 @@ export function segmentLines(strokes: Stroke[]): InkLine[] {
   const byId = new Map(usable.map((s) => [s.id, s]))
   return segmentBoxes(usable.map((s) => ({ id: s.id, box: inkBounds(s) }))).map((l) => ({
     strokes: l.ids.map((id) => byId.get(id)!),
+    allStrokes: l.allIds.map((id) => byId.get(id)!),
     bullet: l.bullet,
     level: l.level,
     bounds: l.bounds,
@@ -199,13 +204,19 @@ export function segmentBoxes(boxes: InkBox[]): BoxLine[] {
           markerX = f.b.x
         }
       }
-      return { items: byX, bullet, markerX, h, bounds: union(byX.length ? byX : g) }
+      return { items: byX, all: g, bullet, markerX, h, bounds: union(byX.length ? byX : g) }
     })
     .sort((a, b) => a.bounds.y - b.bounds.y)
 
   // 4. Indentation → outline levels.
   const levels = outlineLevels(lines.map((l) => ({ x: l.markerX, bullet: l.bullet, h: l.h })))
-  return lines.map((l, i) => ({ ids: l.items.map((it) => it.id), bullet: l.bullet, level: levels[i], bounds: l.bounds }))
+  return lines.map((l, i) => ({
+    ids: l.items.map((it) => it.id),
+    allIds: l.all.map((it) => it.id),
+    bullet: l.bullet,
+    level: levels[i],
+    bounds: l.bounds,
+  }))
 }
 
 /**

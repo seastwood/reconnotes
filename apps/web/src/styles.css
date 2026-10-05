@@ -41,6 +41,19 @@ body,
   height: 100%;
   margin: 0;
 }
+/* The page itself never scrolls (panels scroll inside), so iOS can't push
+   the toolbars out of view when the keyboard or Scribble appears. */
+html,
+body {
+  overflow: hidden;
+}
+body {
+  position: fixed;
+  inset: 0;
+}
+#root {
+  height: var(--app-height, 100%);
+}
 
 body {
   background: var(--bg);
@@ -963,6 +976,7 @@ button.link {
 }
 .drawing-footer-actions {
   display: flex;
+  flex-wrap: wrap;
   padding: 4px 6px;
   align-items: center;
   gap: 4px;

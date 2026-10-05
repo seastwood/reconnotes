@@ -14,9 +14,11 @@ export interface ToolStyle {
   simulatePressure: boolean
 }
 
+// Like Apple Notes' pen: pressure changes the width gently (strong thinning
+// makes ink blobby and uneven), and light pressure still leaves a full line.
 export const TOOL_STYLES: Record<Tool, ToolStyle> = {
-  pen: { sizeMul: 1, thinning: 0.6, opacity: 1, simulatePressure: false },
-  pencil: { sizeMul: 0.8, thinning: 0.75, opacity: 0.8, simulatePressure: false },
+  pen: { sizeMul: 1, thinning: 0.38, opacity: 1, simulatePressure: false },
+  pencil: { sizeMul: 0.8, thinning: 0.5, opacity: 0.8, simulatePressure: false },
   marker: { sizeMul: 2.2, thinning: 0.15, opacity: 1, simulatePressure: false },
   highlighter: { sizeMul: 5, thinning: 0, opacity: 0.35, simulatePressure: false },
 }
@@ -34,8 +36,10 @@ export function strokeOutline(s: Stroke, override?: Partial<ToolStyle> & { size?
   return getStroke(pts, {
     size: override?.size ?? s.size * style.sizeMul,
     thinning: style.thinning,
-    smoothing: 0.5,
-    streamline: 0.45,
+    // lifts light pressure (the Pencil's first and last samples are very light)
+    easing: (t: number) => Math.sin((t * Math.PI) / 2),
+    smoothing: 0.62,
+    streamline: 0.5,
     simulatePressure: style.simulatePressure || (constant && s.tool !== 'highlighter'),
     last: true,
     start: { cap: true },

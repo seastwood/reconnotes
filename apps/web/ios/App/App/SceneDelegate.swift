@@ -45,6 +45,7 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
     /// user picks "Use Scribble" and no drawing is being edited.
     private(set) var scribbleEnabled = false
     private var scribbleBlockers: [UIScribbleInteraction] = []
+    private var offsetObservation: NSKeyValueObservation?
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
@@ -64,6 +65,15 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         webView.addInteraction(pencil)
         // Let the web app draw edge-to-edge and handle Pencil input itself.
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        // The app's panels scroll inside the page; the page itself must never
+        // move. iOS otherwise slides it up when the keyboard or Scribble
+        // appears, taking the toolbars out of view.
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        offsetObservation = webView.scrollView.observe(\.contentOffset, options: [.new]) { scrollView, _ in
+            guard scrollView.zoomScale <= 1.01, scrollView.contentOffset != .zero else { return }
+            scrollView.contentOffset = .zero
+        }
         webView.allowsLinkPreview = false
     }
 

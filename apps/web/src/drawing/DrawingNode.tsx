@@ -2,10 +2,10 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { ArrowDown, ArrowUp, GripVertical, Loader2, ScanText, Trash2 } from 'lucide-react'
-import { getStrokes, getTranscripts, inkHash, newId, transcriptSourceKey } from '@reconnotes/core'
+import { ArrowDown, ArrowUp, GripVertical, Loader2, ScanText, Sparkles, Trash2 } from 'lucide-react'
+import { getStrokes, getTranscripts, inkHash, newId, tidyHandwriting, transcriptSourceKey } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
-import { useUndoManager } from '../editor/undo'
+import { DRAW_ORIGIN, useUndoManager } from '../editor/undo'
 import { inkUi, useInkUi } from './toolState'
 import { convertHandwriting, drawingImageUrl, recognizeDrawingLocally } from '../lib/ai'
 import { useDeviceOcr } from '../lib/deviceOcr'
@@ -133,6 +133,22 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     }
   }
 
+  /** Straighten lines, level words, align margins, smooth wobbles (undoable). */
+  const tidy = () => {
+    const strokes = getStrokes(ctx.doc, drawingId)
+    const before = strokes.toArray()
+    const after = tidyHandwriting(before, newId)
+    um?.stopCapturing()
+    ctx.doc.transact(() => {
+      for (let i = before.length - 1; i >= 0; i--) {
+        if (after[i] === before[i]) continue
+        strokes.delete(i, 1)
+        strokes.insert(i, [after[i]])
+      }
+    }, DRAW_ORIGIN)
+    um?.stopCapturing()
+  }
+
   /** Move this drawing above the previous block or below the next one. */
   const move = (dir: -1 | 1) => {
     const pos = getPos()
@@ -244,6 +260,9 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
         <ArrowDown size={16} />
       </button>
       <span className="spacer" />
+      <button onClick={tidy} title="Make the handwriting neater: straighter lines, even words and margins, smoother strokes (undo restores it)">
+        <Sparkles size={16} /> Tidy
+      </button>
       <button onClick={convert} disabled={busy} title="Convert handwriting to text below this drawing">
         {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} Convert to text
       </button>
