@@ -1,11 +1,14 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useState } from 'react'
-import { FileText, Loader2, Mic, ScanText } from 'lucide-react'
+import { FileText, Loader2, Mic, PenLine, ScanText } from 'lucide-react'
 import { convertImage } from '../lib/ai'
-import { getTranscripts } from '@reconnotes/core'
+import { getTranscripts, newId } from '@reconnotes/core'
 import { addAttachment, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
+import { DrawingCanvas } from '../drawing/DrawingCanvas'
+import { inkUi, useInkUi } from '../drawing/toolState'
+import { useUndoManager } from './undo'
 
 function useAttachmentUrl(id: string | null) {
   const [url, setUrl] = useState<string | null>(null)
@@ -51,6 +54,11 @@ function useAttachmentText(id: string) {
 
 function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
+  const ctx = useContext(NoteContext)
+  const um = useUndoManager()
+  const drawingId = node.attrs.drawingId as string | null
+  const markingUp = useInkUi((s) => drawingId !== null && s.activeDrawing === drawingId)
+  const [aspect, setAspect] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const convert = async () => {
@@ -67,6 +75,26 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
       setBusy(false)
     }
   }
+  /** Open the picture's ink layer (created on first use) to draw on it. */
+  const markUp = () => {
+    let id = drawingId
+    if (!id) {
+      id = newId()
+      updateAttributes({ drawingId: id })
+    }
+    inkUi.set({ activeDrawing: id, palette: null })
+  }
+  // The Pencil touching a picture starts marking it up (that first touch
+  // only opens it, like a closed drawing); mouse and fingers keep selecting,
+  // resizing and scrolling.
+  const onPenDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'pen' || !editor.isEditable || markingUp) return
+    if ((e.target as HTMLElement).closest('button, .image-resize')) return
+    e.preventDefault()
+    e.stopPropagation()
+    markUp()
+  }
+
   const width = node.attrs.width as number | null
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -90,15 +118,29 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     window.addEventListener('pointerup', up)
   }
   return (
-    <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}`} data-drag-handle="">
+    <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}${markingUp ? ' marking-up' : ''}`} data-drag-handle="">
       {url ? (
-        <div className="image-frame" style={width ? { width: `${width}%` } : undefined}>
-          <img src={url} alt={node.attrs.alt ?? ''} draggable={false} />
-          {selected && editor.isEditable && (
+        <div className="image-frame" style={width ? { width: `${width}%` } : undefined} onPointerDownCapture={onPenDown}>
+          <img
+            src={url}
+            alt={node.attrs.alt ?? ''}
+            draggable={false}
+            onLoad={(e) => {
+              const img = e.currentTarget
+              if (img.naturalWidth) setAspect(img.naturalHeight / img.naturalWidth)
+            }}
+          />
+          {ctx && drawingId && aspect && (
+            <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} overlay={{ aspect }} />
+          )}
+          {selected && editor.isEditable && !markingUp && (
             <div className="image-resize" onPointerDown={startResize} title="Drag to resize" aria-label="Resize image" />
           )}
-          {editor.isEditable && (
+          {editor.isEditable && !markingUp && (
             <div className={`image-actions${selected || busy ? ' show' : ''}`}>
+              <button onClick={markUp} title="Draw on this picture (or just touch it with Apple Pencil)">
+                <PenLine size={16} /> Mark up
+              </button>
               <button onClick={convert} disabled={busy} title="Read the handwriting or text in this picture and add it below">
                 {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
               </button>
@@ -128,7 +170,8 @@ export const ImageNode = Node.create({
   atom: true,
   draggable: true,
   addAttributes() {
-    return { attachmentId: { default: null }, alt: { default: '' }, width: { default: null } }
+    // drawingId: ink drawn on top of the picture (created when first marked up)
+    return { attachmentId: { default: null }, alt: { default: '' }, width: { default: null }, drawingId: { default: null } }
   },
   parseHTML() {
     return [{ tag: 'img[data-attachment-id]', getAttrs: (el) => ({ attachmentId: (el as HTMLElement).dataset.attachmentId }) }]

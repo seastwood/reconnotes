@@ -772,6 +772,24 @@ button.text {
 .image-block.selected img {
   outline: 3px solid var(--accent);
 }
+/* Ink on a picture: covers it exactly; takes input only while open. */
+.drawing-canvas.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.drawing-canvas.overlay.open {
+  pointer-events: auto;
+}
+.image-block.marking-up img {
+  outline: 3px solid var(--accent);
+  outline-offset: 0;
+}
+.image-block.marking-up {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 .image-actions {
   position: absolute;
   top: 8px;
@@ -788,6 +806,10 @@ button.text {
   .image-actions {
     opacity: 1;
   }
+}
+.image-actions {
+  display: flex;
+  gap: 6px;
 }
 .image-actions button {
   display: inline-flex;

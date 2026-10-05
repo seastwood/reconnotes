@@ -20,7 +20,7 @@ import {
   type Tool,
 } from '@reconnotes/core'
 import { DRAW_ORIGIN } from '../editor/undo'
-import { inkUi, toolState, useTools } from './toolState'
+import { inkUi, toolState, useInkUi, useTools } from './toolState'
 import { settings } from '../lib/settings'
 
 interface Props {
@@ -34,6 +34,12 @@ interface Props {
    * never draws.
    */
   footer?: React.ReactNode
+  /**
+   * Ink on top of a picture: the canvas covers the picture exactly (height =
+   * width × aspect, so the ink scales with it), never grows, and only takes
+   * input while open – otherwise touches reach the picture underneath.
+   */
+  overlay?: { aspect: number }
 }
 
 const ERASER_RADIUS = 10
@@ -63,12 +69,14 @@ function displayColor(c: string, dark: boolean) {
  *  - Eraser (whole stroke or pixel), lasso select/move, and an undo history
  *    shared with the typed text.
  */
-export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }: Props) {
+export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, overlay }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
   const liveRef = useRef<HTMLCanvasElement>(null)
   const [width, setWidth] = useState(0)
-  const [height, setHeight] = useState(() => getDrawingHeight(doc, drawingId))
+  const [storedHeight, setHeight] = useState(() => getDrawingHeight(doc, drawingId))
+  const height = overlay ? DRAWING_WIDTH * overlay.aspect : storedHeight
+  const open = useInkUi((s) => s.activeDrawing === drawingId)
   const [selection, setSelection] = useState<{ ids: Set<string>; bounds: Rect } | null>(null)
   const selectionRef = useRef(selection)
   selectionRef.current = selection
@@ -212,6 +220,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
   }, [editable])
 
   const growIfNeeded = (y: number) => {
+    if (overlay) return
     const h = getDrawingHeight(doc, drawingId)
     if (y > h - GROW_MARGIN && h < MAX_HEIGHT) getDrawingMeta(doc).set(drawingId, { height: h + GROW_BY })
   }
@@ -487,7 +496,11 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
 
   return (
     <>
-    <div ref={wrapRef} className="drawing-canvas" style={{ height: cssHeight || 200 }}>
+    <div
+      ref={wrapRef}
+      className={`drawing-canvas${overlay ? ' overlay' : ''}${overlay && open ? ' open' : ''}`}
+      style={overlay ? undefined : { height: cssHeight || 200 }}
+    >
       <canvas ref={baseRef} className="ink-layer" style={{ width: '100%', height: cssHeight }} />
       <canvas
         ref={liveRef}
@@ -500,7 +513,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
         onContextMenu={(e) => e.preventDefault()}
       />
     </div>
-    {editable && footer && (
+    {editable && footer && !overlay && (
       <div className="drawing-footer">
         <div
           className="drawing-resize-bar"
