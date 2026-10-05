@@ -68,6 +68,30 @@
 	<string>Take photos and scan documents into your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record audio notes.</string>
+	<key>ReconAppGroup</key>
+	<string>group.com.reconnotes.app</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Pictures, PDFs, recordings and other files</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>com.adobe.pdf</string>
+				<string>public.audio</string>
+				<string>public.movie</string>
+				<string>public.plain-text</string>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Turn your recordings and audio files into text in your notes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

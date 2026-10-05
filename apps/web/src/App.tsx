@@ -11,6 +11,7 @@ import { useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
+import { startShareInbox } from './lib/shareInbox'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -130,6 +131,8 @@ export function App() {
     setPane('note')
   }
   useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
+  // iOS app: things shared to ReconNotes become notes
+  useEffect(() => startShareInbox((id) => openFromReminder.current(id)), [])
 
   const noteDoc = useNoteDoc(note && !note.trashedAt ? nav.noteId : null)
 

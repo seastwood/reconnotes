@@ -2,6 +2,7 @@ import UIKit
 import WebKit
 import Vision
 import Speech
+import UniformTypeIdentifiers
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -14,10 +15,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = ReconBridgeViewController()
         window?.makeKeyAndVisible()
 
+        // Opened with a file ("Open in ReconNotes" / "Copy to ReconNotes") while not running
+        ShareInboxPlugin.importFiles(connectionOptions.urlContexts.map(\.url).filter(\.isFileURL))
+
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        let files = URLContexts.map(\.url).filter(\.isFileURL)
+        if !files.isEmpty {
+            ShareInboxPlugin.importFiles(files)
+            (window?.rootViewController as? CAPBridgeViewController)?.bridge?.triggerWindowJSEvent(eventName: "reconnotes:share-inbox")
+        }
         SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
     }
 
@@ -56,6 +65,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(SpeechRecognitionPlugin())
         // Turn a note into a PDF and open the share sheet (see PdfSharePlugin below).
         bridge?.registerPluginInstance(PdfSharePlugin())
+        // Things shared to ReconNotes (share sheet / Open in…), see ShareInboxPlugin below.
+        bridge?.registerPluginInstance(ShareInboxPlugin())
         bridge?.registerPluginInstance(ScribblePlugin())
         Self.current = self
         guard let webView = webView else { return }
@@ -386,6 +397,91 @@ public class PdfSharePlugin: CAPPlugin, CAPBridgedPlugin, WKNavigationDelegate {
         }
         sheet.completionWithItemsHandler = { _, completed, _, _ in call.resolve(["completed": completed]) }
         presenter.present(sheet, animated: true)
+    }
+}
+
+/// Things shared to ReconNotes wait in an inbox until the app turns them
+/// into a note: from the Share Extension (via the App Group container) and
+/// from "Open in / Copy to ReconNotes" (the app's own Library folder).
+///
+/// Each share is a folder holding `share.json` and any files:
+///     { id, createdAt, title?, items: [{ kind: "url" | "text" | "file", url?, text?, name?, mime?, file? }] }
+///
+///     ShareInbox.take() → { shares: [{ …share.json, dir }] }
+///     ShareInbox.remove({ ids })
+@objc(ShareInboxPlugin)
+public class ShareInboxPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "ShareInboxPlugin"
+    public let jsName = "ShareInbox"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "take", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
+    ]
+
+    static var appGroup: String {
+        Bundle.main.object(forInfoDictionaryKey: "ReconAppGroup") as? String ?? "group.com.reconnotes.app"
+    }
+
+    static var localInbox: URL {
+        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("ShareInbox", isDirectory: true)
+    }
+
+    static var inboxes: [URL] {
+        var dirs = [localInbox]
+        if let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
+            dirs.append(group.appendingPathComponent("ShareInbox", isDirectory: true))
+        }
+        return dirs
+    }
+
+    /// Copy opened files into the inbox as one share.
+    static func importFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let id = UUID().uuidString
+        let dir = localInbox.appendingPathComponent(id, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var items: [[String: Any]] = []
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let name = url.lastPathComponent
+            let dest = dir.appendingPathComponent(name)
+            do {
+                try FileManager.default.copyItem(at: url, to: dest)
+                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                items.append(["kind": "file", "name": name, "mime": mime, "file": name])
+            } catch {
+                NSLog("ReconNotes: couldn't import \(url): \(error)")
+            }
+        }
+        let share: [String: Any] = ["id": id, "createdAt": Date().timeIntervalSince1970 * 1000, "items": items]
+        if let data = try? JSONSerialization.data(withJSONObject: share) {
+            try? data.write(to: dir.appendingPathComponent("share.json"))
+        }
+    }
+
+    @objc func take(_ call: CAPPluginCall) {
+        var shares: [[String: Any]] = []
+        for inbox in Self.inboxes {
+            let dirs = (try? FileManager.default.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
+            for dir in dirs {
+                guard let data = try? Data(contentsOf: dir.appendingPathComponent("share.json")),
+                      var share = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                share["dir"] = dir.path
+                shares.append(share)
+            }
+        }
+        call.resolve(["shares": shares])
+    }
+
+    @objc func remove(_ call: CAPPluginCall) {
+        let ids = call.getArray("ids", String.self) ?? []
+        for inbox in Self.inboxes {
+            for id in ids where !id.contains("/") && !id.contains("..") {
+                try? FileManager.default.removeItem(at: inbox.appendingPathComponent(id, isDirectory: true))
+            }
+        }
+        call.resolve()
     }
 }
 

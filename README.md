@@ -226,6 +226,23 @@ server skips its own recognition for those drawings. Your server's AI agents are
 finds nothing, or in the web app. Settings › *Handwriting recognition on this device* switches it
 off or adds a polish pass with your clean-up agent.
 
+**Open in ReconNotes.** Files, Mail and other apps offer *Open in… / Copy to ReconNotes* for
+pictures, PDFs, recordings and other files: each becomes a new note. Nothing to set up.
+
+**Share → ReconNotes (share sheet).** To share links from Safari, photos from Photos, recordings
+from Voice Memos and so on, add the share extension once (an iOS app can't add it by itself):
+
+1. In Xcode: *File › New › Target… › Share Extension*, name it **ShareExtension**, finish, and
+   answer *Activate* when asked.
+2. In Terminal: `sh apps/web/ios/App/ShareExtension-src/install.sh` (puts ReconNotes' code into
+   the new extension).
+3. In Xcode, for **both** the *App* and the *ShareExtension* targets: *Signing & Capabilities ›
+   + Capability › App Groups*, then add **group.com.reconnotes.app** (same team for both).
+4. Run the app again.
+
+Shared things land in a new note the next time you open ReconNotes. App Groups need a paid
+Apple developer account; with a free Apple ID, use *Open in ReconNotes* instead.
+
 **No Mac?** Serve the web app from your server, open it in Safari on the iPad, and use
 *Share › Add to Home Screen*. It works offline and supports Apple Pencil pressure, but Pencil
 double-tap and squeeze need the native app. Serve it over HTTPS (e.g. Tailscale); browsers only
