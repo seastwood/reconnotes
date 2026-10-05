@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import Vision
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -39,6 +40,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
+        // On-device handwriting/text recognition for the web app (see TextRecognitionPlugin below).
+        bridge?.registerPluginInstance(TextRecognitionPlugin())
         guard let webView = webView else { return }
         let pencil = UIPencilInteraction()
         pencil.delegate = self
@@ -93,5 +96,89 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         guard let data = try? JSONSerialization.data(withJSONObject: detail),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('reconnotes:pencil', { detail: \(json) }))")
+    }
+}
+
+// MARK: - On-device text recognition
+
+/// Exposes Apple's Vision text recognizer to the web app as the
+/// `TextRecognition` Capacitor plugin (see apps/web/src/lib/deviceOcr.ts).
+///
+///     TextRecognition.recognize({ image: <base64 PNG/JPEG>, languages?: ["en-US"] })
+///       → { lines: [{ text, confidence, x, y, w, h }], width, height }
+///
+/// Boxes are normalised (0–1) with the origin at the top-left. Recognition
+/// runs on the device, works offline and handles handwriting.
+@objc(TextRecognitionPlugin)
+public class TextRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "TextRecognitionPlugin"
+    public let jsName = "TextRecognition"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "recognize", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func recognize(_ call: CAPPluginCall) {
+        guard let base64 = call.getString("image"),
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
+              let image = UIImage(data: data),
+              let cgImage = image.cgImage else {
+            call.reject("Could not read the image")
+            return
+        }
+        let languages = (call.getArray("languages") as? [String]) ?? []
+
+        let request = VNRecognizeTextRequest { request, error in
+            if let error = error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
+            let lines: [[String: Any]] = observations.compactMap { observation in
+                guard let best = observation.topCandidates(1).first else { return nil }
+                let box = observation.boundingBox // normalised, origin bottom-left
+                return [
+                    "text": best.string,
+                    "confidence": Double(best.confidence),
+                    "x": Double(box.minX),
+                    "y": Double(1 - box.maxY),
+                    "w": Double(box.width),
+                    "h": Double(box.height),
+                ]
+            }
+            call.resolve(["lines": lines, "width": cgImage.width, "height": cgImage.height])
+        }
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        if !languages.isEmpty {
+            request.recognitionLanguages = languages
+        } else if #available(iOS 16.0, *) {
+            request.automaticallyDetectsLanguage = true
+        }
+
+        let orientation = CGImagePropertyOrientation(image.imageOrientation)
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:]).perform([request])
+            } catch {
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+}
+
+extension CGImagePropertyOrientation {
+    /// Photos keep their rotation in EXIF; tell Vision which way is up.
+    init(_ orientation: UIImage.Orientation) {
+        switch orientation {
+        case .up: self = .up
+        case .down: self = .down
+        case .left: self = .left
+        case .right: self = .right
+        case .upMirrored: self = .upMirrored
+        case .downMirrored: self = .downMirrored
+        case .leftMirrored: self = .leftMirrored
+        case .rightMirrored: self = .rightMirrored
+        @unknown default: self = .up
+        }
     }
 }

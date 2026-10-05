@@ -167,3 +167,50 @@ describe('guarding against repetition loops', () => {
     expect(calls.every((c) => c.prompt === 'Text Recognition:')).toBe(true)
   })
 })
+
+describe('results from Apple on-device recognition', () => {
+  it('tidies text recognised on an iPad through the clean-up agents', async () => {
+    const tidy = app.ai.agents.agents().find((a) => a.model === 'tidy')!
+    app.ai.agents.updateSettings({ routing: { ...app.ai.agents.settings().routing, format: [tidy.id] } })
+    tidyAnswer = 'Seth\n\nHello\n\nI am groot'
+    const r = await fetch(`${base}/api/ai/tidy`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Seth\n\nHello\n\n1 am groot', image: Buffer.from('not really an image').toString('base64') }),
+    }).then((x) => x.json())
+    expect(r).toEqual({ text: 'Seth\n\nHello\n\nI am groot', cleaned: true })
+  })
+
+  it('skips server recognition for drawings an iPad already recognised', async () => {
+    const { getTranscripts, inkHash, transcriptSourceKey } = await import('@reconnotes/core')
+    const noteId = 'notedevice0000000001'
+    const strokes = word(40, 40, 4)
+    await app.sync.change(noteDocName(noteId), (doc) => {
+      getStrokes(doc, 'drawingdevice00001').push(strokes)
+      getTranscripts(doc).set('drawingdevice00001', 'Seth')
+      getTranscripts(doc).set(transcriptSourceKey('drawingdevice00001'), `device:${inkHash(strokes)}`)
+    })
+    // a second drawing in the same note that no device has recognised
+    await app.sync.change(noteDocName(noteId), (doc) => {
+      getStrokes(doc, 'drawingdevice00002').push(word(40, 200, 3))
+    })
+    const Yjs = await import('yjs')
+    const { getContent } = await import('@reconnotes/core')
+    await app.sync.change(noteDocName(noteId), (doc) => {
+      for (const id of ['drawingdevice00001', 'drawingdevice00002']) {
+        const el = new Yjs.XmlElement('drawing')
+        el.setAttribute('drawingId', id)
+        getContent(doc).push([el])
+      }
+    })
+    app.ai.agents.updateSettings({ autoHandwriting: true })
+    const timers = (app.sync as unknown as { hwTimers: Map<string, NodeJS.Timeout> }).hwTimers
+    app.sync.indexNote(noteId, app.sync.getDoc(noteDocName(noteId))!)
+    const keys = [...timers.keys()]
+    for (const t of timers.values()) clearTimeout(t)
+    timers.clear()
+    app.ai.agents.updateSettings({ autoHandwriting: false })
+    expect(keys.some((k) => k.endsWith('drawingdevice00002'))).toBe(true) // control: scheduled
+    expect(keys.some((k) => k.endsWith('drawingdevice00001'))).toBe(false) // recognised on device: skipped
+  })
+})

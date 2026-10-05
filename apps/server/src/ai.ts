@@ -298,18 +298,18 @@ export class Ai {
    * fails the conversion: if no agent is set up or all fail, the recognised
    * text is returned as is.
    */
-  async tidy(text: string, image: Buffer, mime: string): Promise<string> {
+  async tidy(text: string, image: Buffer | null, mime: string): Promise<string> {
     if (!this.agents.available('format') || !text.trim()) return text
     try {
       const { result, agent } = await this.agents.run('format', (backend, agent) => {
         const prompt =
-          FORMAT_PROMPT.replace('{IMAGE}', agent.vision ? ' (the original image is attached)' : '').replace(
+          FORMAT_PROMPT.replace('{IMAGE}', agent.vision && image ? ' (the original image is attached)' : '').replace(
             '{SOURCE}',
-            agent.vision ? 'the image' : 'common sense',
+            agent.vision && image ? 'the image' : 'common sense',
           ) + text
         // The tidied text should be about as long as the input; leave some room for Markdown.
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
-        return backend.generate(agent.vision ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
+        return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
       })
       const raw = unwrapModelOutput(result)
       const tidied = collapseRepeats(raw)

@@ -169,6 +169,26 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, { text, agent })
   })
 
+  /**
+   * Run only the clean-up pass on text recognised elsewhere (e.g. by
+   * Apple's on-device recognizer on an iPad). Returns the text unchanged
+   * when no clean-up agent is set up.
+   */
+  route('POST', '/api/ai/tidy', async (req, res) => {
+    const body = await readBody(req, 25 * 1024 * 1024)
+    let input: { text?: string; image?: string; mime?: string }
+    try {
+      input = JSON.parse(body.toString('utf8'))
+    } catch {
+      throw new HttpError(400, 'invalid JSON')
+    }
+    const text = String(input.text ?? '')
+    const image = input.image ? Buffer.from(input.image, 'base64') : null
+    const mime = input.mime && isAiImage(input.mime) ? input.mime : 'image/png'
+    const tidied = await sync.enqueue(() => ai.tidy(text, image, mime))
+    json(res, 200, { text: tidied, cleaned: tidied !== text })
+  })
+
   /** The exact image sent to the AI for a drawing – handy when recognition goes wrong. */
   route('GET', '/api/ai/drawing-image', (_req, res, _p, url) => {
     const noteId = url.searchParams.get('noteId') ?? ''

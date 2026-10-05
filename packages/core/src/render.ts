@@ -7,7 +7,7 @@ import type { Stroke, Tool } from './schema'
  * filled outline paths, so what the AI reads matches what you see.
  */
 
-interface ToolStyle {
+export interface ToolStyle {
   sizeMul: number
   thinning: number
   opacity: number
@@ -76,12 +76,11 @@ export function drawingToSvg(
   scale = 1,
   opts: { recognition?: boolean } = {},
 ): string {
-  const minSize = 3 / scale
   const paths = strokes
     .filter((s) => !opts.recognition || s.tool !== 'highlighter')
     .map((s) => {
       if (opts.recognition) {
-        const d = strokePath(s, { thinning: 0.15, simulatePressure: false, size: Math.max(s.size * 1.2, minSize) })
+        const d = strokePath(s, recognitionStyle(s, scale))
         return d ? `<path d="${d}" fill="#111111"/>` : ''
       }
       const d = strokePath(s)
@@ -99,3 +98,29 @@ export function drawingToSvg(
 function escapeAttr(v: string) {
   return /^#[0-9a-fA-F]{3,8}$|^[a-z]+$/.test(v) ? v : '#000000'
 }
+
+/**
+ * How a stroke is drawn for handwriting recognition (server and on-device):
+ * evenly thick, at least ~3 output pixels wide, so light pencil pressure
+ * stays legible.
+ */
+export function recognitionStyle(s: Stroke, scale: number): Partial<ToolStyle> & { size: number } {
+  return { thinning: 0.15, simulatePressure: false, size: Math.max(s.size * 1.2, 3 / scale) }
+}
+
+/** A short fingerprint of a drawing's strokes (same value on every device and the server). */
+export function inkHash(strokes: { id: string }[]): string {
+  let h = 0x811c9dc5
+  for (const s of strokes) {
+    for (let i = 0; i < s.id.length; i++) {
+      h ^= s.id.charCodeAt(i)
+      h = Math.imul(h, 0x01000193)
+    }
+    h ^= 44 // ","
+    h = Math.imul(h, 0x01000193)
+  }
+  return `${strokes.length}-${(h >>> 0).toString(36)}`
+}
+
+/** Key in a note's transcripts map recording who recognised a drawing, e.g. "device:<inkHash>". */
+export const transcriptSourceKey = (drawingId: string) => `${drawingId}#src`

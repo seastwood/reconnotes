@@ -6,6 +6,8 @@ import {
   extractNote,
   getStrokes,
   getTranscripts,
+  inkHash,
+  transcriptSourceKey,
   noteDocName,
   noteIdFromDocName,
   readNote,
@@ -141,6 +143,9 @@ export class SyncEngine {
     const strokes = getStrokes(doc, drawingId).toArray()
     const hash = strokesHash(strokes)
     if (this.store.drawingHash(noteId, drawingId) === hash) return
+    // An iPad already recognised exactly these strokes with Apple's
+    // on-device recognizer (usually better than server models): keep it.
+    if (getTranscripts(doc).get(transcriptSourceKey(drawingId)) === `device:${inkHash(strokes)}`) return
     const key = `${noteId}/${drawingId}`
     clearTimeout(this.hwTimers.get(key))
     // Wait until the writer has paused so we don't recognise half a sentence.

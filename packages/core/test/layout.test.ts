@@ -98,3 +98,33 @@ describe('lines that are only a bullet mark', () => {
     expect(linesToMarkdown(lines, ['Seth', '-', 'Hello'])).toBe('Seth\n\nHello')
   })
 })
+
+import { positionedLinesToMarkdown } from '../src'
+
+describe('positioned lines from an on-device recogniser', () => {
+  it('rebuilds nesting from where each line starts', () => {
+    // roughly what Apple Vision reports for the meeting-notes photo
+    const L = (text: string, x: number, y: number, w: number) => ({ text, x, y, w, h: 0.05 })
+    const md = positionedLinesToMarkdown([
+      L('Leadership Meeting 9/3/26', 0.07, 0.05, 0.85),
+      L('- Sprint goals - offer thoughts', 0.1, 0.15, 0.85),
+      L('- Standardized task boards', 0.1, 0.25, 0.7),
+      L('- how?', 0.2, 0.32, 0.2),
+      L('-Templates?', 0.34, 0.39, 0.3),
+      L('. Focus on winning 2 awards', 0.09, 0.52, 0.8),
+      L('~Imagry award', 0.16, 0.6, 0.45),
+    ])
+    expect(md).toBe(
+      [
+        'Leadership Meeting 9/3/26',
+        '',
+        '- Sprint goals - offer thoughts',
+        '- Standardized task boards',
+        '  - how?',
+        '    - Templates?',
+        '- Focus on winning 2 awards',
+        '  - Imagry award',
+      ].join('\n'),
+    )
+  })
+})

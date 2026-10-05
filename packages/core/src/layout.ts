@@ -203,21 +203,29 @@ export function segmentBoxes(boxes: InkBox[]): BoxLine[] {
     })
     .sort((a, b) => a.bounds.y - b.bounds.y)
 
-  // 4. Indentation → outline levels. Bullet lines form a list whose nesting
-  //    follows how far each bullet is indented relative to the ones above.
-  //    A plain line at (or left of) the list's margin is a paragraph and ends
-  //    the list; an indented plain line continues it as a sub-item.
+  // 4. Indentation → outline levels.
+  const levels = outlineLevels(lines.map((l) => ({ x: l.markerX, bullet: l.bullet, h: l.h })))
+  return lines.map((l, i) => ({ ids: l.items.map((it) => it.id), bullet: l.bullet, level: levels[i], bounds: l.bounds }))
+}
+
+/**
+ * Outline levels from where each line starts. Bullet lines form a list whose
+ * nesting follows how far each bullet is indented relative to the ones
+ * above. A plain line at (or left of) the list's margin is a paragraph and
+ * ends the list; an indented plain line continues it as a sub-item.
+ * `h` is the line's letter height; indents smaller than `tol × h` are noise.
+ */
+export function outlineLevels(lines: { x: number; bullet: boolean; h: number }[], tol = 0.6): number[] {
   let stack: number[] = []
   return lines.map((l) => {
-    const tol = 0.6 * l.h
-    const x = l.markerX
-    if (!l.bullet && (!stack.length || x <= stack[0] + tol)) {
+    const t = tol * l.h
+    if (!l.bullet && (!stack.length || l.x <= stack[0] + t)) {
       stack = []
-      return { ids: l.items.map((i) => i.id), bullet: false, level: 0, bounds: l.bounds }
+      return 0
     }
-    while (stack.length && x < stack[stack.length - 1] - tol) stack.pop()
-    if (!stack.length || x > stack[stack.length - 1] + tol) stack.push(x)
-    return { ids: l.items.map((i) => i.id), bullet: l.bullet, level: stack.length - 1, bounds: l.bounds }
+    while (stack.length && l.x < stack[stack.length - 1] - t) stack.pop()
+    if (!stack.length || l.x > stack[stack.length - 1] + t) stack.push(l.x)
+    return stack.length - 1
   })
 }
 
@@ -248,4 +256,34 @@ export function linesToMarkdown(lines: { bullet: boolean; level: number }[], tex
     }
   })
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * Turn text lines found by a recogniser that reports positions (e.g. Apple
+ * Vision; boxes normalised 0–1, origin top-left) into structured Markdown:
+ * pieces on the same row are joined left to right, and indentation becomes
+ * list nesting.
+ */
+export function positionedLinesToMarkdown(found: { text: string; x: number; y: number; w: number; h: number }[]): string {
+  const usable = found.filter((l) => l.text.trim())
+  if (!usable.length) return ''
+  const boxes = usable.map((l, i) => ({ id: String(i), box: { x: l.x * 1000, y: l.y * 1000, w: l.w * 1000, h: l.h * 1000 } }))
+  const grouped = segmentBoxes(boxes)
+  const rows = grouped.map((g) => {
+    const parts = g.ids.map((id) => usable[Number(id)]).sort((a, b) => a.x - b.x)
+    const text = parts.map((l) => l.text.trim()).join(' ')
+    return {
+      text,
+      // here bullet marks arrive as text ("- how?"), not as separate ink
+      bullet: BULLET_TEXT.test(text) && !/^\.\d/.test(text),
+      x: parts[0].x * 1000,
+      // these boxes are whole text lines, so a smaller share of their height marks an indent
+      h: (parts.reduce((sum, l) => sum + l.h, 0) / parts.length) * 1000 * 0.6,
+    }
+  })
+  const levels = outlineLevels(rows)
+  return linesToMarkdown(
+    rows.map((r, i) => ({ bullet: r.bullet, level: levels[i] })),
+    rows.map((r) => r.text),
+  )
 }

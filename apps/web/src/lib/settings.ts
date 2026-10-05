@@ -12,6 +12,10 @@ export interface Settings {
   /** what the Apple Pencil does when it touches typed text */
   pencilInText: PencilInTextMode
   theme: Theme
+  /** iOS app: recognise handwriting with Apple's on-device recognizer */
+  deviceOcr: boolean
+  /** …and then polish it with the server's clean-up agents when online */
+  deviceOcrCleanup: boolean
 }
 
 const KEY = 'reconnotes.settings'
@@ -20,7 +24,15 @@ function defaults(): Settings {
   // When the web app is served by the ReconNotes server itself, sync with it.
   const sameOrigin =
     typeof location !== 'undefined' && /^https?:$/.test(location.protocol) && !import.meta.env.DEV ? location.origin : ''
-  return { serverUrl: sameOrigin, token: '', fingerDrawing: false, pencilInText: 'draw', theme: 'system' }
+  return {
+    serverUrl: sameOrigin,
+    token: '',
+    fingerDrawing: false,
+    pencilInText: 'draw',
+    theme: 'system',
+    deviceOcr: true,
+    deviceOcrCleanup: false,
+  }
 }
 
 export const settings = new Store<Settings>(safeLocalGet(KEY, defaults()))

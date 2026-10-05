@@ -3,11 +3,12 @@ import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from 
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as Y from 'yjs'
 import { Loader2, ScanText, Trash2 } from 'lucide-react'
-import { getTranscripts, newId } from '@reconnotes/core'
+import { getStrokes, getTranscripts, inkHash, newId, transcriptSourceKey } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
 import { useUndoManager } from '../editor/undo'
 import { inkUi, useInkUi } from './toolState'
-import { convertHandwriting, drawingImageUrl } from '../lib/ai'
+import { convertHandwriting, drawingImageUrl, recognizeDrawingLocally } from '../lib/ai'
+import { useDeviceOcr } from '../lib/deviceOcr'
 
 export interface NoteContextValue {
   doc: Y.Doc
@@ -73,6 +74,36 @@ function DrawingView({ node, editor, deleteNode, selected }: ReactNodeViewProps)
   const [transcript, setTranscript] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // iOS app: recognise the handwriting on the device a few seconds after the
+  // writer pauses, so the drawing is searchable (synced to every device).
+  useEffect(() => {
+    if (!ctx || !drawingId || !useDeviceOcr() || !editor.isEditable) return
+    const strokes = getStrokes(ctx.doc, drawingId)
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let running = false
+    const check = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(async () => {
+        const marker = getTranscripts(ctx.doc).get(transcriptSourceKey(drawingId))
+        if (running || !strokes.length || marker === `device:${inkHash(strokes.toArray())}`) return
+        running = true
+        try {
+          await recognizeDrawingLocally(ctx.noteId, drawingId, { cleanup: false })
+        } catch {
+          /* best effort – the server can still recognise it */
+        } finally {
+          running = false
+        }
+      }, 4000)
+    }
+    strokes.observe(check)
+    check()
+    return () => {
+      strokes.unobserve(check)
+      if (timer) clearTimeout(timer)
+    }
+  }, [ctx, drawingId, editor])
 
   useEffect(() => {
     if (!ctx) return

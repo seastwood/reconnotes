@@ -191,6 +191,15 @@ In Xcode, select the **App** target › *Signing & Capabilities*, choose your te
 iPad, and press Run. A free Apple ID works, but the app must be re-installed every 7 days; a paid
 developer account removes that limit and allows TestFlight.
 
+**Apple's on-device handwriting recognition.** In the iOS/iPadOS app, *Convert to text* (for
+drawings and pictures) and the background recognition that makes handwriting searchable use
+Apple's Vision text recognizer, which runs on the iPad itself: fast, private, free and offline.
+ReconNotes still works out the structure (lines, bullets, indentation) from your strokes and only
+asks Apple to read each line. The text is synced, so it's searchable on every device, and the
+server skips its own recognition for those drawings. Your server's AI agents are used when Apple
+finds nothing, or in the web app. Settings › *Handwriting recognition on this device* switches it
+off or adds a polish pass with your clean-up agent.
+
 **No Mac?** Serve the web app from your server, open it in Safari on the iPad, and use
 *Share › Add to Home Screen*. It works offline and supports Apple Pencil pressure, but Pencil
 double-tap and squeeze need the native app. Serve it over HTTPS (e.g. Tailscale); browsers only

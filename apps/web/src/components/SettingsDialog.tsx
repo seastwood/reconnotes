@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib/settings'
 import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
+import { deviceOcrAvailable } from '../lib/deviceOcr'
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const s = useSettings((x) => x)
@@ -97,6 +98,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </section>
+
+        {deviceOcrAvailable() && (
+          <section>
+            <h3>Handwriting recognition on this device</h3>
+            <label className="check">
+              <input type="checkbox" checked={s.deviceOcr} onChange={(e) => settings.set({ deviceOcr: e.target.checked })} />
+              Use Apple’s on-device recognition (fast, private, works offline)
+            </label>
+            <p className="hint">
+              “Convert to text” and search use the recognizer built into iPadOS/iOS. Your server’s AI agents are used only if it finds
+              nothing.
+            </p>
+            {s.deviceOcr && (
+              <label className="check">
+                <input type="checkbox" checked={s.deviceOcrCleanup} onChange={(e) => settings.set({ deviceOcrCleanup: e.target.checked })} />
+                Then polish the result with my “Clean up converted text” agent when online
+              </label>
+            )}
+          </section>
+        )}
 
         <section>
           <h3>Apple Pencil &amp; drawing</h3>
