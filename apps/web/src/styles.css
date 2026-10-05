@@ -1626,6 +1626,23 @@ button.link {
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
+.replace-bar {
+  border-top: 0;
+}
+.find-bar button.text {
+  padding: 5px 10px;
+  font-size: 14px;
+  color: var(--accent-text);
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.1);
+  flex-shrink: 0;
+}
+.find-bar button.text:disabled {
+  opacity: 0.4;
+}
+.find-bar .icon.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
 .find-bar .find-icon {
   color: var(--muted);
   flex-shrink: 0;

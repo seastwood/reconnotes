@@ -1,5 +1,5 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
-import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
+import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useState } from 'react'
 import { AudioLines, FileText, Loader2, Mic, PenLine, ScanText } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
@@ -9,6 +9,7 @@ import { NoteContext } from '../drawing/DrawingNode'
 import { DrawingCanvas } from '../drawing/DrawingCanvas'
 import { inkUi, useInkUi } from '../drawing/toolState'
 import { useUndoManager } from './undo'
+import { findKey } from './find'
 
 function useAttachmentUrl(id: string | null) {
   const [url, setUrl] = useState<string | null>(null)
@@ -215,11 +216,39 @@ export const ImageNode = Node.create({
 
 // --- Audio ------------------------------------------------------------------
 
+/** The transcript with the words being searched for (⌘F) marked. */
+function highlight(text: string, query: string) {
+  const q = query.trim().toLocaleLowerCase()
+  if (!q) return text
+  const out: (string | React.ReactElement)[] = []
+  const lower = text.toLocaleLowerCase()
+  let i = 0
+  for (let at = lower.indexOf(q); at >= 0; at = lower.indexOf(q, at + q.length)) {
+    out.push(text.slice(i, at), <mark key={at} className="find-match current">{text.slice(at, at + q.length)}</mark>)
+    i = at + q.length
+  }
+  out.push(text.slice(i))
+  return out
+}
+
 function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const transcript = useAttachmentText(node.attrs.attachmentId)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Find (⌘F) landed on this recording because its transcript matches: show the transcript
+  const findHere = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const f = e ? findKey.getState(e.state) : undefined
+      const m = f?.matches[f.current]
+      return Boolean(m?.block && m.from === getPos())
+    },
+  })
+  useEffect(() => {
+    if (findHere) setOpen(true)
+  }, [findHere])
+  const findQuery = useEditorState({ editor, selector: ({ editor: e }) => (e ? (findKey.getState(e.state)?.query ?? '') : '') })
   const [error, setError] = useState<string | null>(null)
   const transcribe = async () => {
     if (busy) return
@@ -260,7 +289,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
           {open ? 'Hide transcript' : 'Show transcript'}
         </button>
       )}
-      {open && transcript && <div className="audio-transcript">{transcript}</div>}
+      {open && transcript && <div className="audio-transcript">{highlight(transcript, findQuery)}</div>}
     </NodeViewWrapper>
   )
 }

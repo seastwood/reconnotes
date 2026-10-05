@@ -43,6 +43,10 @@ declare module '@tiptap/core' {
       findNext: () => ReturnType
       findPrevious: () => ReturnType
       clearFind: () => ReturnType
+      /** replace the current match (typed text only) and move to the next */
+      replaceMatch: (text: string) => ReturnType
+      /** replace every typed-text match, as one undo step */
+      replaceAllMatches: (text: string) => ReturnType
     }
   }
 }
@@ -129,6 +133,29 @@ export const FindInNote = Extension.create<FindOptions>({
         () =>
         ({ tr, dispatch }) => {
           if (dispatch) dispatch(tr.setMeta(findKey, { query: '' } satisfies Meta))
+          return true
+        },
+      replaceMatch:
+        (text: string) =>
+        ({ state, dispatch }) => {
+          const s = findKey.getState(state)
+          const m = s?.matches[s.current]
+          if (!m || m.block) return false
+          if (dispatch) dispatch(state.tr.insertText(text, m.from, m.to))
+          return true
+        },
+      replaceAllMatches:
+        (text: string) =>
+        ({ state, dispatch }) => {
+          const s = findKey.getState(state)
+          const matches = (s?.matches ?? []).filter((m) => !m.block)
+          if (!matches.length) return false
+          if (dispatch) {
+            const tr = state.tr
+            // from the end, so earlier positions stay valid
+            for (const m of [...matches].reverse()) tr.insertText(text, m.from, m.to)
+            dispatch(tr)
+          }
           return true
         },
     }
