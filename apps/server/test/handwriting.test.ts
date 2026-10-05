@@ -46,6 +46,11 @@ beforeAll(async () => {
         return json.think === false ? reply('Buy milk') : reply('', 'Let me look at this image carefully', 40)
       case 'generate-only':
         return isGenerate ? reply('Buy milk') : reply('')
+      case 'think-long':
+        // reasons until it hits the limit, unless asked not to think
+        return /\/no_think$/.test(prompt) && json.options?.num_predict >= 2048
+          ? reply('Buy milk')
+          : res.end(JSON.stringify({ message: { content: '', thinking: 'Got it, let me look carefully…' }, done_reason: 'length', eval_count: 527 }))
       case 'short-prompt':
         return prompt.length < 80 ? reply('Buy milk') : reply('', '', 3)
     }
@@ -211,5 +216,19 @@ describe('compiling a note with pictures', () => {
     expect(sent.messages[0].images).toHaveLength(2) // the drawing and the picture
     expect(sent.messages[0].content).toMatch(/Meeting notes/)
     expect(sent.messages[0].content).toMatch(/picture attached to the note/)
+  })
+})
+
+describe('thinking models that run out of room', () => {
+  it('retries with /no_think and a bigger budget', async () => {
+    mode = 'think-long'
+    requests.length = 0
+    const r = await convert()
+    expect(r.status).toBe(200)
+    expect(r.body.text).toBe('Buy milk')
+    const retry = requests[1] as unknown as { think?: boolean; options: { num_predict: number }; messages: { content: string }[] }
+    expect(retry.think).toBe(false)
+    expect(retry.options.num_predict).toBeGreaterThanOrEqual(2048)
+    expect(retry.messages[0].content).toMatch(/\/no_think$/)
   })
 })

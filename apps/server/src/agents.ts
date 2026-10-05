@@ -172,8 +172,13 @@ class OllamaBackend implements Backend {
     const first = await attempt('chat', () => this.chat(text, images, limit))
     if (first !== null) return first
     // 2. "thinking" models that only reasoned: ask again with thinking off
+    //    (plus Qwen's "/no_think" switch, which some models honour instead),
+    //    and with enough room to finish if they reason anyway.
     if (tried[0].includes('reasoning only')) {
-      const noThink = await attempt('chat without thinking', () => this.chat(text, images, limit, false)).catch(() => null)
+      const roomy = Math.min(8192, Math.max(limit * 4, 2048))
+      const noThink = await attempt('chat without thinking', () => this.chat(`${text}\n\n/no_think`, images, roomy, false)).catch(
+        () => null,
+      )
       if (noThink) return noThink
     }
     // 3. some OCR models only answer through the plain /api/generate endpoint

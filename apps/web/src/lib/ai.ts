@@ -45,12 +45,33 @@ export function markdownToHtml(md: string): string {
   // Task list syntax -> TipTap task list markup
   const html = marked.parse(md, { async: false, gfm: true }) as string
   return html
+    // empty list items (a lone "-") are invalid in the editor: drop them, then any list left empty
+    .replace(/<li>\s*(<p>\s*<\/p>)?\s*<\/li>/g, '')
+    .replace(/<(ul|ol)>\s*<\/\1>/g, '')
     .replace(/<ul>\s*(<li><input[^>]*type="checkbox"[\s\S]*?)<\/ul>/g, (_m, items: string) => `<ul data-type="taskList">${items}</ul>`)
     .replace(
       /<li><input([^>]*)type="checkbox"([^>]*)>\s*([\s\S]*?)<\/li>/g,
       (_m, a: string, b: string, body: string) =>
         `<li data-type="taskItem" data-checked="${/checked/.test(a + b)}"><p>${body.trim()}</p></li>`,
     )
+}
+
+/**
+ * Insert converted text. If the formatted version is rejected by the editor
+ * (odd Markdown from a model), fall back to plain paragraphs rather than
+ * losing the result.
+ */
+function insertConverted(editor: Editor, at: number, markdown: string) {
+  try {
+    editor.chain().focus().insertContentAt(at, markdownToHtml(markdown), { errorOnInvalidContent: true }).run()
+  } catch {
+    const paragraphs = markdown
+      .split(/\n+/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => ({ type: 'paragraph', content: [{ type: 'text', text: l }] }))
+    editor.chain().focus().insertContentAt(at, paragraphs).run()
+  }
 }
 
 /** Recognise the handwriting in a drawing and insert it as text right below. */
@@ -67,7 +88,7 @@ export async function convertHandwriting(editor: Editor, noteId: string, drawing
     return at === null
   })
   if (at === null) throw new Error('Drawing no longer exists')
-  editor.chain().focus().insertContentAt(at, markdownToHtml(text)).run()
+  insertConverted(editor, at, text)
 }
 
 /**
@@ -117,7 +138,7 @@ export async function convertImage(editor: Editor, attachmentId: string, insertA
   if (!json.text?.trim()) throw new Error('The AI returned no text for this picture.')
   const at = insertAt()
   if (at === undefined) throw new Error('The picture no longer exists')
-  editor.chain().focus().insertContentAt(at, markdownToHtml(json.text)).run()
+  insertConverted(editor, at, json.text)
 }
 
 /**

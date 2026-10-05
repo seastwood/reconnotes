@@ -237,8 +237,9 @@ export function linesToMarkdown(lines: { bullet: boolean; level: number }[], tex
     const checkbox = /^\s*\[(x| )?\]\s*/i.exec(t)
     if (BULLET_TEXT.test(t) && !/^\.\d/.test(t)) {
       bullet = true
-      t = t.replace(BULLET_TEXT, '')
+      t = t.replace(BULLET_TEXT, '').trim()
     }
+    if (!t) return // the line was only a bullet mark
     const item = checkbox ? `[${checkbox[1]?.toLowerCase() === 'x' ? 'x' : ' '}] ${t}` : t
     if (bullet || l.level > 0) out.push(`${'  '.repeat(l.level)}- ${item}`)
     else {

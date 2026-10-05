@@ -87,3 +87,14 @@ describe('handwriting layout', () => {
     expect(segmentLines([])).toEqual([])
   })
 })
+
+describe('lines that are only a bullet mark', () => {
+  it('skips them instead of producing an empty list item', () => {
+    const lines = [
+      { bullet: false, level: 0 },
+      { bullet: true, level: 0 },
+      { bullet: false, level: 0 },
+    ]
+    expect(linesToMarkdown(lines, ['Seth', '-', 'Hello'])).toBe('Seth\n\nHello')
+  })
+})
