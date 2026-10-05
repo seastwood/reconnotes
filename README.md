@@ -31,8 +31,21 @@ It's built for one person's daily notes, and anyone can run it.
   text in images, screenshots and charts, PDFs, and audio transcripts. Search works offline too.
 - **AI.** *Convert to text* turns a drawing into clean typed text. *Compile* turns a whole note,
   handwriting and typing, into a tidy new document.
-- **Backups.** Scheduled snapshots of the database, plus a plain **Markdown export** of every note
-  in its folder structure, readable without ReconNotes.
+- **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
+  *Settings › Backups* shows what changed since each backup and restores one note or everything;
+  each note's current state goes into its version history first.
+- **Never locked in.** *Settings › Export & import*: every note as Markdown in its folders, with
+  pictures, files and drawings, in one zip. It imports Markdown or zips back, including from
+  Obsidian, Bear and Notion, with folders, checklists, tables and `[[links]]`.
+- **A key per device.** *Settings › Devices*: give each device its own key and switch a lost one
+  off on its own. Setup links connect a new device in one tap.
+- **Quick and versatile.** ⌘K runs any command or opens any note. You can select several notes, or
+  swipe a note for Move, Pin or Delete, and Undo is offered after each. Notes can have tables,
+  repeating due dates (`!every monday`) and a calendar. Folders can be *kept offline*, and a single
+  note can be shared as a **read-only link**.
+- **iPhone and iPad extras.** Scan documents with the camera, and add notes from the Home Screen or
+  Lock Screen widget or from Siri and Shortcuts. Tap your handwriting to hear what was being said
+  while you wrote it.
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
@@ -229,16 +242,23 @@ off or adds a polish pass with your clean-up agent.
 **Open in ReconNotes.** Files, Mail and other apps offer *Open in… / Copy to ReconNotes* for
 pictures, PDFs, recordings and other files: each becomes a new note. Nothing to set up.
 
-**Share → ReconNotes (share sheet).** To share links from Safari, photos from Photos, recordings
-from Voice Memos and so on, add the share extension once, on the Mac:
+**Share → ReconNotes (share sheet) and the Quick capture widget.** To share links from Safari,
+photos from Photos, recordings from Voice Memos and so on, and to get the Home Screen and Lock Screen
+widget, add the app extensions once, on the Mac:
 
 ```bash
 gem install --user-install xcodeproj                      # once (or: sudo gem install xcodeproj)
-npm run ios:add-share-extension -w @reconnotes/web
+npm run ios:add-extensions -w @reconnotes/web
 ```
 
-This adds the *ShareExtension* target, embeds it in the app and gives both the App Group
-`group.com.reconnotes.app`, signed with the App target's team. Then run the app from Xcode as usual.
+This adds the *ShareExtension* and *ReconNotesWidget* targets, embeds them in the app, and gives
+the app and the share extension the App Group `group.com.reconnotes.app`. Everything is signed with
+the App target's team. Then run the app from Xcode as usual. It's safe to run again after updates.
+
+**Siri and Shortcuts.** *"New note in ReconNotes"*, *"Record a ReconNotes voice note"* and
+*"Scan into ReconNotes"* work with Siri, Spotlight, the Action button and the Shortcuts app with no
+setup. The links `reconnotes://new?text=…`, `reconnotes://record` and `reconnotes://scan` also work
+from anywhere.
 (By hand instead: *File › New › Target › Share Extension* named **ShareExtension**, run
 `sh apps/web/ios/App/ShareExtension-src/install.sh`, and add the App Group to both targets.)
 
@@ -253,9 +273,12 @@ allow offline app caching on secure origins.
 ## Tests
 
 ```bash
-npm test                 # core + server: CRDT merges, folders, search, attachments, backups, Ollama
+npm test                 # core + server: CRDT merges, folders, search, attachments, backups, restore, export/import, device keys, share links
 npm run build && npm run e2e   # browser test: two devices, offline edits, drawing, undo, search
 ```
+
+Every push runs these on GitHub Actions, plus an iOS simulator build of the app with its extensions
+(`.github/workflows/ci.yml`). Swift mistakes show up there, not only on the Mac.
 
 ## License
 
