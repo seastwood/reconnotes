@@ -93,8 +93,9 @@ export function App() {
   usePencilInteractions()
   const ws = useWorkspace()
   const narrow = useMedia('(max-width: 699px)')
-  // room for folders + notes + the note side by side (iPad landscape, large iPad portrait, desktop)
-  const wide = useMedia('(min-width: 1000px)')
+  // tablets and computers: folders, notes and the note side by side (the
+  // columns get narrower on smaller screens); phones show one at a time
+  const wide = !narrow
   const [nav, setNavState] = useState<Nav>(() => safeLocalGet<Nav>('reconnotes.nav', { view: { kind: 'all' }, noteId: null }))
   const [pane, setPane] = useState<'folders' | 'list' | 'note'>(nav.noteId ? 'note' : 'folders')
   /** iPad/desktop: 3 = folders + notes + note, 2 = notes + note, 1 = note only (full screen) */

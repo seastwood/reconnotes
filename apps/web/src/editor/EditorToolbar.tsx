@@ -165,6 +165,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
           <ChevronLeft size={22} />
         </button>
       )}
+      {/* the middle buttons scroll sideways when space is short; navigation
+          (left) and AI + ⋯ (right) always stay in view */}
+      <div className="tb-scroll">
       <button className="tb undo" onClick={() => um?.undo()} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
         <Undo2 size={20} />
       </button>
@@ -224,8 +227,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <input ref={photoRef} type="file" accept="image/*" multiple hidden onChange={onFiles} />
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onFiles} />
       <input ref={fileRef} type="file" multiple hidden onChange={onFiles} />
+      </div>
 
-      <span className="spacer" />
       {busy && <Loader2 size={18} className="spin" aria-label={busy} />}
       <button
         className="tb"

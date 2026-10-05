@@ -135,13 +135,28 @@ select {
   left: 0;
   box-shadow: var(--shadow);
 }
-/* mid-size screens (e.g. 12.9" iPad portrait): slimmer columns leave the note room */
-@media (min-width: 700px) and (max-width: 1199px) {
+/* smaller screens: slimmer columns leave the note room */
+@media (min-width: 1000px) and (max-width: 1199px) {
   .sidebar {
     width: 240px;
   }
   .list-col {
     width: 290px;
+  }
+}
+/* iPad portrait (e.g. 11": 834px): all three still fit side by side */
+@media (min-width: 700px) and (max-width: 999px) {
+  .sidebar {
+    width: 210px;
+  }
+  .sidebar-head {
+    padding-left: 12px;
+  }
+  .sidebar-head h1 {
+    font-size: 17px;
+  }
+  .list-col {
+    width: 250px;
   }
 }
 .sidebar-backdrop {
@@ -203,10 +218,17 @@ button.text {
   gap: 4px;
   padding: 14px 10px 8px 16px;
 }
+.sidebar-head > :not(h1) {
+  flex-shrink: 0;
+}
 .sidebar-head h1 {
   font-size: 20px;
   margin: 0;
   flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   letter-spacing: -0.01em;
 }
 .sync-badge {
@@ -577,8 +599,21 @@ button.text {
   background: var(--paper);
   z-index: 10;
 }
-.editor-toolbar::-webkit-scrollbar {
+.editor-toolbar::-webkit-scrollbar,
+.tb-scroll::-webkit-scrollbar {
   display: none;
+}
+.tb-scroll {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* a soft fade shows there's more to scroll to */
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
 }
 .editor-toolbar .menu-anchor {
   position: static;
