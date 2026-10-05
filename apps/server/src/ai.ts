@@ -4,6 +4,7 @@ import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
+import { collapseRepeats } from './text'
 import { createHash } from 'node:crypto'
 export { stripThinking } from './agents'
 
@@ -68,6 +69,17 @@ export function sampleHandwritingPng(): Buffer {
 
 /** A minimal fallback instruction for OCR models that ignore long prompts. */
 const SHORT_HANDWRITING_PROMPT = 'Transcribe the handwritten text in this image.'
+
+/**
+ * Dedicated OCR models are trained on a fixed task prompt and can ramble or
+ * loop with a long instruction. Used when the agent has no custom prompt.
+ */
+function knownOcrPrompt(model: string): string | null {
+  const m = model.toLowerCase()
+  if (m.includes('glm-ocr')) return 'Text Recognition:'
+  if (m.includes('deepseek-ocr')) return 'Free OCR.'
+  return null
+}
 
 /** For photos and screenshots, which may mix handwriting with printed text. */
 const PHOTO_PROMPT = `Transcribe all the text in this image – handwritten and printed – such as a photo of a notebook page, a whiteboard, a sticky note or a screenshot.
@@ -168,14 +180,20 @@ export class Ai {
     // OCR models handle better.
     const prompts = [
       ...new Set([
-        agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT),
+        agent.prompt.trim() ||
+          knownOcrPrompt(agent.model) ||
+          (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT),
         opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
       ]),
     ]
+    // A single line can't need many tokens; a low cap also stops runaway loops quickly.
+    const maxTokens = opts.line ? 200 : 4096
     const empties: string[] = []
     for (const [i, prompt] of prompts.entries()) {
       try {
-        const text = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], 16000)
+        const raw = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], maxTokens)
+        const text = collapseRepeats(raw)
+        if (text.length < raw.length) log.info(`"${agent.name}" repeated itself; collapsed ${raw.length} → ${text.length} chars`)
         log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
         if (text.trim()) return text
         empties.push(`prompt ${i + 1}: empty reply`)
@@ -289,10 +307,20 @@ export class Ai {
             '{SOURCE}',
             agent.vision ? 'the image' : 'common sense',
           ) + text
-        return backend.generate(agent.vision ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], 16000)
+        // The tidied text should be about as long as the input; leave some room for Markdown.
+        const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
+        return backend.generate(agent.vision ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
       })
-      log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${result.length} chars)`)
-      return result.trim() ? stripFences(result) : text
+      const raw = stripFences(result)
+      const tidied = collapseRepeats(raw)
+      log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${raw.length} chars)`)
+      // Reject clean-ups that wander off: much longer than the input (before
+      // or after collapsing repeats) means the model looped or invented text.
+      if (!tidied.trim() || raw.length > text.length * 2 + 200 || tidied.length < raw.length * 0.7) {
+        log.warn(`clean-up by "${agent.name}" rejected (${text.length} → ${tidied.length} chars); keeping the recognised text`)
+        return text
+      }
+      return tidied
     } catch (err) {
       log.warn(`clean-up skipped: ${(err as Error).message}`)
       return text

@@ -141,6 +141,12 @@ interface OllamaReply {
   evalCount: number
 }
 
+/**
+ * Deterministic output, with a repetition penalty: small OCR models with
+ * plain greedy decoding easily get stuck repeating the same words.
+ */
+const SAMPLING = { temperature: 0, repeat_penalty: 1.15, repeat_last_n: 64 }
+
 class OllamaBackend implements Backend {
   constructor(private agent: AgentConfig) {}
 
@@ -201,7 +207,7 @@ class OllamaBackend implements Backend {
   private async chat(text: string, images: string[], maxTokens: number, think?: boolean): Promise<OllamaReply> {
     const body = await this.post('/api/chat', {
       ...(think === undefined ? {} : { think }),
-      options: { num_predict: maxTokens, temperature: 0 },
+      options: { num_predict: maxTokens, ...SAMPLING },
       messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
     })
     const m = (body.message ?? {}) as { content?: string; thinking?: string }
@@ -212,7 +218,7 @@ class OllamaBackend implements Backend {
     const body = await this.post('/api/generate', {
       prompt: text,
       ...(images.length ? { images } : {}),
-      options: { num_predict: maxTokens, temperature: 0 },
+      options: { num_predict: maxTokens, ...SAMPLING },
     })
     return {
       content: String(body.response ?? ''),
@@ -240,7 +246,13 @@ class OpenAiBackend implements Backend {
         ...(this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {}),
       },
       signal: AbortSignal.timeout(this.agent.timeoutSec * 1000),
-      body: JSON.stringify({ model: this.agent.model, max_tokens: maxTokens, temperature: 0, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({
+        model: this.agent.model,
+        max_tokens: maxTokens,
+        temperature: 0,
+        frequency_penalty: 0.3, // discourages repetition loops
+        messages: [{ role: 'user', content }],
+      }),
     })
     if (!res.ok) throw new Error(`server returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
     const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }

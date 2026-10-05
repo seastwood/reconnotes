@@ -13,7 +13,7 @@ let app: App
 let base: string
 let dir: string
 let ollama: http.Server
-const calls: { model: string; prompt: string; images: number }[] = []
+const calls: { model: string; prompt: string; images: number; options?: { num_predict?: number; repeat_penalty?: number } }[] = []
 const ocrAnswers = ['Leadership Meeting 9/3/26', 'Sprint goals', '- how?']
 let ocrIndex = 0
 let tidyAnswer = '```markdown\n# Leadership Meeting 9/3/26\n\n- Sprint goals\n  - how?\n```'
@@ -36,7 +36,7 @@ beforeAll(async () => {
     for await (const c of req) body += c
     const j = JSON.parse(body)
     const m = j.messages?.[0] ?? { content: j.prompt, images: j.images }
-    calls.push({ model: j.model, prompt: m.content, images: m.images?.length ?? 0 })
+    calls.push({ model: j.model, prompt: m.content, images: m.images?.length ?? 0, options: j.options })
     res.writeHead(200, { 'Content-Type': 'application/json' })
     const content = j.model === 'tidy' ? tidyAnswer : ocrAnswers[ocrIndex++ % ocrAnswers.length]
     res.end(JSON.stringify(req.url === '/api/generate' ? { response: content, eval_count: 0 } : { message: { content }, eval_count: content ? 5 : 0 }))
@@ -116,5 +116,48 @@ describe('line-by-line recognition of pictures', () => {
     const ocrCalls = calls.filter((c) => c.model === 'ocr')
     expect(ocrCalls).toHaveLength(3)
     expect(ocrCalls.every((c) => /single line/.test(c.prompt))).toBe(true)
+  })
+})
+
+describe('guarding against repetition loops', () => {
+  it('collapses a looping line, caps tokens per line and uses a repetition penalty', async () => {
+    const strokes = [...word(40, 40, 4), ...word(40, 200, 5), ...word(40, 360, 1), ...word(120, 360, 2), ...word(240, 360, 5)]
+    await app.sync.change(noteDocName('noteloop000000000001'), (doc) => getStrokes(doc, 'drawingloop0000001').push(strokes))
+    ocrAnswers.splice(0, ocrAnswers.length, Array(300).fill('Seth').join(' '), 'Hello', 'I am groot')
+    ocrIndex = 0
+    calls.length = 0
+    tidyAnswer = ''
+    const r = await fetch(`${base}/api/ai/handwriting`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId: 'noteloop000000000001', drawingId: 'drawingloop0000001' }),
+    }).then((x) => x.json())
+    expect(r.text).toBe('Seth\n\nHello\n\nI am groot')
+    const ocr = calls.filter((c) => c.model === 'ocr')
+    expect(ocr.every((c) => c.options?.num_predict === 200 && c.options?.repeat_penalty === 1.15)).toBe(true)
+  })
+
+  it('rejects a clean-up that runs away and keeps the recognised text', async () => {
+    tidyAnswer = 'Seth Hello I am groot ' + Array(400).fill('and more invented text').join(' ')
+    const r = await fetch(`${base}/api/ai/handwriting`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId: 'noteloop000000000001', drawingId: 'drawingloop0000001' }),
+    }).then((x) => x.json())
+    expect(r.text).toBe('Seth\n\nHello\n\nI am groot')
+  })
+
+  it('uses the task prompt GLM-OCR was trained on', async () => {
+    const glm = app.ai.agents.save({ name: 'GLM', kind: 'ollama', baseUrl: app.ai.agents.agents()[0].baseUrl, model: 'glm-ocr:q8_0' })
+    app.ai.agents.updateSettings({ routing: { ...app.ai.agents.settings().routing, handwriting: [glm.id], format: [] } })
+    ocrIndex = 0
+    calls.length = 0
+    await fetch(`${base}/api/ai/handwriting`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ noteId: 'noteloop000000000001', drawingId: 'drawingloop0000001' }),
+    })
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every((c) => c.prompt === 'Text Recognition:')).toBe(true)
   })
 })
