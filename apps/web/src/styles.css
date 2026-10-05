@@ -97,6 +97,7 @@ select {
 /* ---------------------------------------------------------------- layout */
 .app {
   display: flex;
+  position: relative;
   height: 100%;
   padding-top: env(safe-area-inset-top);
   overflow: hidden;
@@ -2791,4 +2792,25 @@ a.button {
 }
 .replay-bar .hint {
   font-size: 13px;
+}
+
+/* put the on-screen keyboard away (sits just above it) */
+.hide-keyboard {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 250;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.app:has(.ink-toolbar) .hide-keyboard {
+  bottom: 72px;
 }

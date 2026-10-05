@@ -13,6 +13,7 @@ import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
+import { HideKeyboardButton } from './components/HideKeyboardButton'
 import { CommandPalette } from './components/CommandPalette'
 import { Tour, shouldShowTour } from './components/Tour'
 import { registerCommands } from './lib/commands'
@@ -418,6 +419,7 @@ export function App() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />
+      <HideKeyboardButton />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {paletteOpen && (
         <CommandPalette

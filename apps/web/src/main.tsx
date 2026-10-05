@@ -4,6 +4,7 @@ import { App } from './App'
 import { syncScribbleSetting } from './lib/deviceOcr'
 import { handleConnectHash } from './lib/connectLink'
 import { startOfflineFolders } from './lib/offline'
+import { keyboard } from './lib/keyboard'
 import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -34,7 +35,9 @@ function pinToViewport() {
       // shouldn't keep their safe-area gap above it
       const tallest = Math.max(full.get(window.innerWidth) ?? 0, vv.height, window.innerHeight)
       full.set(window.innerWidth, tallest)
-      document.documentElement.classList.toggle('keyboard-open', tallest - vv.height > 150)
+      const open = tallest - vv.height > 150
+      document.documentElement.classList.toggle('keyboard-open', open)
+      if (keyboard.get().open !== open) keyboard.set({ open })
     }
     if (window.scrollX || window.scrollY) window.scrollTo(0, 0)
   }
