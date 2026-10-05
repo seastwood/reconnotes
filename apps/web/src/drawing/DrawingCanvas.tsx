@@ -210,8 +210,10 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   const activePointer = useRef<number | null>(null)
 
   const toLocal = (e: { clientX: number; clientY: number }) => {
+    // the on-screen size, so this is right when the drawing is zoomed (picture viewer) too
     const r = liveRef.current!.getBoundingClientRect()
-    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }
+    const s = r.width / DRAWING_WIDTH || scale
+    return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }
   }
 
   const canDraw = (e: React.PointerEvent | PointerEvent) => {

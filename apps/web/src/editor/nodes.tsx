@@ -1,6 +1,6 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { getTranscripts, newId, wordsKey, type Stroke } from '@reconnotes/core'
@@ -11,6 +11,7 @@ import { DrawingCanvas } from '../drawing/DrawingCanvas'
 import { inkUi, useInkUi } from '../drawing/toolState'
 import { useUndoManager } from './undo'
 import { fileKind, formatSize, openFile, shareFile } from '../lib/files'
+import { openImageViewer } from '../components/ImageViewer'
 import { findKey } from './find'
 import { useFindInNode, useInkMatches, usePictureMatches, useTranscript, WordHighlights } from './findHighlights'
 import { recognizeImageWords, useDeviceOcr } from '../lib/deviceOcr'
@@ -156,6 +157,34 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     markUp()
   }
 
+  // A tap on the picture (finger or mouse) opens it full screen; the Pencil marks it up instead.
+  const tapStart = useRef<{ x: number; y: number; t: number } | null>(null)
+  const openViewer = () => {
+    if (!url || !ctx) return
+    openImageViewer({
+      attachmentId: node.attrs.attachmentId,
+      url,
+      alt: (node.attrs.alt as string) || 'Picture',
+      doc: ctx.doc,
+      undoManager: um,
+      drawingId,
+      ensureDrawing: () => {
+        const id = newId()
+        updateAttributes({ drawingId: id })
+        return id
+      },
+      editable: editor.isEditable,
+    })
+  }
+  const onImgPointerDown = (e: React.PointerEvent) => {
+    tapStart.current = e.pointerType === 'pen' || markingUp ? null : { x: e.clientX, y: e.clientY, t: Date.now() }
+  }
+  const onImgPointerUp = (e: React.PointerEvent) => {
+    const s = tapStart.current
+    tapStart.current = null
+    if (s && Date.now() - s.t < 500 && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 8) openViewer()
+  }
+
   const width = node.attrs.width as number | null
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -186,6 +215,8 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
             src={url}
             alt={node.attrs.alt ?? ''}
             draggable={false}
+            onPointerDown={onImgPointerDown}
+            onPointerUp={onImgPointerUp}
             onLoad={(e) => {
               const img = e.currentTarget
               if (img.naturalWidth) setAspect(img.naturalHeight / img.naturalWidth)

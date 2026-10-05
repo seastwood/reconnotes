@@ -14,6 +14,7 @@ import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
+import { ImageViewerHost } from './components/ImageViewer'
 import { CommandPalette } from './components/CommandPalette'
 import { Tour, shouldShowTour } from './components/Tour'
 import { registerCommands } from './lib/commands'
@@ -65,6 +66,7 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
         return
       }
       const target = e.target as Element
+      if (target.closest?.('.image-viewer')) return void (start = null) // the viewer has its own gestures
       start = {
         x: t.clientX,
         y: t.clientY,
@@ -420,6 +422,7 @@ export function App() {
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />
       <HideKeyboardButton />
+      <ImageViewerHost />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {paletteOpen && (
         <CommandPalette
