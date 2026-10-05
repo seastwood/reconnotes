@@ -17,7 +17,7 @@ import { EditorToolbar, STYLES, applyStyle } from './EditorToolbar'
 import { registerCommands } from '../lib/commands'
 import { compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { saveAsTemplate } from '../lib/templates'
-import { settings } from '../lib/settings'
+import { isSyncConfigured, settings } from '../lib/settings'
 import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
 import { FindBar } from './FindBar'
@@ -25,6 +25,8 @@ import { Hashtags } from './hashtags'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
+import { ShareDialog } from '../components/ShareDialog'
+
 import { printNote } from '../lib/printNote'
 
 interface Props {
@@ -47,6 +49,7 @@ interface Props {
 export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const onFollowLinkRef = useRef(onFollowLink)
   onFollowLinkRef.current = onFollowLink
   const onOpenNoteRef = useRef(onOpenNote)
@@ -173,6 +176,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       { id: 'link', label: 'Link to another note', section: S, keywords: '[[ reference', run: () => openLinkPicker(null) },
       ...STYLES.map((st) => ({ id: `style-${st.key}`, label: `Style: ${st.label.replace(/^[^A-Za-z0-9]+/, '')}`, section: S, run: () => applyStyle(editor, st.key) })),
       { id: 'history', label: 'Version history', section: S, keywords: 'restore earlier undo', run: () => setHistoryOpen(true) },
+      { id: 'share', label: 'Share a read-only link', section: S, keywords: 'public url send', run: () => setShareOpen(true) },
       { id: 'print', label: 'Print or save as PDF', section: S, keywords: 'share pdf export', run: () => void printNote(editor, doc, noteId) },
       { id: 'convert', label: 'Convert all handwriting to text', section: S, keywords: 'ocr recognise', run: () => void convertAllHandwriting(editor, noteId) },
       { id: 'summary', label: 'Summarise with AI', section: S, keywords: 'summary ai', run: () => void noteAction(editor, noteId, 'summary').catch((e) => alert((e as Error).message)) },
@@ -242,6 +246,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             onFind={openFind}
             onLinkNote={() => openLinkPicker(null)}
             onHistory={() => setHistoryOpen(true)}
+            onShareLink={isSyncConfigured() ? () => setShareOpen(true) : undefined}
             onPrint={() => printNote(editor, doc, noteId)}
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
@@ -284,6 +289,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             />
           )}
           {historyOpen && <VersionHistory noteId={noteId} onClose={() => setHistoryOpen(false)} />}
+          {shareOpen && <ShareDialog noteId={noteId} onClose={() => setShareOpen(false)} />}
           <InkToolbar />
           <PencilPalette />
         </div>

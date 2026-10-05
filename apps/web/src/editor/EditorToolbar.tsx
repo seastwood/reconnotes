@@ -36,6 +36,7 @@ import {
   History,
   Printer,
   Table2,
+  Globe,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -64,6 +65,8 @@ interface Props {
   onLinkNote?: () => void
   /** show earlier versions of the note */
   onHistory?: () => void
+  /** share a read-only link */
+  onShareLink?: () => void
   /** print / share as PDF */
   onPrint?: () => Promise<void>
 }
@@ -121,7 +124,7 @@ export function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onPrint }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onShareLink, onPrint }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | 'table' | null>(null)
@@ -386,6 +389,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 }}
               >
                 <History size={16} /> Version history…
+              </button>
+            )}
+            {onShareLink && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  onShareLink()
+                }}
+              >
+                <Globe size={16} /> Share a read-only link…
               </button>
             )}
             {onPrint && (

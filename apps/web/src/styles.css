@@ -2750,3 +2750,22 @@ li[data-checked='true'] .due-chip button {
   color: var(--muted);
   padding: 12px 4px 4px;
 }
+
+.share-url {
+  width: 100%;
+  margin: 6px 0 10px;
+  font-size: 14px;
+}
+a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.14);
+}
+.share-dialog .danger-text {
+  margin-top: 12px;
+}

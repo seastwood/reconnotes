@@ -26,6 +26,7 @@ import { initialTextStatus, queueAttachment, retryAttachments } from './attachme
 import { listBackups, runBackup } from './backup'
 import { exportZip } from './exportZip'
 import type { Caller, Devices } from './devices'
+import { SHARE_HEADERS, Shares, drawingSvg, noteHas, sharePage, sharedNote } from './shares'
 import { importNotes, unpack } from './importNotes'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
@@ -86,6 +87,7 @@ const ID = '([a-z0-9]{8,64})'
 
 export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
+  const shares = new Shares(store)
   const routes: [string, RegExp, Handler][] = []
   const route = (method: string, pattern: string, handler: Handler) =>
     routes.push([method, new RegExp(`^${pattern}$`), handler])
@@ -154,6 +156,9 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       'Content-Type': att.mime,
       'Content-Length': att.size,
       'Cache-Control': 'private, max-age=31536000, immutable',
+      // an uploaded HTML/SVG file must never run as a page on this address
+      'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+      'X-Content-Type-Options': 'nosniff',
     })
     fs.createReadStream(store.blobPath(id)).pipe(res)
   })
@@ -459,6 +464,59 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, { ok: true })
   })
 
+  // --- Share links (read-only, public) ---------------------------------------
+  const shareView = (noteId: string) => {
+    const row = shares.forNote(noteId)
+    return { shared: Boolean(row), path: row ? `/s/${row.id}` : null, createdAt: row?.createdAt ?? null }
+  }
+  route('GET', `/api/notes/${ID}/share`, (_req, res, [id]) => json(res, 200, shareView(id)))
+  route('POST', `/api/notes/${ID}/share`, (_req, res, [id]) => {
+    if (!sync.getDoc(noteDocName(id))) throw new HttpError(409, 'This note hasn’t reached the server yet – try again once it has synced.')
+    shares.share(id)
+    json(res, 200, shareView(id))
+  })
+  route('DELETE', `/api/notes/${ID}/share`, (_req, res, [id]) => {
+    shares.stop(id)
+    json(res, 200, shareView(id))
+  })
+
+  /** Public pages for share links (no key needed). */
+  const servePublic = (res: http.ServerResponse, url: URL): boolean => {
+    const m = /^\/s\/([A-Za-z0-9_-]{16,40})(?:\/(a|d)\/([A-Za-z0-9]{8,64})(\.svg)?)?\/?$/.exec(url.pathname)
+    if (!m) return false
+    const shared = sharedNote(shares, sync, m[1])
+    const notFound = () => {
+      res.writeHead(404, { ...SHARE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><meta charset="utf-8"><title>Not shared</title><p style="font:17px system-ui;margin:40px">This note isn’t shared any more.</p>')
+      return true
+    }
+    if (!shared) return notFound()
+    if (!m[2]) {
+      res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(sharePage(m[1], shared.title, shared.doc, shared.updatedAt))
+      return true
+    }
+    if (m[2] === 'd') {
+      if (!noteHas(shared.doc, 'drawing', m[3])) return notFound()
+      res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'image/svg+xml' })
+      res.end(drawingSvg(shared.doc, m[3], url.searchParams.has('overlay')))
+      return true
+    }
+    const att = noteHas(shared.doc, 'attachment', m[3]) ? store.getAttachment(m[3]) : null
+    if (!att || !store.hasBlob(att.id)) return notFound()
+    const inline = /^(image\/(png|jpeg|gif|webp|heic)|audio\/|video\/|application\/pdf)/.test(att.mime)
+    res.writeHead(200, {
+      ...SHARE_HEADERS,
+      // never let a shared file run as a page on this address
+      'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'",
+      'Content-Type': inline ? att.mime : 'application/octet-stream',
+      'Content-Length': att.size,
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(att.name || att.id)}`,
+    })
+    fs.createReadStream(store.blobPath(att.id)).pipe(res)
+    return true
+  }
+
   route('GET', `/api/notes/${ID}/markdown`, (_req, res, [id]) => {
     const doc = sync.getDoc(noteDocName(id))
     if (!doc) throw new HttpError(404, 'note not found')
@@ -504,6 +562,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       return res.end()
     }
     try {
+      if (url.pathname.startsWith('/s/') && (req.method === 'GET' || req.method === 'HEAD') && servePublic(res, url)) return
       if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url)
       for (const [method, re, handler] of routes) {
         const m = re.exec(url.pathname)
