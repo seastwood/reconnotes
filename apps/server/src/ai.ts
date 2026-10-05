@@ -142,8 +142,26 @@ export class Ai {
   get canCompile() {
     return this.agents.available('compile')
   }
+  get canAudio() {
+    return this.agents.available('audio')
+  }
+  get autoAudio() {
+    return this.agents.settings().autoAudio && this.canAudio
+  }
   get enabled() {
-    return this.canHandwriting || this.canImages || this.canPdf || this.canCompile
+    return this.canHandwriting || this.canImages || this.canPdf || this.canCompile || this.canAudio
+  }
+
+  /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
+  async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
+      if (!backend.transcribe)
+        throw new Error(`${agent.name} can't transcribe audio – use an OpenAI-compatible speech-to-text server (e.g. Whisper) or OpenAI`)
+      const text = collapseRepeats(await backend.transcribe(data, mime, filename))
+      return text
+    })
+    log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.length} chars)`)
+    return { text: result, agent: agent.name }
   }
   get autoHandwriting() {
     return this.agents.settings().autoHandwriting && this.canHandwriting
@@ -399,30 +417,3 @@ export type CompilePart =
   | { text: string }
   | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[] }
   | { image: Buffer; mime: string; kind: 'photo' }
-
-
-/**
- * Speech-to-text through any OpenAI-compatible transcription endpoint, such
- * as a self-hosted whisper.cpp / faster-whisper server on the same machine.
- */
-export async function transcribeAudio(config: Config, data: Buffer, mime: string, filename: string): Promise<string> {
-  if (!config.transcribeUrl) throw new Error('audio transcription disabled: set RECON_TRANSCRIBE_URL')
-  const form = new FormData()
-  form.append('file', new Blob([new Uint8Array(data)], { type: mime }), filename || 'audio')
-  form.append('model', config.transcribeModel)
-  form.append('response_format', 'text')
-  const url = config.transcribeUrl.replace(/\/$/, '') + '/v1/audio/transcriptions'
-  const res = await fetch(url, {
-    method: 'POST',
-    body: form,
-    headers: config.transcribeApiKey ? { Authorization: `Bearer ${config.transcribeApiKey}` } : {},
-  })
-  if (!res.ok) throw new Error(`transcription failed: ${res.status} ${await res.text()}`)
-  const body = await res.text()
-  try {
-    const json = JSON.parse(body) as { text?: string }
-    return (json.text ?? '').trim()
-  } catch {
-    return body.trim()
-  }
-}

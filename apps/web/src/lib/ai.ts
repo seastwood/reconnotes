@@ -6,7 +6,8 @@ import { createNote, getContent, getStrokes, getTranscripts, inkHash, noteDocNam
 import { recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
-import { attachmentBlob } from './attachments'
+import { attachmentBlob, flushUploads } from './attachments'
+import { deviceCanDecode, speechToParagraphs, transcribeOnDevice, useDeviceSpeech } from './speech'
 
 /**
  * AI features run on the self-hosted server (which talks to Claude and/or a
@@ -223,6 +224,41 @@ export async function convertImage(editor: Editor, attachmentId: string, insertA
   const at = insertAt()
   if (at === undefined) throw new Error('The picture no longer exists')
   insertConverted(editor, at, json.text)
+}
+
+/**
+ * Transcribe a recording or audio file and insert the text right below it.
+ * In the iOS app Apple's speech recognizer runs on the device first; the
+ * server's "Audio to text" agents (e.g. a Whisper server) are the fallback
+ * and the only option in the web app. Returns the transcript (also kept with
+ * the recording for search).
+ */
+export async function transcribeAudio(editor: Editor, attachmentId: string, insertAt: () => number | undefined): Promise<string> {
+  let text = ''
+  let deviceError: Error | null = null
+  if (useDeviceSpeech()) {
+    const blob = await attachmentBlob(attachmentId)
+    if (blob && deviceCanDecode(blob.type)) {
+      try {
+        text = await transcribeOnDevice(blob)
+      } catch (e) {
+        deviceError = e as Error
+      }
+    }
+  }
+  if (!text) {
+    if (!isSyncConfigured()) {
+      if (deviceError) throw deviceError
+      throw new Error(useDeviceSpeech() ? 'No speech was recognised in this recording.' : 'Connect a ReconNotes server in Settings to transcribe audio.')
+    }
+    await flushUploads()
+    text = (await post<{ text: string }>('/api/ai/audio-to-text', { attachmentId })).text ?? ''
+  }
+  if (!text.trim()) throw new Error('No speech was recognised in this recording.')
+  const at = insertAt()
+  if (at === undefined) throw new Error('The recording no longer exists')
+  insertConverted(editor, at, speechToParagraphs(text))
+  return text
 }
 
 /**

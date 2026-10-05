@@ -18,6 +18,8 @@ export interface Settings {
   deviceOcrCleanup: boolean
   /** iOS app: quietly recognise drawings for search (never changes the note) */
   backgroundOcr: boolean
+  /** iOS app: transcribe recordings with Apple's on-device speech recognition */
+  deviceSpeech: boolean
   /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */
   debugInput?: boolean
   /** settings format version, for one-off migrations */
@@ -45,6 +47,7 @@ function defaults(): Settings {
     deviceOcr: true,
     deviceOcrCleanup: false,
     backgroundOcr: true,
+    deviceSpeech: true,
   }
 }
 

@@ -1,6 +1,7 @@
 import UIKit
 import WebKit
 import Vision
+import Speech
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -51,6 +52,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         super.capacitorDidLoad()
         // On-device handwriting/text recognition for the web app (see TextRecognitionPlugin below).
         bridge?.registerPluginInstance(TextRecognitionPlugin())
+        // On-device speech recognition for recordings and audio files (see SpeechRecognitionPlugin below).
+        bridge?.registerPluginInstance(SpeechRecognitionPlugin())
         bridge?.registerPluginInstance(ScribblePlugin())
         Self.current = self
         guard let webView = webView else { return }
@@ -218,6 +221,83 @@ public class TextRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                 try VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:]).perform([request])
             } catch {
                 call.reject(error.localizedDescription)
+            }
+        }
+    }
+}
+
+/// Transcribes recordings and audio files with Apple's speech recognizer,
+/// on the device when the language supports it (private, free, offline):
+///     SpeechRecognition.transcribe({ audio: <base64>, ext: 'm4a' }) → { text, onDevice }
+@objc(SpeechRecognitionPlugin)
+public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "SpeechRecognitionPlugin"
+    public let jsName = "SpeechRecognition"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "transcribe", returnType: CAPPluginReturnPromise)
+    ]
+    /// Running recognitions (kept alive until they finish).
+    private var tasks: [UUID: SFSpeechRecognitionTask] = [:]
+
+    @objc func transcribe(_ call: CAPPluginCall) {
+        guard let base64 = call.getString("audio"),
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+            call.reject("Could not read the audio")
+            return
+        }
+        let ext = call.getString("ext") ?? "m4a"
+        let id = UUID()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension(ext)
+        do {
+            try data.write(to: url)
+        } catch {
+            call.reject("Could not save the audio: \(error.localizedDescription)")
+            return
+        }
+        let cleanup = { [weak self] in
+            try? FileManager.default.removeItem(at: url)
+            DispatchQueue.main.async { self?.tasks[id] = nil }
+        }
+
+        SFSpeechRecognizer.requestAuthorization { status in
+            DispatchQueue.main.async {
+                guard status == .authorized else {
+                    cleanup()
+                    call.reject("Speech recognition is turned off for ReconNotes. Allow it in Settings › Privacy & Security › Speech Recognition.")
+                    return
+                }
+                let locale = call.getString("locale").map { Locale(identifier: $0) } ?? Locale.current
+                guard let recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer(), recognizer.isAvailable else {
+                    cleanup()
+                    call.reject("Speech recognition isn't available for this language right now.")
+                    return
+                }
+                let request = SFSpeechURLRecognitionRequest(url: url)
+                request.shouldReportPartialResults = false
+                request.taskHint = .dictation
+                // On the device: private, works offline, and no 1-minute limit.
+                let onDevice = recognizer.supportsOnDeviceRecognition
+                request.requiresOnDeviceRecognition = onDevice
+                if #available(iOS 16.0, *) { request.addsPunctuation = true }
+
+                var done = false
+                self.tasks[id] = recognizer.recognitionTask(with: request) { result, error in
+                    if done { return }
+                    if let result = result, result.isFinal {
+                        done = true
+                        cleanup()
+                        call.resolve(["text": result.bestTranscription.formattedString, "onDevice": onDevice])
+                    } else if let error = error {
+                        done = true
+                        cleanup()
+                        // 1110: no speech found in the recording
+                        if (error as NSError).code == 1110 {
+                            call.resolve(["text": "", "onDevice": onDevice])
+                        } else {
+                            call.reject(error.localizedDescription)
+                        }
+                    }
+                }
             }
         }
     }

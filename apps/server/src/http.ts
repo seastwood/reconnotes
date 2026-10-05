@@ -87,9 +87,9 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, {
       ok: true,
       version: VERSION,
-      ai: { handwriting: ai.canHandwriting, images: ai.canImages, pdf: ai.canPdf, compile: ai.canCompile },
+      ai: { handwriting: ai.canHandwriting, images: ai.canImages, pdf: ai.canPdf, compile: ai.canCompile, audio: ai.canAudio },
       autoHandwriting: ai.autoHandwriting,
-      transcription: Boolean(config.transcribeUrl),
+      transcription: ai.canAudio,
     }),
   )
 
@@ -166,6 +166,22 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     if (!isAiImage(mime)) throw new HttpError(415, 'Send a PNG, JPEG, GIF or WebP image')
     const data = await readBody(req, 25 * 1024 * 1024)
     const { text, agent } = await sync.enqueue(() => ai.transcribePhoto(data, mime))
+    json(res, 200, { text, agent })
+  })
+
+  /**
+   * Transcribe a recording or audio file that has been uploaded. Reuses the
+   * transcript when the server already made one (for search).
+   */
+  route('POST', '/api/ai/audio-to-text', async (req, res) => {
+    const { attachmentId } = await readJson<{ attachmentId: string }>(req)
+    const att = /^[a-zA-Z0-9_-]{8,64}$/.test(attachmentId ?? '') ? store.getAttachment(attachmentId) : undefined
+    if (!att || !store.hasBlob(att.id)) throw new HttpError(409, "This recording hasn't reached the server yet – try again once it has synced.")
+    if (att.text_status === 'done' && att.text?.trim()) return json(res, 200, { text: att.text, agent: null })
+    const data = fs.readFileSync(store.blobPath(att.id))
+    const { text, agent } = await sync.enqueue(() => ai.transcribeAudio(data, att.mime, att.name))
+    store.setAttachmentText(att.id, text, 'done')
+    sync.reindexNotesFor(att.id)
     json(res, 200, { text, agent })
   })
 

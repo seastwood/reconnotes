@@ -1,0 +1,76 @@
+import { Capacitor, registerPlugin } from '@capacitor/core'
+import { settings } from './settings'
+
+/**
+ * On-device speech recognition with Apple's Speech framework
+ * ==========================================================
+ *
+ * In the iOS/iPadOS app a small native plugin (SpeechRecognition, in
+ * ios/App/App/SceneDelegate.swift) transcribes recordings and audio files on
+ * the device: private, free and offline for most languages.
+ */
+
+interface SpeechRecognitionPlugin {
+  transcribe(options: { audio: string; ext: string; locale?: string }): Promise<{ text: string; onDevice: boolean }>
+}
+
+const SpeechRecognition = registerPlugin<SpeechRecognitionPlugin>('SpeechRecognition')
+
+/** Is Apple's speech recognizer available (running in the iOS app)? */
+export function deviceSpeechAvailable(): boolean {
+  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios' && Capacitor.isPluginAvailable('SpeechRecognition')
+}
+
+/** Available and switched on in Settings. */
+export function useDeviceSpeech(): boolean {
+  return deviceSpeechAvailable() && settings.get().deviceSpeech !== false
+}
+
+/** File extension Apple's decoder expects for this kind of audio. */
+function extFor(mime: string): string {
+  if (/mp4|m4a|aac/.test(mime)) return 'm4a'
+  if (/mpeg|mp3/.test(mime)) return 'mp3'
+  if (/wav/.test(mime)) return 'wav'
+  if (/aiff/.test(mime)) return 'aiff'
+  if (/caf/.test(mime)) return 'caf'
+  return 'm4a'
+}
+
+/** Apple can't decode WebM/Ogg (recordings made in Chrome/Firefox): let the server do those. */
+export function deviceCanDecode(mime: string): boolean {
+  return !/webm|ogg|opus/.test(mime)
+}
+
+export async function transcribeOnDevice(blob: Blob): Promise<string> {
+  const audio = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(blob)
+  })
+  const { text } = await SpeechRecognition.transcribe({ audio, ext: extFor(blob.type) })
+  return text.trim()
+}
+
+/**
+ * Speech recognisers return one long block of text: split it into
+ * paragraphs of a few sentences so it reads like notes.
+ */
+export function speechToParagraphs(text: string): string {
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g)
+  if (!sentences) return text.trim()
+  const paras: string[] = []
+  let cur = ''
+  for (const s of sentences.map((x) => x.trim()).filter(Boolean)) {
+    cur = cur ? `${cur} ${s}` : s
+    if (cur.length > 320) {
+      paras.push(cur)
+      cur = ''
+    }
+  }
+  if (cur) paras.push(cur)
+  return paras.join('\n\n')
+}

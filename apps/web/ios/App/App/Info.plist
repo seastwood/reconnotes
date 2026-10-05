@@ -68,6 +68,8 @@
 	<string>Take photos and scan documents into your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record audio notes.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turn your recordings and audio files into text in your notes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Add photos and screenshots to your notes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

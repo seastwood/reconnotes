@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import type { Config } from './config'
 import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
-import { Ai, isAiImage, transcribeAudio } from './ai'
+import { Ai, isAiImage } from './ai'
 import { log } from './log'
 
 const TEXT_MIMES = /^(text\/|application\/(json|xml|x-markdown))/
@@ -12,7 +12,7 @@ export function initialTextStatus(config: Config, ai: Ai, mime: string): Attachm
   if (TEXT_MIMES.test(mime)) return 'pending'
   if (isAiImage(mime)) return ai.canImages && ai.autoImageText ? 'pending' : 'skipped'
   if (mime === 'application/pdf') return ai.canPdf && ai.autoImageText ? 'pending' : 'skipped'
-  if (mime.startsWith('audio/') || mime.startsWith('video/')) return config.transcribeUrl ? 'pending' : 'skipped'
+  if (mime.startsWith('audio/') || mime.startsWith('video/')) return ai.autoAudio ? 'pending' : 'skipped'
   return 'skipped'
 }
 
@@ -27,7 +27,7 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
     if (TEXT_MIMES.test(att.mime)) text = data.toString('utf8').slice(0, 200_000)
     else if (isAiImage(att.mime)) text = await ai.imageText(data, att.mime)
     else if (att.mime === 'application/pdf') text = await ai.pdfText(data)
-    else text = await transcribeAudio(config, data, att.mime, att.name)
+    else text = (await ai.transcribeAudio(data, att.mime, att.name)).text
   } catch (err) {
     log.error(`text extraction failed for ${att.id} (${att.mime})`, err)
     store.setAttachmentText(att.id, null, 'error')

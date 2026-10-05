@@ -173,6 +173,7 @@ export function AiAgentsSection() {
                           {a.name}
                           {!a.enabled && ' (disabled)'}
                           {!a.vision && (t.id === 'handwriting' || t.id === 'images') && <em> – can't read images</em>}
+                          {t.id === 'audio' && a.kind !== 'openai' && <em> – can't transcribe audio</em>}
                         </span>
                         <button className="icon" disabled={i === 0} onClick={() => moveInTask(t.id, id, -1)} aria-label="Move up">
                           <ArrowUp size={15} />
@@ -223,6 +224,14 @@ export function AiAgentsSection() {
               onChange={(e) => void apply(agentsApi.updateSettings({ autoImageText: e.target.checked }))}
             />
             Extract text from new images and PDFs for search
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={state.settings.autoAudio}
+              onChange={(e) => void apply(agentsApi.updateSettings({ autoAudio: e.target.checked }))}
+            />
+            Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
           </label>
         </>
       )}

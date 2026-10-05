@@ -169,8 +169,28 @@ Then add an **Ollama** agent with the address `http://<ollama-machine-ip>:11434`
 **Test connection**. If your OCR model works better with a short instruction, set one under
 *Advanced › Handwriting prompt*.
 
-Audio transcription is separate: point `RECON_TRANSCRIBE_URL` at any OpenAI-compatible
-speech-to-text server (for example a local Whisper server).
+### Audio to text
+
+Every recording and audio file has a **Transcribe** button that puts the spoken words into the
+note below it. In the iPhone/iPad app Apple's speech recognition does this on the device. The
+web app, and the iPad app when Apple can't read a file, use the server's **Audio to text**
+agents: any OpenAI-compatible speech-to-text server. Ollama and Claude can't transcribe audio.
+
+A self-hosted Whisper server next to ReconNotes (uses the GPU if Docker has access to it):
+
+```bash
+docker run -d --name speaches --restart unless-stopped --gpus all -p 8000:8000 \
+  ghcr.io/speaches-ai/speaches:latest-cuda
+# download a model once (use the :latest-cpu image instead if there's no NVIDIA GPU)
+curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-small
+```
+
+Then add an agent: kind **OpenAI-compatible**, address `http://<server-ip>:8000/v1`, model
+`Systran/faster-whisper-small` (or `-medium` / `deepdml/faster-whisper-large-v3-turbo-ct2` for
+better accuracy). Agents whose model name contains "whisper" are put on *Audio to text*
+automatically. OpenAI itself works too (`https://api.openai.com/v1`, model `whisper-1`).
+With an agent set up, new recordings are also transcribed in the background so search finds
+them. The old `RECON_TRANSCRIBE_URL` setting is turned into such an agent on start.
 
 Older setups that used `ANTHROPIC_API_KEY` / `RECON_OLLAMA_*` environment variables are imported
 as agents on first start; after that the app is in charge.

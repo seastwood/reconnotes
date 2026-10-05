@@ -19,8 +19,8 @@ import { log } from './log'
  */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai'
-export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile'
-export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile']
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
+export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'audio']
 
 /** How an agent reads handwritten drawings. */
 export type ReadingMode = 'auto' | 'page' | 'lines'
@@ -66,13 +66,20 @@ export interface AiSettings {
   routing: Record<AiTask, string[]>
   autoHandwriting: boolean
   autoImageText: boolean
+  /** transcribe new recordings and audio files in the background (for search) */
+  autoAudio: boolean
 }
 
 export type Part = { text: string } | { image: Buffer; mime: string } | { pdf: Buffer }
 
 export interface Backend {
   generate(parts: Part[], maxTokens: number): Promise<string>
+  /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
+  transcribe?(audio: Buffer, mime: string, filename: string): Promise<string>
 }
+
+/** Model names that are speech-to-text models rather than chat models. */
+export const SPEECH_MODEL = /whisper|speech|stt|parakeet|canary|voxtral|transcri/i
 
 export const DEFAULT_URLS: Record<AgentKind, string> = {
   anthropic: 'https://api.anthropic.com',
@@ -263,6 +270,36 @@ class OpenAiBackend implements Backend {
     const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     return stripThinking(body.choices?.[0]?.message?.content ?? '')
   }
+  /**
+   * OpenAI's /audio/transcriptions API, which self-hosted Whisper servers
+   * (Speaches / faster-whisper-server, whisper.cpp, LocalAI…) also offer.
+   */
+  async transcribe(audio: Buffer, mime: string, filename: string): Promise<string> {
+    const form = new FormData()
+    form.append('file', new Blob([new Uint8Array(audio)], { type: mime || 'application/octet-stream' }), filename || audioFileName(mime))
+    form.append('model', this.agent.model || 'whisper-1')
+    form.append('response_format', 'json')
+    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/audio/transcriptions', {
+      method: 'POST',
+      headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},
+      // a long recording takes a while, even on a GPU
+      signal: AbortSignal.timeout(Math.max(this.agent.timeoutSec, 900) * 1000),
+      body: form,
+    })
+    if (!res.ok) throw new Error(`server returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    const text = await res.text()
+    try {
+      return String((JSON.parse(text) as { text?: string }).text ?? '').trim()
+    } catch {
+      return text.trim()
+    }
+  }
+}
+
+/** A file name with the right extension: Whisper servers pick the decoder from it. */
+function audioFileName(mime: string): string {
+  const ext = /mp4|m4a|aac/.test(mime) ? 'm4a' : /mpeg|mp3/.test(mime) ? 'mp3' : /ogg|opus/.test(mime) ? 'ogg' : /wav/.test(mime) ? 'wav' : /flac/.test(mime) ? 'flac' : 'webm'
+  return `audio.${ext}`
 }
 
 export function makeBackend(agent: AgentConfig): Backend {
@@ -494,10 +531,13 @@ export const TASK_LABELS: Record<AiTask, string> = {
   images: 'Text from images',
   pdf: 'Text from PDFs',
   compile: 'Compile notes',
+  audio: 'Audio to text',
 }
 
 /** Tasks a new agent of this kind can do (where it is added by default). */
 function defaultTasks(a: AgentConfig): AiTask[] {
+  // a speech-to-text server (e.g. Whisper) does only that
+  if (a.kind === 'openai' && SPEECH_MODEL.test(a.model)) return ['audio']
   const t: AiTask[] = []
   if (a.vision) t.push('handwriting', 'images')
   if (a.kind === 'anthropic') t.push('format', 'pdf')
@@ -513,6 +553,31 @@ export class AgentRegistry {
     config: Config,
   ) {
     if (store.getSetting(AGENTS_KEY) === null) this.seedFromEnv(config)
+    this.adoptTranscribeEnv(config)
+  }
+
+  /**
+   * Audio transcription used to be configured only with RECON_TRANSCRIBE_URL.
+   * Turn that into a speech-to-text agent once, so it shows up (and can be
+   * changed) in Settings › AI agents.
+   */
+  private adoptTranscribeEnv(c: Config) {
+    if (!c.transcribeUrl || this.store.getSetting('ai.transcribeEnvAdopted')) return
+    this.store.setSetting('ai.transcribeEnvAdopted', true)
+    const agent = withDefaults({
+      id: newId(),
+      name: 'Speech to text',
+      kind: 'openai',
+      baseUrl: trimSlash(c.transcribeUrl).replace(/\/v1$/, '') + '/v1',
+      apiKey: c.transcribeApiKey ?? '',
+      model: c.transcribeModel,
+      vision: false,
+    })
+    this.store.setSetting(AGENTS_KEY, [...this.agents(), agent])
+    const s = this.settings()
+    s.routing.audio = [agent.id]
+    this.store.setSetting(SETTINGS_KEY, s)
+    log.info(`added speech-to-text agent for ${agent.baseUrl} (from RECON_TRANSCRIBE_URL); manage it in Settings › AI agents`)
   }
 
   agents(): AgentConfig[] {
@@ -521,8 +586,8 @@ export class AgentRegistry {
 
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
-    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
-    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true }
+    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], audio: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
+    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true }
   }
 
   get(id: string): AgentConfig | undefined {
@@ -575,6 +640,7 @@ export class AgentRegistry {
     }
     if (typeof patch.autoHandwriting === 'boolean') s.autoHandwriting = patch.autoHandwriting
     if (typeof patch.autoImageText === 'boolean') s.autoImageText = patch.autoImageText
+    if (typeof patch.autoAudio === 'boolean') s.autoAudio = patch.autoAudio
     this.store.setSetting(SETTINGS_KEY, s)
     return s
   }
@@ -656,6 +722,7 @@ export class AgentRegistry {
       pdf: claude ? [claude.id] : [],
       format: claude ? [claude.id] : [],
       compile: order(c.compileProvider, [claude, ollamaText ?? ollama]),
+      audio: [],
     }
     this.store.setSetting(AGENTS_KEY, agents)
     this.store.setSetting(SETTINGS_KEY, { routing, autoHandwriting: c.autoHandwriting || agents.length === 0, autoImageText: c.autoImageText || agents.length === 0 })

@@ -3,7 +3,7 @@ import { apiUrl, authHeaders } from './settings'
 /** Client for the server's AI agent management API (see apps/server/src/agents.ts). */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai'
-export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile'
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
 export type ReadingMode = 'auto' | 'page' | 'lines'
 
 export interface Agent {
@@ -27,6 +27,7 @@ export interface AiSettings {
   routing: Record<AiTask, string[]>
   autoHandwriting: boolean
   autoImageText: boolean
+  autoAudio: boolean
 }
 
 export interface AgentsState {
@@ -88,7 +89,7 @@ export const DEFAULT_URLS: Record<AgentKind, string> = {
 export const KIND_LABELS: Record<AgentKind, string> = {
   anthropic: 'Claude (Anthropic API)',
   ollama: 'Ollama (local model)',
-  openai: 'OpenAI-compatible (LM Studio, vLLM, OpenRouter…)',
+  openai: 'OpenAI-compatible (LM Studio, vLLM, OpenRouter, Whisper servers…)',
 }
 
 export const TASK_HELP: Record<AiTask, string> = {
@@ -98,6 +99,8 @@ export const TASK_HELP: Record<AiTask, string> = {
   images: 'Reads text in photos, screenshots and charts so search can find them. Needs a model that reads images.',
   pdf: 'Extracts text from attached PDFs for search. Only Claude agents can read PDFs.',
   compile: 'Turns a whole note into a clean document. A general model works best; OCR-only models do poorly here.',
+  audio:
+    '“Transcribe” on recordings and audio files, and background transcripts for search. Needs an OpenAI-compatible speech-to-text server – e.g. Speaches/faster-whisper or whisper.cpp on your server, or OpenAI (model whisper-1). Ollama and Claude can’t transcribe audio. The iPad app uses Apple’s recognition first.',
 }
 
 export const agentsApi = {

@@ -1,8 +1,8 @@
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useState } from 'react'
-import { FileText, Loader2, Mic, PenLine, ScanText } from 'lucide-react'
-import { convertImage } from '../lib/ai'
+import { AudioLines, FileText, Loader2, Mic, PenLine, ScanText } from 'lucide-react'
+import { convertImage, transcribeAudio } from '../lib/ai'
 import { getTranscripts, newId } from '@reconnotes/core'
 import { addAttachment, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
@@ -215,15 +215,45 @@ export const ImageNode = Node.create({
 
 // --- Audio ------------------------------------------------------------------
 
-function AudioView({ node }: ReactNodeViewProps) {
+function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const transcript = useAttachmentText(node.attrs.attachmentId)
   const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const transcribe = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await transcribeAudio(editor, node.attrs.attachmentId, () => {
+        const pos = getPos()
+        return typeof pos === 'number' ? pos + node.nodeSize : undefined
+      })
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <NodeViewWrapper className="audio-block" data-drag-handle="">
       <div className="audio-head">
         <Mic size={16} /> <span>{node.attrs.name || 'Recording'}</span>
+        {editor.isEditable && (
+          <button className="audio-transcribe" {...tap(() => void transcribe())} disabled={busy} title="Turn the speech into text below this recording">
+            {busy ? <Loader2 size={15} className="spin" /> : <AudioLines size={15} />} {busy ? 'Transcribing…' : 'Transcribe'}
+          </button>
+        )}
       </div>
+      {error && (
+        <div className="drawing-error" role="alert">
+          {error}{' '}
+          <button className="link" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {url ? <audio controls src={url} preload="metadata" /> : <div className="attachment-placeholder">{missing ? 'Audio will appear when synced' : '…'}</div>}
       {transcript && (
         <button className="link" onClick={() => setOpen(!open)}>
@@ -250,7 +280,9 @@ export const AudioNode = Node.create({
     return ['audio', mergeAttributes({ 'data-attachment-id': HTMLAttributes.attachmentId })]
   },
   addNodeView() {
-    return ReactNodeViewRenderer(AudioView)
+    return ReactNodeViewRenderer(AudioView, {
+      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button, audio')),
+    })
   },
 })
 

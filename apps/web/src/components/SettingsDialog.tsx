@@ -4,6 +4,7 @@ import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib
 import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
 import { deviceOcrAvailable } from '../lib/deviceOcr'
+import { deviceSpeechAvailable } from '../lib/speech'
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const s = useSettings((x) => x)
@@ -120,6 +121,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 Then polish the result with my “Clean up converted text” agent when online
               </label>
             )}
+          </section>
+        )}
+
+        {deviceSpeechAvailable() && (
+          <section>
+            <h3>Audio transcription on this device</h3>
+            <label className="check">
+              <input type="checkbox" checked={s.deviceSpeech} onChange={(e) => settings.set({ deviceSpeech: e.target.checked })} />
+              Use Apple’s speech recognition for “Transcribe” (private, works offline for most languages)
+            </label>
+            <p className="hint">
+              Your server’s “Audio to text” agents (e.g. a Whisper server) are used when Apple can’t read the recording or finds no speech.
+            </p>
           </section>
         )}
 

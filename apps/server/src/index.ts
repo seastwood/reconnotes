@@ -45,7 +45,7 @@ async function main() {
     log.info(`ReconNotes server ${VERSION} listening on http://${config.host}:${config.port}`)
     log.info(`data: ${config.dataDir}  backups: ${config.backupDir}`)
     log.info(
-      `AI agents: ${app.ai.enabled ? app.ai.describe() : 'none yet – add them in the app under Settings › AI agents'}; audio transcription: ${config.transcribeUrl ?? 'disabled'}`,
+      `AI agents: ${app.ai.enabled ? app.ai.describe() : 'none yet – add them in the app under Settings › AI agents'}`,
     )
   })
 
