@@ -123,22 +123,61 @@ function blobToBase64(blob: Blob): Promise<string> {
 
 interface ScribblePlugin {
   setEnabled(options: { enabled: boolean }): Promise<void>
+  setBlockedRegions(options: { rects: { x: number; y: number; w: number; h: number }[] }): Promise<void>
 }
 const Scribble = registerPlugin<ScribblePlugin>('Scribble')
 
+/** Where Scribble must not start: writing there is ink (or a picture), not text. */
+const NO_SCRIBBLE = '.drawing-block, .image-block'
+
 /**
- * iOS app: keep iPadOS Scribble (which turns Pencil writing over text into
- * typed text immediately) in line with the "When the Pencil touches typed
- * text" setting. With "Start a drawing", Scribble is off and writing stays ink.
+ * iOS app: iPadOS Scribble (Pencil writing over text becomes typed text)
+ * follows the "When the Pencil touches typed text" setting. With "Use
+ * Scribble", it works on typed text but never inside a drawing or on a
+ * picture: the app keeps the native side told where those are on screen,
+ * and iPadOS asks it before Scribble starts at a point.
  */
 export function syncScribbleSetting() {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('Scribble')) return
-  let last: boolean | null = null
+  let enabled: boolean | null = null
+  let lastRects = ''
+  let frame = 0
+  let observer: MutationObserver | null = null
+
+  const sendRects = () => {
+    frame = 0
+    const rects = [...document.querySelectorAll<HTMLElement>(NO_SCRIBBLE)]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight)
+      .map((r) => ({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }))
+    const key = JSON.stringify(rects)
+    if (key === lastRects) return
+    lastRects = key
+    Scribble.setBlockedRegions({ rects }).catch(() => undefined)
+  }
+  const schedule = () => {
+    if (!frame) frame = requestAnimationFrame(sendRects)
+  }
+
   const apply = () => {
-    const enabled = settings.get().pencilInText === 'scribble'
-    if (enabled === last) return
-    last = enabled
+    const next = settings.get().pencilInText === 'scribble'
+    if (next === enabled) return
+    enabled = next
     Scribble.setEnabled({ enabled }).catch(() => undefined)
+    if (enabled) {
+      // drawings move when the page scrolls, resizes or changes
+      addEventListener('scroll', schedule, { capture: true, passive: true })
+      addEventListener('resize', schedule)
+      observer = new MutationObserver(schedule)
+      observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'class'] })
+      lastRects = ''
+      schedule()
+    } else {
+      removeEventListener('scroll', schedule, { capture: true })
+      removeEventListener('resize', schedule)
+      observer?.disconnect()
+      observer = null
+    }
   }
   apply()
   settings.subscribe(apply)

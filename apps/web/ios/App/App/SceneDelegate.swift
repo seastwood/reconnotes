@@ -42,6 +42,10 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
     /// notes. Off by default so Pencil writing stays ink; the web app changes
     /// it through the Scribble plugin when the user picks "Use Scribble".
     static var scribbleEnabled = false
+    /// Where Scribble must never start, even when enabled: drawings and
+    /// pictures on screen, in web view points (= CSS pixels). Kept up to date
+    /// by the web app as the page scrolls and changes.
+    static var scribbleBlockedRects: [CGRect] = []
     private var scribbleBlockers: [UIScribbleInteraction] = []
 
     override func capacitorDidLoad() {
@@ -77,7 +81,11 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
     }
 
     func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
-        Self.scribbleEnabled
+        guard Self.scribbleEnabled else { return false }
+        // Writing in a drawing stays ink; writing over typed text uses Scribble.
+        guard let webView = webView, let view = interaction.view else { return true }
+        let point = view.convert(location, to: webView)
+        return !Self.scribbleBlockedRects.contains { $0.insetBy(dx: -8, dy: -8).contains(point) }
     }
 
     // MARK: - UIPencilInteractionDelegate
@@ -212,20 +220,40 @@ extension CGImagePropertyOrientation {
     }
 }
 
-/// Lets the web app turn iPadOS Scribble on or off:
+/// Lets the web app turn iPadOS Scribble on or off, and mark the areas
+/// (drawings, pictures) where it must not start:
 ///     Scribble.setEnabled({ enabled: false })
+///     Scribble.setBlockedRegions({ rects: [{ x, y, w, h }] })
 @objc(ScribblePlugin)
 public class ScribblePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ScribblePlugin"
     public let jsName = "Scribble"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "setEnabled", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "setEnabled", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setBlockedRegions", returnType: CAPPluginReturnPromise)
     ]
 
     @objc func setEnabled(_ call: CAPPluginCall) {
         let enabled = call.getBool("enabled") ?? false
         DispatchQueue.main.async {
             ReconBridgeViewController.scribbleEnabled = enabled
+            call.resolve()
+        }
+    }
+
+    @objc func setBlockedRegions(_ call: CAPPluginCall) {
+        let list = call.getArray("rects", JSObject.self) ?? []
+        let rects = list.map { r -> CGRect in
+            func num(_ key: String) -> CGFloat {
+                if let n = r[key] as? NSNumber { return CGFloat(n.doubleValue) }
+                if let d = r[key] as? Double { return CGFloat(d) }
+                if let i = r[key] as? Int { return CGFloat(i) }
+                return 0
+            }
+            return CGRect(x: num("x"), y: num("y"), width: num("w"), height: num("h"))
+        }
+        DispatchQueue.main.async {
+            ReconBridgeViewController.scribbleBlockedRects = rects
             call.resolve()
         }
     }
