@@ -37,6 +37,7 @@ import {
   Printer,
   Table2,
   Globe,
+  ScanLine,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -47,6 +48,7 @@ import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
 import { trashNotes } from '../lib/noteActions'
+import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { Capacitor } from '@capacitor/core'
 
 const isNativeApp = Capacitor.isNativePlatform()
@@ -295,7 +297,17 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className="tb" onClick={() => photoRef.current?.click()} aria-label="Add photo" title="Add photo or screenshot (or paste)">
         <ImagePlus size={20} />
       </button>
-      <button className="tb hide-sm" onClick={() => cameraRef.current?.click()} aria-label="Take photo" title="Take photo / scan">
+      {scannerAvailable() && (
+        <button
+          className="tb"
+          onClick={() => run('Scanning…', () => scanIntoNote(editor, noteId))}
+          aria-label="Scan document"
+          title="Scan a document (pages are found, cropped and straightened)"
+        >
+          <ScanLine size={20} />
+        </button>
+      )}
+      <button className="tb hide-sm" onClick={() => cameraRef.current?.click()} aria-label="Take photo" title="Take photo">
         <Camera size={20} />
       </button>
       <AudioRecorder editor={editor} onError={setError} />

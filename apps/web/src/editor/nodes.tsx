@@ -474,16 +474,20 @@ export const FileNode = Node.create({
 })
 
 /** Store files locally (synced later) and insert the right node for each. */
-export async function insertFiles(editor: Editor, files: File[], pos?: number) {
+/** Put files in the note (pictures, recordings, other files); returns their attachment ids. */
+export async function insertFiles(editor: Editor, files: File[], pos?: number): Promise<string[]> {
   const nodes = []
+  const ids: string[] = []
   for (const f of files) {
     const attachmentId = await addAttachment(f, f.name)
+    ids.push(attachmentId)
     if (f.type.startsWith('image/')) nodes.push({ type: 'image', attrs: { attachmentId, alt: f.name.replace(/\.[^.]+$/, '') } })
     else if (f.type.startsWith('audio/')) nodes.push({ type: 'audio', attrs: { attachmentId, name: f.name } })
     else nodes.push({ type: 'file', attrs: { attachmentId, name: f.name, mime: f.type, size: f.size } })
   }
-  if (!nodes.length) return
+  if (!nodes.length) return ids
   const chain = editor.chain().focus()
   if (pos !== undefined) chain.insertContentAt(pos, [...nodes, { type: 'paragraph' }]).run()
   else chain.insertContent([...nodes, { type: 'paragraph' }]).run()
+  return ids
 }

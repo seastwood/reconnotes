@@ -26,6 +26,7 @@ import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { ShareDialog } from '../components/ShareDialog'
+import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 
 import { printNote } from '../lib/printNote'
 
@@ -171,6 +172,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     return registerCommands('editor', [
       { id: 'find', label: 'Find in note', section: S, shortcut: '⌘F', keywords: 'search replace', run: () => openFindRef.current() },
       { id: 'drawing', label: 'Add drawing', section: S, keywords: 'pen handwriting sketch ink', run: () => c().insertDrawing().run() },
+      ...(scannerAvailable() ? [{ id: 'scan', label: 'Scan a document', section: S, keywords: 'camera paper pages', run: () => void scanIntoNote(editor, noteId) }] : []),
       { id: 'table', label: 'Insert table', section: S, keywords: 'grid rows columns', run: () => c().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
       { id: 'checklist', label: 'Checklist', section: S, keywords: 'todo task list', run: () => c().toggleTaskList().run() },
       { id: 'link', label: 'Link to another note', section: S, keywords: '[[ reference', run: () => openLinkPicker(null) },

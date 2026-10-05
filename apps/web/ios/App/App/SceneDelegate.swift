@@ -4,6 +4,7 @@ import Vision
 import Speech
 import UniformTypeIdentifiers
 import QuickLook
+import VisionKit
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -71,6 +72,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         // Open attached files in Quick Look / share them (see FilePreviewPlugin below).
         bridge?.registerPluginInstance(FilePreviewPlugin())
         bridge?.registerPluginInstance(ScribblePlugin())
+        // Scan paper documents with the camera (see DocumentScannerPlugin below).
+        bridge?.registerPluginInstance(DocumentScannerPlugin())
         Self.current = self
         guard let webView = webView else { return }
         installScribbleBlocker(in: webView)
@@ -665,5 +668,76 @@ public class ScribblePlugin: CAPPlugin, CAPBridgedPlugin {
             ReconBridgeViewController.current?.setScribbleEnabled(enabled)
             call.resolve()
         }
+    }
+}
+
+
+// MARK: - Document scanner
+
+/// Apple's document scanner (the one in Notes and Files): finds the page,
+/// crops and straightens it, several pages in a row.
+///
+///     DocumentScanner.scan() → { pages: [<base64 JPEG>], title }   (pages: [] if cancelled)
+@objc(DocumentScannerPlugin)
+public class DocumentScannerPlugin: CAPPlugin, CAPBridgedPlugin, VNDocumentCameraViewControllerDelegate {
+    public let identifier = "DocumentScannerPlugin"
+    public let jsName = "DocumentScanner"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "scan", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
+    ]
+    private var pending: CAPPluginCall?
+
+    @objc func isAvailable(_ call: CAPPluginCall) {
+        call.resolve(["available": VNDocumentCameraViewController.isSupported])
+    }
+
+    @objc func scan(_ call: CAPPluginCall) {
+        guard VNDocumentCameraViewController.isSupported else {
+            call.reject("Document scanning isn’t available on this device.")
+            return
+        }
+        DispatchQueue.main.async {
+            self.pending = call
+            let scanner = VNDocumentCameraViewController()
+            scanner.delegate = self
+            self.bridge?.viewController?.present(scanner, animated: true)
+        }
+    }
+
+    public func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+        let call = pending
+        pending = nil
+        controller.dismiss(animated: true)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var pages: [String] = []
+            for i in 0..<scan.pageCount {
+                let image = Self.downscaled(scan.imageOfPage(at: i), longest: 2400)
+                if let data = image.jpegData(compressionQuality: 0.82) { pages.append(data.base64EncodedString()) }
+            }
+            call?.resolve(["pages": pages, "title": scan.title])
+        }
+    }
+
+    public func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+        controller.dismiss(animated: true)
+        pending?.resolve(["pages": [], "title": ""])
+        pending = nil
+    }
+
+    public func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+        controller.dismiss(animated: true)
+        pending?.reject(error.localizedDescription)
+        pending = nil
+    }
+
+    private static func downscaled(_ image: UIImage, longest: CGFloat) -> UIImage {
+        let size = image.size
+        let scale = min(1, longest / max(size.width, size.height))
+        if scale >= 1 { return image }
+        let target = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
     }
 }
