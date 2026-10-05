@@ -50,6 +50,31 @@ function useAttachmentText(id: string) {
   return text
 }
 
+/**
+ * Button handlers that work for finger and Pencil on iPad as well as the
+ * mouse: touch/pen act on pointerup (inside a note, iOS doesn't always
+ * deliver the click), the mouse on click.
+ */
+function tap(action: () => void) {
+  let handledAt = 0
+  return {
+    onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+    onPointerUp: (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse') return
+      const r = e.currentTarget.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
+      e.preventDefault()
+      handledAt = Date.now()
+      action()
+    },
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (Date.now() - handledAt < 800) return // already handled on pointerup
+      action()
+    },
+  }
+}
+
 // --- Image ------------------------------------------------------------------
 
 function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNodeViewProps) {
@@ -138,10 +163,10 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
           )}
           {editor.isEditable && !markingUp && (
             <div className={`image-actions${selected || busy ? ' show' : ''}`}>
-              <button onClick={markUp} title="Draw on this picture (or just touch it with Apple Pencil)">
+              <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
                 <PenLine size={16} /> Mark up
               </button>
-              <button onClick={convert} disabled={busy} title="Read the handwriting or text in this picture and add it below">
+              <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
                 {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
               </button>
             </div>
@@ -180,7 +205,11 @@ export const ImageNode = Node.create({
     return ['img', mergeAttributes({ 'data-attachment-id': HTMLAttributes.attachmentId, alt: HTMLAttributes.alt })]
   },
   addNodeView() {
-    return ReactNodeViewRenderer(ImageView)
+    // Touches on the picture's own controls are theirs alone: the editor
+    // mustn't turn them into selecting the picture (which can swallow the tap).
+    return ReactNodeViewRenderer(ImageView, {
+      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('.image-actions, .image-resize, .drawing-canvas.overlay.open')),
+    })
   },
 })
 
