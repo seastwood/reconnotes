@@ -3,7 +3,8 @@ import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeV
 import { useContext, useEffect, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { getTranscripts, newId, wordsKey } from '@reconnotes/core'
+import { getTranscripts, newId, wordsKey, type Stroke } from '@reconnotes/core'
+import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
 import { DrawingCanvas } from '../drawing/DrawingCanvas'
@@ -251,7 +252,7 @@ export const ImageNode = Node.create({
     // Touches on the picture's own controls are theirs alone: the editor
     // mustn't turn them into selecting the picture (which can swallow the tap).
     return ReactNodeViewRenderer(ImageView, {
-      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('.image-actions, .image-resize, .drawing-canvas.overlay.open')),
+      stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('.image-actions, .image-resize, .drawing-canvas.overlay.open, .drawing-canvas.overlay.replay')),
     })
   },
 })
@@ -287,8 +288,49 @@ function highlight(text: string, query: string) {
   return out
 }
 
+/** Is there writing in this note from while the recording was made? */
+function useLinkedInk(startedAt: number | null, endedAt: number | null): boolean {
+  const ctx = useContext(NoteContext)
+  const [linked, setLinked] = useState(false)
+  useEffect(() => {
+    if (!ctx || !startedAt || !endedAt) return setLinked(false)
+    const check = () => {
+      for (const key of ctx.doc.share.keys()) {
+        if (key.startsWith('ink:') && hasLinkedInk(ctx.doc.getArray<Stroke>(key).toArray(), startedAt, endedAt)) return setLinked(true)
+      }
+      setLinked(false)
+    }
+    check()
+    ctx.doc.on('afterTransaction', check)
+    return () => ctx.doc.off('afterTransaction', check)
+  }, [ctx, startedAt, endedAt])
+  return linked
+}
+
+/** Keep the replay's playhead in step with the audio while it plays. */
+function setPlayhead(el: HTMLAudioElement) {
+  const r = replay.get()
+  if (r.attachmentId) replay.set({ playhead: r.startedAt + el.currentTime * 1000 })
+}
+function followPlayhead(el: HTMLAudioElement) {
+  const step = () => {
+    if (!replay.get().attachmentId) return
+    setPlayhead(el)
+    if (!el.paused && !el.ended) requestAnimationFrame(step)
+  }
+  step()
+}
+
 function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
+  const startedAt = node.attrs.startedAt as number | null
+  const endedAt = node.attrs.endedAt as number | null
+  const linked = useLinkedInk(startedAt, endedAt)
+  const replaying = useReplay((r) => r.attachmentId === node.attrs.attachmentId)
+  // leaving the note ends replay mode
+  useEffect(() => () => {
+    if (replay.get().attachmentId === node.attrs.attachmentId) stopReplay()
+  }, [node.attrs.attachmentId])
   const transcript = useAttachmentText(node.attrs.attachmentId)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -349,7 +391,30 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
           </button>
         </div>
       )}
-      {url ? <audio controls src={url} preload="metadata" /> : <div className="attachment-placeholder">{missing ? 'Audio will appear when synced' : '…'}</div>}
+      {url ? (
+        <audio
+          ref={(el) => registerPlayer(node.attrs.attachmentId, el)}
+          controls
+          src={url}
+          preload="metadata"
+          onPlay={(e) => replaying && followPlayhead(e.currentTarget)}
+          onSeeked={(e) => replaying && setPlayhead(e.currentTarget)}
+        />
+      ) : (
+        <div className="attachment-placeholder">{missing ? 'Audio will appear when synced' : '…'}</div>
+      )}
+      {linked && url && (
+        <div className={`replay-bar${replaying ? ' on' : ''}`}>
+          <button
+            className="audio-transcribe"
+            {...tap(() => (replaying ? stopReplay() : startReplay(node.attrs.attachmentId, startedAt!, endedAt!)))}
+            title="Tap your writing to hear what was being said when you wrote it"
+          >
+            <PenLine size={15} /> {replaying ? 'Done replaying' : 'Replay with writing'}
+          </button>
+          {replaying && <span className="hint">Tap any writing to hear what was said as you wrote it. Writing still to come is faded.</span>}
+        </div>
+      )}
       {transcript && (
         <button className="link" onClick={() => setOpen(!open)}>
           {open ? 'Hide transcript' : 'Show transcript'}
@@ -393,7 +458,8 @@ export const AudioNode = Node.create({
   atom: true,
   draggable: true,
   addAttributes() {
-    return { attachmentId: { default: null }, name: { default: '' } }
+    // startedAt / endedAt: when it was recorded here (ms), to link it to the writing done meanwhile
+    return { attachmentId: { default: null }, name: { default: '' }, startedAt: { default: null }, endedAt: { default: null } }
   },
   parseHTML() {
     return [{ tag: 'audio[data-attachment-id]', getAttrs: (el) => ({ attachmentId: (el as HTMLElement).dataset.attachmentId }) }]

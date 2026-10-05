@@ -24,6 +24,7 @@ import { DRAW_ORIGIN } from '../editor/undo'
 import { inkUi, toolState, useInkUi, useTools } from './toolState'
 import { settings } from '../lib/settings'
 import { WordHighlights } from '../editor/findHighlights'
+import { inRecording, playFrom, replay, strokeAt, useReplay } from '../lib/replay'
 
 interface Props {
   doc: Y.Doc
@@ -143,7 +144,10 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   }
 
   const paintStroke = (ctx: CanvasRenderingContext2D, s: Stroke, dark: boolean, path?: Path2D) => {
-    ctx.globalAlpha = strokeOpacity(s)
+    // replaying a recording: ink not yet written at this point is faded
+    const r = replay.get()
+    const later = r.playhead !== null && inRecording(s, r) && (s.t ?? 0) > r.playhead
+    ctx.globalAlpha = strokeOpacity(s) * (later ? 0.15 : 1)
     ctx.fillStyle = displayColor(s.color, dark)
     ctx.fill(path ?? pathFor(s))
   }
@@ -172,10 +176,18 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
       if (sel && ![...sel.ids].every((id) => ids.has(id))) setSelection(null)
     }
     strokes.observe(obs)
+    // replay: redraw as the recording plays (at most once a frame)
+    let frame = 0
+    const unReplay = replay.subscribe(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(renderBase)
+    })
     const mo = new MutationObserver(renderBase)
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => {
       strokes.unobserve(obs)
+      unReplay()
+      cancelAnimationFrame(frame)
       mo.disconnect()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -338,7 +350,16 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
 
   useEffect(drawLive)
 
+  /** Replay mode: a tap on writing plays the recording from when it was written. */
+  const onReplayTap = (e: React.MouseEvent) => {
+    if (!replay.get().attachmentId) return
+    const { x, y } = toLocal(e)
+    const hit = strokeAt(strokes.toArray(), x, y, 18 / scale)
+    if (hit) playFrom(hit)
+  }
+
   const onPointerDown = (e: React.PointerEvent) => {
+    if (replay.get().attachmentId) return // replaying: taps play, they don't write
     if (e.pointerType === 'pen' && !inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     if (activePointer.current !== null || !canDraw(e)) return
     e.preventDefault()
@@ -383,6 +404,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
           color: t.colors[inkTool],
           size: t.sizes[inkTool],
           pts: [round1(x), round1(y), round2(e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5)],
+          t: Date.now(),
         },
         focusTap: opening,
       }
@@ -571,6 +593,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     handle.addEventListener('pointercancel', end)
   }
 
+  const replaying = useReplay((r) => Boolean(r.attachmentId))
   const cssHeight = height * scale
   // fingers draw only in an open drawing (and only with "draw with finger"); otherwise they scroll
   const touchAction = settings.get().fingerDrawing && open ? 'none' : 'pan-y pinch-zoom'
@@ -579,7 +602,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     <>
     <div
       ref={wrapRef}
-      className={`drawing-canvas${overlay ? ' overlay' : ''}${overlay && open ? ' open' : ''}`}
+      className={`drawing-canvas${overlay ? ' overlay' : ''}${overlay && open ? ' open' : ''}${replaying ? ' replay' : ''}`}
       style={overlay ? undefined : { height: cssHeight || 200 }}
     >
       <canvas ref={baseRef} className="ink-layer" style={{ width: '100%', height: cssHeight }} />
@@ -591,6 +614,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         onPointerMove={onPointerMove}
         onPointerUp={finish}
         onPointerCancel={finish}
+        onClick={onReplayTap}
         onContextMenu={(e) => e.preventDefault()}
       />
       {highlights && <WordHighlights rects={highlights.rects} current={highlights.current} scale={scale} />}

@@ -469,14 +469,17 @@ function AudioRecorder({ editor, onError }: { editor: Editor; onError: (msg: str
       const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? ''
       const r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
       const chunks: Blob[] = []
+      let startedAt = Date.now()
+      r.onstart = () => (startedAt = Date.now())
       r.ondataavailable = (e) => chunks.push(e.data)
       r.onstop = async () => {
+        const endedAt = Date.now()
         stream.getTracks().forEach((t) => t.stop())
         const type = r.mimeType.split(';')[0] || 'audio/webm'
         const blob = new Blob(chunks, { type })
         const name = `Recording ${new Date().toLocaleString()}`
         const attachmentId = await addAttachment(blob, `${name}.${type.includes('mp4') ? 'm4a' : 'webm'}`)
-        editor.chain().focus().insertContent([{ type: 'audio', attrs: { attachmentId, name } }, { type: 'paragraph' }]).run()
+        editor.chain().focus().insertContent([{ type: 'audio', attrs: { attachmentId, name, startedAt, endedAt } }, { type: 'paragraph' }]).run()
       }
       r.start()
       setSecs(0)

@@ -205,8 +205,17 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
   const onPointerDownCapture = (e: React.PointerEvent) => {
     // Touching the text (not a drawing) ends drawing mode, which also lets
     // iPadOS Scribble work there again.
-    if (inkUi.get().activeDrawing && (e.target as HTMLElement).closest('.ProseMirror') && !(e.target as HTMLElement).closest('.drawing-block, .image-block.marking-up'))
-      inkUi.set({ activeDrawing: null, palette: null })
+    // Closed only once the tap is over: closing hides the drawing's footer, and
+    // if the page moved under the finger now, a tap on a button below would miss.
+    if (inkUi.get().activeDrawing && (e.target as HTMLElement).closest('.ProseMirror') && !(e.target as HTMLElement).closest('.drawing-block, .image-block.marking-up')) {
+      const close = () => {
+        window.removeEventListener('pointerup', close, true)
+        window.removeEventListener('pointercancel', close, true)
+        setTimeout(() => inkUi.set({ activeDrawing: null, palette: null }), 0)
+      }
+      window.addEventListener('pointerup', close, true)
+      window.addEventListener('pointercancel', close, true)
+    }
     if (e.pointerType !== 'pen' || !editor) return
     if (!inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     const target = e.target as HTMLElement

@@ -147,6 +147,8 @@ export interface Stroke {
   size: number
   /** flat list of x, y, pressure triples */
   pts: number[]
+  /** when it was written (ms since 1970) – links it to a recording made at the time */
+  t?: number
 }
 
 export const DRAWING_WIDTH = 1000

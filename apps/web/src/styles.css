@@ -2769,3 +2769,26 @@ a.button {
 .share-dialog .danger-text {
   margin-top: 12px;
 }
+
+/* replaying a recording with the writing done meanwhile */
+.drawing-canvas.replay,
+.drawing-canvas.replay .ink-input {
+  cursor: pointer;
+}
+.drawing-canvas.overlay.replay {
+  pointer-events: auto;
+}
+.replay-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.replay-bar.on .audio-transcribe {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+.replay-bar .hint {
+  font-size: 13px;
+}
