@@ -25,8 +25,26 @@ export type LinkAction =
 
 interface AppLinksPlugin {
   take(): Promise<{ urls: string[] }>
+  openExternal(options: { url: string }): Promise<void>
 }
 const AppLinks = registerPlugin<AppLinksPlugin>('AppLinks')
+
+/** Links that may be opened from a note (never javascript: and the like). */
+export function openableUrl(href: string): string | null {
+  const h = href.trim()
+  if (/^(https?|mailto|tel|sms|maps|facetime):/i.test(h)) return h
+  if (/^www\./i.test(h)) return `https://${h}`
+  return null
+}
+
+/** Open a link from a note: Safari (or the right app) in the iOS app, a new tab on the web. */
+export function openExternal(href: string) {
+  const url = openableUrl(href)
+  if (!url) return
+  if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AppLinks')) {
+    void AppLinks.openExternal({ url }).catch(() => window.open(url, '_blank', 'noopener'))
+  } else window.open(url, '_blank', 'noopener,noreferrer')
+}
 
 /** What a link asks for (null: not one of ours). */
 export function parseLink(raw: string): LinkAction | 'connected' | null {

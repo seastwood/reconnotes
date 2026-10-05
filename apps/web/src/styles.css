@@ -768,6 +768,9 @@ button.text {
 }
 .note-content a {
   color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 .note-content ul,
 .note-content ol {

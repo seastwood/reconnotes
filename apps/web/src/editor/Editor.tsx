@@ -22,6 +22,7 @@ import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
+import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
@@ -89,6 +90,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           link: { openOnClick: false, autolink: true },
         }),
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
+        LinkOpener,
         TaskList,
         TaskItem.configure({ nested: true }),
         TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),

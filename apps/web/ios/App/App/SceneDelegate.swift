@@ -765,9 +765,25 @@ public class AppLinksPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "AppLinksPlugin"
     public let jsName = "AppLinks"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "take", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "take", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openExternal", returnType: CAPPluginReturnPromise),
     ]
     private static var pending: [String] = []
+
+    /// Open a link from a note outside the app: web pages in Safari,
+    /// mailto:/tel:/maps links in their apps.
+    @objc func openExternal(_ call: CAPPluginCall) {
+        guard let raw = call.getString("url"), let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(), ["http", "https", "mailto", "tel", "sms", "maps", "facetime"].contains(scheme) else {
+            call.reject("Not a link that can be opened")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url, options: [:]) { ok in
+                ok ? call.resolve() : call.reject("Couldn't open the link")
+            }
+        }
+    }
     private static let lock = NSLock()
 
     static func open(_ url: URL) {
