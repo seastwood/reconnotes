@@ -153,6 +153,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <input type="checkbox" checked={s.fingerDrawing} onChange={(e) => settings.set({ fingerDrawing: e.target.checked })} />
             Draw with finger in an open drawing (tap a drawing to open it; two fingers scroll). Otherwise only Apple Pencil and mouse draw
           </label>
+          <label className="check">
+            <input type="checkbox" checked={s.shapeSnap !== false} onChange={(e) => settings.set({ shapeSnap: e.target.checked })} />
+            Hold the pen still at the end of a line, box, circle or arrow to make it a clean shape
+          </label>
           <label>
             When the Pencil touches typed text
             <select value={s.pencilInText} onChange={(e) => settings.set({ pencilInText: e.target.value as PencilInTextMode })}>

@@ -271,3 +271,29 @@ describe('due dates', () => {
     expect(extractDue(doc)[0].done).toBe(true)
   })
 })
+
+describe('shape snapping', () => {
+  const wobble = (pts: [number, number][], j = 3) => {
+    const out: [number, number][] = []
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [a, b] = [pts[i], pts[i + 1]]
+      for (let k = 0; k < 20; k++) out.push([a[0] + ((b[0] - a[0]) * k) / 20 + Math.sin(k * 1.7 + i) * j, a[1] + ((b[1] - a[1]) * k) / 20 + Math.cos(k * 1.3 + i) * j])
+    }
+    out.push(pts[pts.length - 1])
+    return out
+  }
+  it('recognises lines, boxes, triangles, circles and arrows', async () => {
+    const { recognizeShape } = await import('../src')
+    expect(recognizeShape(wobble([[10, 100], [300, 104]], 1))?.kind).toBe('line')
+    const line = recognizeShape(wobble([[10, 100], [300, 106]], 1))!
+    expect(Math.abs(line.points[line.points.length - 1][1] - line.points[0][1])).toBeLessThan(0.5) // snapped level
+    expect(recognizeShape(wobble([[0, 0], [200, 4], [204, 120], [2, 118], [3, 2]]))?.kind).toBe('rectangle')
+    expect(recognizeShape(wobble([[100, 0], [200, 170], [0, 170], [98, 2]]))?.kind).toBe('triangle')
+    const circle: [number, number][] = []
+    for (let i = 0; i <= 60; i++) circle.push([150 + Math.cos(i / 9.4) * (80 + Math.sin(i) * 3), 150 + Math.sin(i / 9.4) * (80 + Math.cos(i) * 3)])
+    expect(recognizeShape(circle)?.kind).toBe('ellipse')
+    expect(recognizeShape(wobble([[0, 100], [300, 100], [270, 80], [300, 100], [270, 120]], 1))?.kind).toBe('arrow')
+    // handwriting is left alone
+    expect(recognizeShape(wobble([[0, 0], [20, 40], [40, 0], [60, 40], [80, 0], [100, 40], [120, 0], [140, 40], [160, 0]], 1))).toBe(null)
+  })
+})

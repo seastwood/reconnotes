@@ -20,6 +20,8 @@ export interface Settings {
   backgroundOcr: boolean
   /** iOS app: transcribe recordings with Apple's on-device speech recognition */
   deviceSpeech: boolean
+  /** hold the pen still at the end of a stroke to snap it to a clean shape */
+  shapeSnap?: boolean
   /** iOS app: a notification at 9:00 on the day a checklist item is due */
   dueReminders?: boolean
   /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */

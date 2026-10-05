@@ -7,6 +7,7 @@ import {
   getDrawingMeta,
   getStrokes,
   newId,
+  recognizeShape,
   round1,
   round2,
   strokeHit,
@@ -185,7 +186,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   // --- Input --------------------------------------------------------------
   type Gesture =
     /** focusTap: the drawing was opened by this touch – a mere tap leaves no dot */
-    | { kind: 'ink'; stroke: Stroke; focusTap?: boolean }
+    | { kind: 'ink'; stroke: Stroke; focusTap?: boolean; snapped?: boolean }
     | { kind: 'erase' }
     | { kind: 'lasso'; poly: number[] }
     | { kind: 'move'; startX: number; startY: number; dx: number; dy: number }
@@ -249,6 +250,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
 
   /** Drop the stroke in progress (a second finger turned it into a scroll). */
   const cancelGesture = () => {
+    stopHold()
     const id = activePointer.current
     if (id === null) return
     activePointer.current = null
@@ -385,10 +387,39 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     drawLive()
   }
 
+  // Shape snapping: hold the pen still at the end of a stroke and a wobbly
+  // line, box, triangle, circle or arrow becomes a clean one.
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number }>({ timer: null, x: 0, y: 0 })
+  const stopHold = () => {
+    if (hold.current.timer) clearTimeout(hold.current.timer)
+    hold.current.timer = null
+  }
+  const watchHold = (x: number, y: number) => {
+    const h = hold.current
+    // ignore tiny tremor (≈3 screen pixels) while holding still
+    if (h.timer && Math.hypot(x - h.x, y - h.y) * scale < 3) return
+    stopHold()
+    h.x = x
+    h.y = y
+    h.timer = setTimeout(() => {
+      h.timer = null
+      const g = gesture.current
+      if (!g || g.kind !== 'ink' || g.snapped || settings.get().shapeSnap === false) return
+      const pts: [number, number][] = []
+      for (let i = 0; i < g.stroke.pts.length; i += 3) pts.push([g.stroke.pts[i], g.stroke.pts[i + 1]])
+      const shape = recognizeShape(pts)
+      if (!shape) return
+      g.snapped = true
+      g.stroke.pts = shape.points.flatMap(([px, py]) => [round1(px), round1(py), 0.5])
+      drawLive()
+    }, 550)
+  }
+
   const onPointerMove = (e: React.PointerEvent) => {
     if (e.pointerId !== activePointer.current) return
     const g = gesture.current
     if (!g) return
+    if (g.kind === 'ink' && g.snapped) return // the shape is set; lifting the pen keeps it
     const events = e.nativeEvent.getCoalescedEvents?.() ?? [e.nativeEvent]
     for (const ev of events.length ? events : [e.nativeEvent]) {
       const { x, y } = toLocal(ev)
@@ -398,6 +429,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         const ly = p[p.length - 2]
         if (Math.abs(lx - x) + Math.abs(ly - y) < 0.4) continue
         p.push(round1(x), round1(y), round2(ev.pointerType === 'pen' ? ev.pressure || 0.5 : 0.5))
+        watchHold(x, y)
       } else if (g.kind === 'erase') {
         eraseAt(x, y)
       } else if (g.kind === 'lasso') {
@@ -412,6 +444,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
 
   const finish = (e: React.PointerEvent) => {
     if (e.pointerId !== activePointer.current) return
+    stopHold()
     activePointer.current = null
     const g = gesture.current
     gesture.current = null
