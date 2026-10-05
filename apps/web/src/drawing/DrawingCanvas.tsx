@@ -29,9 +29,9 @@ interface Props {
   undoManager: Y.UndoManager | null
   editable: boolean
   /**
-   * Controls shown in a bar under the drawing while it's being edited. The
-   * bar's empty space is the resize handle. Kept outside the ink area so a
-   * Pencil tap on a control never draws.
+   * Controls shown in a bar under the drawing while it's being edited, below
+   * a resize handle. Kept outside the ink area so a Pencil tap on a control
+   * never draws.
    */
   footer?: React.ReactNode
 }
@@ -432,26 +432,39 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     }
   }, [selection, drawingId])
 
-  // Resize handle: drag to make the drawing taller or shorter.
-  const onResizeDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('button, a')) return // a control in the bar, not a resize
+  // Resize handle: drag to make the drawing taller or shorter. Pointer
+  // capture keeps the drag going (finger, mouse or Pencil) even when the
+  // pointer leaves the handle.
+  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    const handle = e.currentTarget
+    const id = e.pointerId
+    handle.setPointerCapture(id)
+    handle.classList.add('dragging')
     const startY = e.clientY
     const startH = getDrawingHeight(doc, drawingId)
-    const minH = Math.max(150, (unionBounds(strokes.toArray())?.y ?? 0) + (unionBounds(strokes.toArray())?.h ?? 0) + 20)
+    const ink = unionBounds(strokes.toArray())
+    const minH = Math.max(150, (ink?.y ?? 0) + (ink?.h ?? 0) + 20)
+    const heightAt = (y: number) => Math.min(MAX_HEIGHT, Math.max(minH, startH + (y - startY) / scale))
+    let last = startY
     const move = (ev: PointerEvent) => {
-      const h = Math.min(MAX_HEIGHT, Math.max(minH, startH + (ev.clientY - startY) / scale))
-      setHeight(h)
+      if (ev.pointerId !== id) return
+      last = ev.clientY
+      setHeight(heightAt(last))
     }
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      const h = Math.min(MAX_HEIGHT, Math.max(minH, startH + (ev.clientY - startY) / scale))
-      getDrawingMeta(doc).set(drawingId, { height: Math.round(h) })
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', end)
+      handle.removeEventListener('pointercancel', end)
+      handle.classList.remove('dragging')
+      if (ev.type === 'pointerup') last = ev.clientY
+      getDrawingMeta(doc).set(drawingId, { height: Math.round(heightAt(last)) })
     }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', end)
+    handle.addEventListener('pointercancel', end)
   }
 
   const cssHeight = height * scale
@@ -473,8 +486,16 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
       />
     </div>
     {editable && footer && (
-      <div className="drawing-footer" onPointerDown={onResizeDown} title="Drag the bar to make the drawing taller or shorter">
-        <span className="resize-grip" aria-hidden="true" />
+      <div className="drawing-footer">
+        <div
+          className="drawing-resize-bar"
+          onPointerDown={onResizeDown}
+          title="Drag to make the drawing taller or shorter"
+          aria-label="Resize drawing"
+          role="separator"
+        >
+          <span className="resize-grip" aria-hidden="true" />
+        </div>
         {footer}
       </div>
     )}

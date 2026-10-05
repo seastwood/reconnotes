@@ -145,10 +145,93 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     editor.view.dispatch(tr.scrollIntoView())
   }
 
+  /**
+   * Drag the grip to move the drawing anywhere in the note. Done with
+   * pointer events (not HTML drag and drop, which touch and Pencil on iPad
+   * don't start here): a line shows where it will land, and the page scrolls
+   * near the top or bottom edge.
+   */
+  const startDrag = (e: React.PointerEvent<HTMLElement>) => {
+    const pos = getPos()
+    if (typeof pos !== 'number' || editor.state.doc.resolve(pos).depth !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const grip = e.currentTarget
+    const id = e.pointerId
+    grip.setPointerCapture(id)
+    const view = editor.view
+    const block = grip.closest('.drawing-block') as HTMLElement | null
+    block?.classList.add('dragging')
+    const indicator = document.createElement('div')
+    indicator.className = 'drop-indicator'
+    document.body.appendChild(indicator)
+    const scroller = scrollParent(view.dom)
+    let y = e.clientY
+    let target = -1
+
+    const update = () => {
+      const blocks: { index: number; rect: DOMRect }[] = []
+      view.state.doc.forEach((_n, offset, index) => {
+        const dom = view.nodeDOM(offset)
+        if (dom instanceof HTMLElement) blocks.push({ index, rect: dom.getBoundingClientRect() })
+      })
+      if (!blocks.length) return
+      const before = blocks.find((b) => y < b.rect.top + b.rect.height / 2)
+      target = before ? before.index : view.state.doc.childCount
+      const lineY = before ? before.rect.top - 3 : blocks[blocks.length - 1].rect.bottom + 3
+      const r = view.dom.getBoundingClientRect()
+      indicator.style.cssText = `top:${lineY - 2}px;left:${r.left}px;width:${r.width}px`
+    }
+    let raf = 0
+    const autoScroll = () => {
+      if (scroller) {
+        const r = scroller.getBoundingClientRect()
+        const edge = 60
+        if (y < r.top + edge) scroller.scrollTop -= Math.ceil((r.top + edge - y) / 4)
+        else if (y > r.bottom - edge) scroller.scrollTop += Math.ceil((y - (r.bottom - edge)) / 4)
+      }
+      update()
+      raf = requestAnimationFrame(autoScroll)
+    }
+    raf = requestAnimationFrame(autoScroll)
+
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId === id) y = ev.clientY
+    }
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      cancelAnimationFrame(raf)
+      grip.removeEventListener('pointermove', move)
+      grip.removeEventListener('pointerup', end)
+      grip.removeEventListener('pointercancel', end)
+      indicator.remove()
+      block?.classList.remove('dragging')
+      if (ev.type !== 'pointerup') return
+      const from = getPos()
+      if (typeof from !== 'number' || target < 0) return
+      const { state } = editor
+      const $from = state.doc.resolve(from)
+      if ($from.depth !== 0) return
+      const index = $from.index()
+      if (target === index || target === index + 1) return // dropped where it already is
+      const self = state.doc.nodeAt(from)!
+      let insertAt = 0
+      state.doc.forEach((n, offset, i) => {
+        if (i < target) insertAt = offset + n.nodeSize
+      })
+      const tr = state.tr.insert(insertAt, self)
+      tr.delete(tr.mapping.map(from), tr.mapping.map(from + self.nodeSize))
+      view.dispatch(tr.scrollIntoView())
+    }
+    grip.addEventListener('pointermove', move)
+    grip.addEventListener('pointerup', end)
+    grip.addEventListener('pointercancel', end)
+  }
+
   const footer = active && editor.isEditable && (
     <div className="drawing-footer-actions" onPointerDown={(e) => e.stopPropagation()}>
-      <span className="drag-grip" data-drag-handle="" draggable title="Drag to move this drawing" aria-label="Drag to move">
-        <GripVertical size={18} />
+      <span className="drag-grip" onPointerDown={startDrag} title="Drag to move this drawing" aria-label="Drag to move">
+        <GripVertical size={20} />
       </span>
       <button onClick={() => move(-1)} title="Move up" aria-label="Move drawing up">
         <ArrowUp size={16} />
@@ -187,4 +270,12 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
       {transcript && !active && <div className="drawing-transcript" title="Recognised handwriting (searchable)">{transcript}</div>}
     </NodeViewWrapper>
   )
+}
+
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const o = getComputedStyle(n).overflowY
+    if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n
+  }
+  return document.scrollingElement as HTMLElement | null
 }

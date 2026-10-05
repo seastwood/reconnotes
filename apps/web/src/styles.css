@@ -905,31 +905,38 @@ button.link {
   cursor: cell;
 }
 .drawing-footer {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 6px;
   border-top: 1px solid var(--line);
-  cursor: ns-resize;
-  touch-action: none;
-  position: relative;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Big, easy target for finger, mouse and Pencil: the whole strip resizes. */
+.drawing-resize-bar {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+.drawing-resize-bar:hover,
+.drawing-resize-bar.dragging {
+  background: color-mix(in srgb, var(--accent, var(--muted)) 18%, transparent);
 }
 .resize-grip {
-  position: absolute;
-  left: 50%;
-  top: 6px;
-  width: 44px;
-  height: 4px;
-  margin-left: -22px;
-  border-radius: 2px;
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
   background: var(--muted);
-  opacity: 0.5;
+  opacity: 0.6;
   pointer-events: none;
+}
+.drawing-resize-bar.dragging .resize-grip {
+  opacity: 1;
 }
 .drawing-footer-actions {
   display: flex;
+  padding: 4px 6px;
   align-items: center;
   gap: 4px;
   width: 100%;
@@ -953,10 +960,27 @@ button.link {
 .drag-grip {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 34px;
+  width: 44px;
+  height: 38px;
   color: var(--muted);
   cursor: grab;
+  touch-action: none;
+  border-radius: 8px;
+  border: 1px dashed var(--line);
+}
+.drag-grip:active {
+  cursor: grabbing;
+}
+.drawing-block.dragging {
+  opacity: 0.55;
+}
+.drop-indicator {
+  position: fixed;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent, #c48a00);
+  z-index: 1000;
+  pointer-events: none;
 }
 .drawing-actions {
   position: absolute;
