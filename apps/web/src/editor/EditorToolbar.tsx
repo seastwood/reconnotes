@@ -35,6 +35,7 @@ import {
   Link2,
   History,
   Printer,
+  Table2,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -67,6 +68,21 @@ interface Props {
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
+
+type Chain = ReturnType<Editor['chain']>
+const TABLE_ACTIONS: ('-' | { label: string; run: (c: Chain) => Chain; danger?: boolean; close?: boolean })[] = [
+  { label: 'Add row above', run: (c) => c.addRowBefore() },
+  { label: 'Add row below', run: (c) => c.addRowAfter() },
+  { label: 'Add column left', run: (c) => c.addColumnBefore() },
+  { label: 'Add column right', run: (c) => c.addColumnAfter() },
+  '-',
+  { label: 'Header row on/off', run: (c) => c.toggleHeaderRow() },
+  { label: 'Merge or split cells', run: (c) => c.mergeOrSplit() },
+  '-',
+  { label: 'Delete row', run: (c) => c.deleteRow(), danger: true },
+  { label: 'Delete column', run: (c) => c.deleteColumn(), danger: true },
+  { label: 'Delete table', run: (c) => c.deleteTable(), danger: true, close: true },
+]
 
 const STYLES: { key: StyleKey; label: string; className: string }[] = [
   { key: 'title', label: 'Title', className: 'st-title' },
@@ -107,12 +123,13 @@ function applyStyle(editor: Editor, key: StyleKey) {
 export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onPrint }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
-  const [menu, setMenu] = useState<'style' | 'more' | null>(null)
+  const [menu, setMenu] = useState<'style' | 'more' | 'table' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const styleBtn = useRef<HTMLButtonElement>(null)
   const moreBtn = useRef<HTMLButtonElement>(null)
+  const tableBtn = useRef<HTMLButtonElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -124,6 +141,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       underline: e.isActive('underline'),
       strike: e.isActive('strike'),
       check: e.isActive('taskList'),
+      table: e.isActive('table'),
       style: e.isActive('heading', { level: 1 })
         ? 'Title'
         : e.isActive('heading', { level: 2 })
@@ -230,6 +248,41 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className={`tb${state.check ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleTaskList().run()} aria-label="Checklist" title="Checklist (or type [ ] )">
         <ListChecks size={20} />
       </button>
+      <button
+        ref={tableBtn}
+        className={`tb hide-xs${state.table || menu === 'table' ? ' on' : ''}`}
+        onClick={() => {
+          if (!state.table) {
+            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+            return
+          }
+          setMenu(menu === 'table' ? null : 'table')
+        }}
+        aria-label={state.table ? 'Table options' : 'Insert table'}
+        title={state.table ? 'Rows, columns and table options' : 'Insert table'}
+      >
+        <Table2 size={19} />
+      </button>
+      {menu === 'table' && (
+        <Popover anchorRef={tableBtn} onClose={() => setMenu(null)} keepFocus>
+          {TABLE_ACTIONS.map((a, i) =>
+            a === '-' ? (
+              <div key={i} className="menu-sep" />
+            ) : (
+              <button
+                key={a.label}
+                className={a.danger ? 'danger' : undefined}
+                onClick={() => {
+                  a.run(editor.chain().focus()).run()
+                  if (a.close) setMenu(null)
+                }}
+              >
+                {a.label}
+              </button>
+            ),
+          )}
+        </Popover>
+      )}
       <span className="sep" />
 
       <button className="tb" onClick={() => editor.chain().focus().insertDrawing().run()} aria-label="Add drawing" title="Add drawing">

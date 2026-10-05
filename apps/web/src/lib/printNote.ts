@@ -100,6 +100,14 @@ async function node(n: JSONContent, doc: Y.Doc): Promise<string> {
       return `<pre><code>${esc((n.content ?? []).map((c) => c.text ?? '').join(''))}</code></pre>`
     case 'horizontalRule':
       return '<hr>'
+    case 'table':
+      return `<table>${await inner()}</table>`
+    case 'tableRow':
+      return `<tr>${await inner()}</tr>`
+    case 'tableHeader':
+      return `<th>${await inner()}</th>`
+    case 'tableCell':
+      return `<td>${await inner()}</td>`
     case 'drawing': {
       const svg = inkSvg(doc, n.attrs?.drawingId)
       return svg ? `<figure class="drawing">${svg}</figure>` : ''
@@ -133,6 +141,10 @@ const STYLE = `
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 body { font: 12pt/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111; margin: 0; }
 .meta { color: #777; font-size: 9pt; margin-bottom: 14pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+th, td { border: 1px solid #bbb; padding: 4pt 7pt; text-align: left; vertical-align: top; }
+th { background: #f1f1f1; }
+th p, td p { margin: 0; }
 h1 { font-size: 20pt; margin: 0 0 6pt; } h2 { font-size: 16pt; margin: 14pt 0 4pt; } h3 { font-size: 13pt; margin: 12pt 0 4pt; }
 p { margin: 0 0 6pt; }
 ul, ol { margin: 0 0 6pt; padding-left: 18pt; }

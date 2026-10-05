@@ -1,4 +1,4 @@
-import zlib from 'node:zlib'
+import { readZip, type ZipEntry } from './zip'
 
 /**
  * Text from office documents, for search: Word/Excel/PowerPoint (.docx,
@@ -13,48 +13,10 @@ export function isOfficeFile(mime: string, name: string): boolean {
   return OFFICE_MIME.test(mime) || OFFICE_EXT.test(name)
 }
 
-interface Entry {
-  name: string
-  method: number
-  compressedSize: number
-  offset: number
-}
+type Entry = ZipEntry
 
-function entries(zip: Buffer): Entry[] {
-  // end of central directory: the last 22+ bytes, signature 0x06054b50
-  let eocd = -1
-  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65_557); i--) {
-    if (zip.readUInt32LE(i) === 0x06054b50) {
-      eocd = i
-      break
-    }
-  }
-  if (eocd < 0) throw new Error('not a zip file')
-  const count = zip.readUInt16LE(eocd + 10)
-  let p = zip.readUInt32LE(eocd + 16)
-  const out: Entry[] = []
-  for (let n = 0; n < count && p + 46 <= zip.length; n++) {
-    if (zip.readUInt32LE(p) !== 0x02014b50) break
-    const method = zip.readUInt16LE(p + 10)
-    const compressedSize = zip.readUInt32LE(p + 20)
-    const nameLen = zip.readUInt16LE(p + 28)
-    const extraLen = zip.readUInt16LE(p + 30)
-    const commentLen = zip.readUInt16LE(p + 32)
-    const offset = zip.readUInt32LE(p + 42)
-    out.push({ name: zip.toString('utf8', p + 46, p + 46 + nameLen), method, compressedSize, offset })
-    p += 46 + nameLen + extraLen + commentLen
-  }
-  return out
-}
-
-function read(zip: Buffer, e: Entry): string {
-  const p = e.offset
-  if (zip.readUInt32LE(p) !== 0x04034b50) return ''
-  const start = p + 30 + zip.readUInt16LE(p + 26) + zip.readUInt16LE(p + 28)
-  const data = zip.subarray(start, start + e.compressedSize)
-  const raw = e.method === 0 ? data : e.method === 8 ? zlib.inflateRawSync(data) : Buffer.alloc(0)
-  return raw.toString('utf8')
-}
+const read = (_zip: Buffer, e: Entry) => e.data().toString('utf8')
+const entries = readZip
 
 const decode = (s: string) =>
   s

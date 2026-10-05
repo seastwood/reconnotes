@@ -24,6 +24,9 @@ import {
 } from './agents'
 import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
 import { listBackups, runBackup } from './backup'
+import { exportZip } from './exportZip'
+import { importNotes, unpack } from './importNotes'
+import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
 
 export const VERSION = '0.1.0'
@@ -358,10 +361,56 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- Backups & export ---------------------------------------------------
-  route('GET', '/api/backups', (_req, res) => json(res, 200, { backups: listBackups(config) }))
+  route('GET', '/api/backups', (_req, res) =>
+    json(res, 200, { backups: listBackups(config), details: describeBackups(config, listBackups(config)), intervalHours: config.backupIntervalHours }),
+  )
   route('POST', '/api/backups', async (_req, res) => {
     const dir = await runBackup(config, store, sync)
     json(res, 201, { backup: path.basename(dir) })
+  })
+  const BACKUP = '(\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z)'
+  /** The notes in a backup, and whether each has changed since. */
+  route('GET', `/api/backups/${BACKUP}/notes`, (_req, res, [name]) => {
+    if (!listBackups(config).includes(name)) throw new HttpError(404, 'backup not found')
+    json(res, 200, { notes: backupNotes(config, sync, name) })
+  })
+  /** Restore some notes ({ noteIds }) or everything ({ all: true }) from a backup. */
+  route('POST', `/api/backups/${BACKUP}/restore`, async (req, res, [name]) => {
+    if (!listBackups(config).includes(name)) throw new HttpError(404, 'backup not found')
+    const body = await readJson<{ noteIds?: string[]; all?: boolean }>(req)
+    const ids = body.all ? null : (body.noteIds ?? []).filter((id) => /^[a-z0-9]{8,64}$/.test(id))
+    if (ids && !ids.length) throw new HttpError(400, 'Choose notes to restore')
+    json(res, 200, await restoreFromBackup(config, store, sync, name, ids))
+  })
+
+  /** Everything as a zip of Markdown files with their pictures, files and drawings. */
+  route('GET', '/api/export', (_req, res) => {
+    const { zip } = exportZip(store, sync)
+    const day = new Date().toISOString().slice(0, 10)
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Length': zip.length,
+      'Content-Disposition': `attachment; filename="ReconNotes ${day}.zip"`,
+      'Cache-Control': 'no-store',
+    })
+    res.end(zip)
+  })
+
+  /** Import a Markdown file, or a zip of them (with folders, pictures and files). */
+  route('POST', '/api/import', async (req, res, _p, url) => {
+    const data = await readBody(req, config.maxUploadBytes)
+    const name = decodeURIComponent((req.headers['x-file-name'] as string | undefined) ?? 'Imported.md')
+    const folderId = url.searchParams.get('folderId')
+    if (folderId && !/^[a-z0-9]{8,64}$/.test(folderId)) throw new HttpError(400, 'bad folder')
+    let files
+    try {
+      files = unpack(name, data)
+    } catch {
+      throw new HttpError(400, 'That file couldn’t be read. Import Markdown (.md) files or a .zip of them.')
+    }
+    if (!files.some((f) => /\.(md|markdown|mdown|txt)$/i.test(f.path)) && files.length === 1)
+      throw new HttpError(400, 'That isn’t a Markdown file. To add other files to a folder, use “Add files” in the notes list.')
+    json(res, 200, await importNotes(config, store, ai, sync, files, folderId))
   })
 
   // --- Version history ------------------------------------------------------

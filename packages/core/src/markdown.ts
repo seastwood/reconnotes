@@ -89,6 +89,30 @@ export function noteToMarkdown(
       case 'horizontalRule':
         out.push('---')
         break
+      case 'table': {
+        // GitHub-style table; the first row is the header
+        const rows = el.toArray().filter((r): r is Y.XmlElement => r instanceof Y.XmlElement)
+        const cells = rows.map((r) =>
+          r
+            .toArray()
+            .filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
+            .map((c) =>
+              c
+                .toArray()
+                .map((p) => (p instanceof Y.XmlElement ? inline(p) : ''))
+                .join(' ')
+                .replace(/\|/g, '\\|')
+                .replace(/\n/g, ' ')
+                .trim(),
+            ),
+        )
+        const width = Math.max(1, ...cells.map((r) => r.length))
+        const line = (r: string[]) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? '').join(' | ')} |`
+        if (cells.length) {
+          out.push(line(cells[0]), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...cells.slice(1).map(line))
+        }
+        break
+      }
       case 'image': {
         const id = el.getAttribute('attachmentId') as string
         const alt = (el.getAttribute('alt') as string) ?? ''

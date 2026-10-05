@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Collaboration from '@tiptap/extension-collaboration'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
+import { TableKit } from '@tiptap/extension-table'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
 import { DrawingNode, NoteContext } from '../drawing/DrawingNode'
@@ -80,6 +81,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
         TaskList,
         TaskItem.configure({ nested: true }),
+        TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),
         DrawingNode,
         ImageNode,
         DueDate,

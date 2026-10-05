@@ -90,7 +90,7 @@ function copyNewFiles(src: string, dest: string): number {
   return n
 }
 
-const safeName = (s: string) => (s.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim().slice(0, 80) || 'Untitled')
+export const safeName = (s: string) => (s.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim().slice(0, 80) || 'Untitled')
 
 function exportMarkdown(sync: SyncEngine, outDir: string, blobsDir: string): number {
   const ws = sync.getDoc(WORKSPACE_DOC)

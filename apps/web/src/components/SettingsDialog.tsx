@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib/settings'
 import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
+import { BackupsSection } from './BackupsSection'
+import { ExportImportSection } from './ExportImportSection'
 import { deviceOcrAvailable } from '../lib/deviceOcr'
 import { deviceSpeechAvailable } from '../lib/speech'
 
@@ -99,6 +101,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </section>
+
+        {connected && (
+          <section>
+            <h3>Export &amp; import</h3>
+            <ExportImportSection />
+          </section>
+        )}
+
+        {connected && (
+          <section>
+            <h3>Backups</h3>
+            <BackupsSection key={s.serverUrl + s.token} />
+          </section>
+        )}
 
         {deviceOcrAvailable() && (
           <section>

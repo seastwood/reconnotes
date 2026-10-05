@@ -73,7 +73,11 @@ export async function openFile(attachmentId: string, name: string, mime: string)
 
 /** Share / save the file: the share sheet in the iOS app, a download on the web. */
 export async function shareFile(attachmentId: string, name: string) {
-  const blob = await blobOf(attachmentId)
+  return saveBlob(await blobOf(attachmentId), name)
+}
+
+/** Save any data as a file: the share sheet (Save to Files, AirDrop…) in the iOS app, a download on the web. */
+export async function saveBlob(blob: Blob, name: string) {
   if (native()) return FilePreview.share({ data: await base64(blob), name: name || 'File' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
