@@ -12,6 +12,7 @@ import {
   Settings as SettingsIcon,
   Trash2,
   Hash,
+  LayoutTemplate,
 } from 'lucide-react'
 import {
   buildTree,
@@ -34,6 +35,7 @@ export type View =
   | { kind: 'folder'; folderId: string }
   | { kind: 'search'; query: string }
   | { kind: 'tag'; tag: string }
+  | { kind: 'templates' }
 
 interface Props {
   /** shown floating over the notes list (medium screens) */
@@ -92,12 +94,13 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
     for (const n of ws.notes) if (!n.trashedAt && n.folderId) c[n.folderId] = (c[n.folderId] ?? 0) + 1
     return c
   }, [ws.notes])
-  const liveCount = ws.notes.filter((n) => !n.trashedAt).length
+  const liveCount = ws.notes.filter((n) => !n.trashedAt && !n.template).length
+  const templateCount = ws.notes.filter((n) => !n.trashedAt && n.template).length
   const trashCount = ws.notes.filter((n) => n.trashedAt).length
   // #tags used in notes, with how many notes use each
   const tags = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const n of ws.notes) if (!n.trashedAt) for (const t of n.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+    for (const n of ws.notes) if (!n.trashedAt && !n.template) for (const t of n.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
     return [...counts].sort((a, b) => a[0].localeCompare(b[0]))
   }, [ws.notes])
 
@@ -306,6 +309,12 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
               ))}
             </ul>
           </>
+        )}
+        {templateCount > 0 && (
+          <div className={`folder-row special${view.kind === 'templates' ? ' active' : ''}`} onClick={() => onView({ kind: 'templates' })}>
+            <LayoutTemplate size={16} /> <span className="folder-name">Templates</span>
+            <span className="count">{templateCount}</span>
+          </div>
         )}
         <div
           className={`folder-row special${view.kind === 'trash' ? ' active' : ''}`}

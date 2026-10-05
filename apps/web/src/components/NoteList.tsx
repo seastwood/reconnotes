@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -17,6 +17,7 @@ import {
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { searchNotes, type SearchResult } from '../lib/search'
+import { newNoteFromTemplate } from '../lib/templates'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 
 interface Props {
@@ -62,13 +63,14 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
 
   const notes: NoteData[] = useMemo(() => {
     if (view.kind === 'trash') return sortNotes(ws.notes.filter((n) => n.trashedAt), 'updated')
+    if (view.kind === 'templates') return sortNotes(ws.notes.filter((n) => !n.trashedAt && n.template), 'title')
     if (view.kind === 'folder')
       return sortNotes(
-        ws.notes.filter((n) => !n.trashedAt && effectiveFolderId(n, liveFolders) === view.folderId),
+        ws.notes.filter((n) => !n.trashedAt && !n.template && effectiveFolderId(n, liveFolders) === view.folderId),
         sort === 'manual' ? 'manual' : sort,
       )
-    if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt), sort)
-    if (view.kind === 'tag') return sortNotes(ws.notes.filter((n) => !n.trashedAt && n.tags.includes(view.tag)), 'updated')
+    if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template), sort)
+    if (view.kind === 'tag') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && n.tags.includes(view.tag)), 'updated')
     return []
   }, [ws.notes, view, sort, liveFolders])
 
@@ -81,7 +83,9 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
           ? 'Search'
           : view.kind === 'tag'
             ? `#${view.tag}`
-            : (folder?.name ?? 'Folder')
+            : view.kind === 'templates'
+              ? 'Templates'
+              : (folder?.name ?? 'Folder')
 
   const setSort = (m: SortMode) => {
     if (folder) updateFolder(workspaceDoc, folder.id, { sort: m })
@@ -90,7 +94,15 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
 
   const newNote = () => {
     const id = createNote(workspaceDoc, { folderId: view.kind === 'folder' ? view.folderId : null })
+    if (view.kind === 'templates') updateNote(workspaceDoc, id, { template: true })
     onOpen(id)
+  }
+  const templates = useMemo(() => sortNotes(ws.notes.filter((n) => !n.trashedAt && n.template), 'title'), [ws.notes])
+  const [templateMenu, setTemplateMenu] = useState(false)
+  const templateBtn = useRef<HTMLButtonElement>(null)
+  const fromTemplate = async (templateId: string) => {
+    setTemplateMenu(false)
+    onOpen(await newNoteFromTemplate(templateId, view.kind === 'folder' ? view.folderId : null))
   }
 
   const onDropNote = (e: React.DragEvent, target: NoteData, index: number) => {
@@ -121,7 +133,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
           </button>
         )}
         <h2>{title}</h2>
-        {view.kind !== 'search' && view.kind !== 'trash' && (
+        {view.kind !== 'search' && view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && (
           <div className="menu-anchor">
             <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
               <ArrowUpDown size={18} />
@@ -147,15 +159,34 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             </button>
           )
         ) : (
-          <button className="icon primary" onClick={newNote} aria-label="New note" title="New note">
-            <SquarePen size={20} />
-          </button>
+          <>
+            {templates.length > 0 && view.kind !== 'templates' && (
+              <div className="menu-anchor">
+                <button ref={templateBtn} className="icon" onClick={() => setTemplateMenu(!templateMenu)} aria-label="New from template" title="New from template">
+                  <LayoutTemplate size={19} />
+                </button>
+                {templateMenu && (
+                  <Popover anchorRef={templateBtn} align="right" onClose={() => setTemplateMenu(false)}>
+                    <div className="menu-label">New note from template</div>
+                    {templates.map((t) => (
+                      <button key={t.id} onClick={() => void fromTemplate(t.id)}>
+                        {t.title || 'Untitled template'}
+                      </button>
+                    ))}
+                  </Popover>
+                )}
+              </div>
+            )}
+            <button className="icon primary" onClick={newNote} aria-label={view.kind === 'templates' ? 'New template' : 'New note'} title={view.kind === 'templates' ? 'New template' : 'New note'}>
+              <SquarePen size={20} />
+            </button>
+          </>
         )}
       </header>
 
       <ul className="notes">
         {view.kind === 'search' &&
-          results?.map((r) => (
+          results?.filter((r) => !ws.notes.find((n) => n.id === r.noteId)?.template).map((r) => (
             <li key={r.noteId} className={`note-row${r.noteId === noteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
               <div className="note-title">{r.title || 'Untitled'}</div>
               <div className="note-snippet">{r.snippet}</div>

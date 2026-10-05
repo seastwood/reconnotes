@@ -28,6 +28,7 @@ import {
   ImagePlus,
   Download,
   Search,
+  LayoutTemplate,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -36,6 +37,7 @@ import { addAttachment } from '../lib/attachments'
 import { compileNote, convertAllHandwriting } from '../lib/ai'
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
+import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
 
 interface Props {
   editor: Editor
@@ -121,6 +123,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
 
   const meta = getNotes(workspaceDoc).get(noteId)
   const pinned = meta ? readNote(meta).pinned : false
+  const isTemplate = meta ? readNote(meta).template : false
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label)
@@ -255,6 +258,20 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 }}
               >
                 <Search size={16} /> Find in note <span className="menu-shortcut">⌘F</span>
+              </button>
+            )}
+            {isTemplate ? (
+              <>
+                <button onClick={() => run('Creating note…', async () => onOpenNote(await newNoteFromTemplate(noteId, null)))}>
+                  <LayoutTemplate size={16} /> New note from this template
+                </button>
+                <button onClick={() => updateNote(workspaceDoc, noteId, { template: false })}>
+                  <LayoutTemplate size={16} /> Turn into a normal note
+                </button>
+              </>
+            ) : (
+              <button onClick={() => run('Saving template…', async () => void (await saveAsTemplate(noteId)))}>
+                <LayoutTemplate size={16} /> Save as template
               </button>
             )}
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>

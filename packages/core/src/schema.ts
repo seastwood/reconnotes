@@ -61,6 +61,8 @@ export interface NoteData {
   trashedAt: number | null
   /** #tags found in the note (lower case, without #) */
   tags: string[]
+  /** a template for new notes (listed under Templates, not with the notes) */
+  template: boolean
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -102,6 +104,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     pinned: Boolean(m.get('pinned')),
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
     tags: (m.get('tags') as string[] | undefined) ?? [],
+    template: Boolean(m.get('template')),
   }
 }
 
