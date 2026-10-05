@@ -54,6 +54,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(TextRecognitionPlugin())
         // On-device speech recognition for recordings and audio files (see SpeechRecognitionPlugin below).
         bridge?.registerPluginInstance(SpeechRecognitionPlugin())
+        // Turn a note into a PDF and open the share sheet (see PdfSharePlugin below).
+        bridge?.registerPluginInstance(PdfSharePlugin())
         bridge?.registerPluginInstance(ScribblePlugin())
         Self.current = self
         guard let webView = webView else { return }
@@ -300,6 +302,90 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
+    }
+}
+
+/// Turns a note (as a self-contained HTML page) into a paginated PDF and
+/// opens the share sheet – Save to Files, Mail, Print, AirDrop…
+///     PdfShare.share({ html, fileName }) → { completed }
+@objc(PdfSharePlugin)
+public class PdfSharePlugin: CAPPlugin, CAPBridgedPlugin, WKNavigationDelegate {
+    public let identifier = "PdfSharePlugin"
+    public let jsName = "PdfShare"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "share", returnType: CAPPluginReturnPromise)
+    ]
+    private var renderView: WKWebView?
+    private var pending: CAPPluginCall?
+    private var fileName = "Note"
+
+    @objc func share(_ call: CAPPluginCall) {
+        guard let html = call.getString("html") else {
+            call.reject("Nothing to share")
+            return
+        }
+        DispatchQueue.main.async {
+            self.pending?.reject("Replaced by a newer request")
+            self.pending = call
+            self.fileName = call.getString("fileName") ?? "Note"
+            let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 800))
+            view.navigationDelegate = self
+            self.renderView = view
+            view.loadHTMLString(html, baseURL: nil)
+        }
+    }
+
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // give pictures a moment to decode before laying out the pages
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.makePdf(from: webView) }
+    }
+
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        pending?.reject(error.localizedDescription)
+        pending = nil
+        renderView = nil
+    }
+
+    private func makePdf(from webView: WKWebView) {
+        guard let call = pending else { return }
+        pending = nil
+        // A4, or US Letter in the US and Canada
+        let region = (Locale.current as NSLocale).object(forKey: .countryCode) as? String ?? ""
+        let paper = ["US", "CA"].contains(region) ? CGRect(x: 0, y: 0, width: 612, height: 792) : CGRect(x: 0, y: 0, width: 595, height: 842)
+        let renderer = UIPrintPageRenderer()
+        renderer.addPrintFormatter(webView.viewPrintFormatter(), startingAtPageAt: 0)
+        renderer.setValue(NSValue(cgRect: paper), forKey: "paperRect")
+        renderer.setValue(NSValue(cgRect: paper.insetBy(dx: 42, dy: 48)), forKey: "printableRect")
+        let data = NSMutableData()
+        UIGraphicsBeginPDFContextToData(data, paper, nil)
+        renderer.prepare(forDrawingPages: NSRange(location: 0, length: renderer.numberOfPages))
+        for page in 0..<renderer.numberOfPages {
+            UIGraphicsBeginPDFPage()
+            renderer.drawPage(at: page, in: UIGraphicsGetPDFContextBounds())
+        }
+        UIGraphicsEndPDFContext()
+        renderView = nil
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(fileName).pdf")
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            call.reject("Couldn't save the PDF: \(error.localizedDescription)")
+            return
+        }
+        guard let presenter = bridge?.viewController else {
+            call.reject("Nothing to show the share sheet on")
+            return
+        }
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            // iPad: the sheet points at the top right, where the ⋯ menu is
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(x: presenter.view.bounds.maxX - 40, y: presenter.view.safeAreaInsets.top + 30, width: 1, height: 1)
+            popover.permittedArrowDirections = [.up]
+        }
+        sheet.completionWithItemsHandler = { _, completed, _, _ in call.resolve(["completed": completed]) }
+        presenter.present(sheet, animated: true)
     }
 }
 

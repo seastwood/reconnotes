@@ -20,6 +20,7 @@ import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { VersionHistory } from '../components/VersionHistory'
+import { printNote } from '../lib/printNote'
 
 interface Props {
   noteId: string
@@ -204,6 +205,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             onFind={openFind}
             onLinkNote={() => openLinkPicker(null)}
             onHistory={() => setHistoryOpen(true)}
+            onPrint={() => printNote(editor, doc, noteId)}
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>

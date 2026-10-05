@@ -34,6 +34,7 @@ import {
   ScrollText,
   Link2,
   History,
+  Printer,
 } from 'lucide-react'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
@@ -43,6 +44,9 @@ import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
+import { Capacitor } from '@capacitor/core'
+
+const isNativeApp = Capacitor.isNativePlatform()
 
 interface Props {
   editor: Editor
@@ -58,6 +62,8 @@ interface Props {
   onLinkNote?: () => void
   /** show earlier versions of the note */
   onHistory?: () => void
+  /** print / share as PDF */
+  onPrint?: () => Promise<void>
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -98,7 +104,7 @@ function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onPrint }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | null>(null)
@@ -326,6 +332,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 }}
               >
                 <History size={16} /> Version history…
+              </button>
+            )}
+            {onPrint && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  void run('Preparing PDF…', onPrint)
+                }}
+              >
+                <Printer size={16} /> {isNativeApp ? 'Share as PDF…' : 'Print / Save as PDF…'}
               </button>
             )}
             <button onClick={exportMarkdown}>
