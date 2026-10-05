@@ -172,7 +172,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
 
   // --- Input --------------------------------------------------------------
   type Gesture =
-    | { kind: 'ink'; stroke: Stroke }
+    /** focusTap: the drawing was opened by this touch – a mere tap leaves no dot */
+    | { kind: 'ink'; stroke: Stroke; focusTap?: boolean }
     | { kind: 'erase' }
     | { kind: 'lasso'; poly: number[] }
     | { kind: 'move'; startX: number; startY: number; dx: number; dy: number }
@@ -283,12 +284,23 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     if (e.pointerType === 'pen' && !inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     if (activePointer.current !== null || !canDraw(e)) return
     e.preventDefault()
+    // The first touch on a drawing that isn't open only opens it: a tap
+    // leaves no dot (and never erases or selects), but writing straight away
+    // still draws.
+    const opening = inkUi.get().activeDrawing !== drawingId
     inkUi.set({ activeDrawing: drawingId, palette: null })
     activePointer.current = e.pointerId
     liveRef.current!.setPointerCapture(e.pointerId)
     const { x, y } = toLocal(e)
     const t = toolState.get()
     undoManager?.stopCapturing()
+
+    const isInk = !(t.tool === 'eraser' || t.tool === 'lasso' || (e.pointerType === 'pen' && e.button === 5))
+    if (opening && !isInk) {
+      activePointer.current = null
+      liveRef.current!.releasePointerCapture(e.pointerId)
+      return
+    }
 
     if (t.tool === 'eraser' || (e.pointerType === 'pen' && e.button === 5)) {
       gesture.current = { kind: 'erase' }
@@ -314,6 +326,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
           size: t.sizes[inkTool],
           pts: [round1(x), round1(y), round2(e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5)],
         },
+        focusTap: opening,
       }
     }
     drawLive()
@@ -350,7 +363,9 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     const g = gesture.current
     gesture.current = null
     if (!g) return
-    if (g.kind === 'ink' && g.stroke.pts.length >= 3) {
+    if (g.kind === 'ink' && g.focusTap && isTap(g.stroke, scale)) {
+      // just opened the drawing with a tap: no dot
+    } else if (g.kind === 'ink' && g.stroke.pts.length >= 3) {
       undoManager?.stopCapturing()
       doc.transact(() => strokes.push([g.stroke]), DRAW_ORIGIN)
       // keep the cached path so the committed stroke renders without a flicker
@@ -501,4 +516,16 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }:
     )}
     </>
   )
+}
+
+/** A stroke that barely moved (under ~6 screen pixels across): a tap, not writing. */
+function isTap(s: Stroke, scale: number): boolean {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (let i = 0; i < s.pts.length; i += 3) {
+    minX = Math.min(minX, s.pts[i])
+    maxX = Math.max(maxX, s.pts[i])
+    minY = Math.min(minY, s.pts[i + 1])
+    maxY = Math.max(maxY, s.pts[i + 1])
+  }
+  return Math.max(maxX - minX, maxY - minY) * scale < 6
 }
