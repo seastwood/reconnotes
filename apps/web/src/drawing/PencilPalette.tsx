@@ -17,12 +17,15 @@ import { useUndoManager, useUndoState } from '../editor/undo'
  * palette next to the pencil with undo/redo, tools, colours and sizes — the
  * same thing Apple Notes does.
  */
+/** Where the Pencil was last seen (hovering or touching), so the palette opens next to it. */
+let lastPencil: { x: number; y: number } | null = null
+
 export function usePencilInteractions() {
   useEffect(() => {
     const onPencil = (e: Event) => {
       const d = (e as CustomEvent<{ kind: 'tap' | 'squeeze'; action?: string; x?: number; y?: number }>).detail
       const pos =
-        d.x !== undefined && d.y !== undefined ? { x: d.x, y: d.y } : (inkUi.get().lastPencil ?? { x: innerWidth / 2, y: innerHeight / 2 })
+        d.x !== undefined && d.y !== undefined ? { x: d.x, y: d.y } : (lastPencil ?? { x: innerWidth / 2, y: innerHeight / 2 })
       const openPalette = () => inkUi.set({ palette: inkUi.get().palette ? null : pos })
       if (d.kind === 'squeeze') return openPalette()
       switch (d.action ?? 'switchEraser') {
@@ -39,7 +42,8 @@ export function usePencilInteractions() {
     }
     // Remember where the pencil is (hovering or touching) so the palette opens next to it.
     const onMove = (e: PointerEvent) => {
-      if (e.pointerType === 'pen') inkUi.set({ lastPencil: { x: e.clientX, y: e.clientY } })
+      // a plain variable, not the store: updating the store on every move re-renders the page while writing
+      if (e.pointerType === 'pen') lastPencil = { x: e.clientX, y: e.clientY }
     }
     window.addEventListener('reconnotes:pencil', onPencil)
     window.addEventListener('pointermove', onMove, { passive: true })

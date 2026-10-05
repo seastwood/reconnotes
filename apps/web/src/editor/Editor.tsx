@@ -91,7 +91,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
     if (inkUi.get().activeDrawing && (e.target as HTMLElement).closest('.ProseMirror') && !(e.target as HTMLElement).closest('.drawing-block'))
       inkUi.set({ activeDrawing: null, palette: null })
     if (e.pointerType !== 'pen' || !editor) return
-    inkUi.set({ pencilSeen: true })
+    if (!inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     const target = e.target as HTMLElement
     // Only start a drawing when the Pencil touches text – never when it taps a
     // control, a picture or an existing drawing.
@@ -130,8 +130,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             fullScreen={fullScreen}
           />
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
+            {/* The blank space below the text is part of the editable area (padding),
+                so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
-            <div className="editor-tail" onClick={() => editor.commands.focus('end')} />
           </div>
           <InkToolbar />
           <PencilPalette />

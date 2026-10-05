@@ -77,11 +77,9 @@ export interface InkUi {
   activeDrawing: string | null
   /** quick palette opened by Pencil squeeze / double-tap, in viewport coords */
   palette: { x: number; y: number } | null
-  /** last position of a hovering / touching pencil, in viewport coords */
-  lastPencil: { x: number; y: number } | null
-  /** true once an Apple Pencil has been used: fingers then scroll instead of draw */
+  /** true once an Apple Pencil has been used in this session */
   pencilSeen: boolean
 }
 
-export const inkUi = new Store<InkUi>({ activeDrawing: null, palette: null, lastPencil: null, pencilSeen: false })
+export const inkUi = new Store<InkUi>({ activeDrawing: null, palette: null, pencilSeen: false })
 export const useInkUi = <S,>(select: (s: InkUi) => S) => useStore(inkUi, select)

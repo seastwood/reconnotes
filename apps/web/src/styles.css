@@ -630,24 +630,19 @@ button.text {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(120px + env(safe-area-inset-bottom));
-}
-.editor-tail {
-  min-height: 40vh;
-  cursor: text;
 }
 .note-content {
   outline: none;
   max-width: 820px;
   margin: 0 auto;
-  padding: 24px 28px 0;
+  padding: 24px 28px calc(40vh + 120px + env(safe-area-inset-bottom));
   line-height: 1.55;
   font-size: 17px;
   caret-color: var(--accent);
 }
 @media (max-width: 699px) {
   .note-content {
-    padding: 16px 16px 0;
+    padding: 16px 16px calc(40vh + 120px + env(safe-area-inset-bottom));
   }
 }
 .note-content h1 {
