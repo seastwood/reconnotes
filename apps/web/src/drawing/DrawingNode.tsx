@@ -34,8 +34,10 @@ export const DrawingNode = Node.create({
   name: 'drawing',
   group: 'block',
   atom: true,
-  draggable: true,
-  selectable: true,
+  // Moved with its own grip and deleted with its own button: a tap or long
+  // press on it must not select it like text (iPadOS paints that blue).
+  draggable: false,
+  selectable: false,
 
   addAttributes() {
     return { drawingId: { default: null } }
@@ -63,7 +65,9 @@ export const DrawingNode = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(DrawingView)
+    // The drawing handles its own touches; the editor shouldn't turn them into
+    // a text selection.
+    return ReactNodeViewRenderer(DrawingView, { stopEvent: ({ event }) => !event.type.startsWith('drag') })
   },
 })
 

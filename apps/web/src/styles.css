@@ -872,6 +872,14 @@ button.link {
   border-radius: 10px;
   border: 1px solid transparent;
   position: relative;
+  /* a press on a drawing is never a text selection */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.drawing-block::selection,
+.drawing-block *::selection {
+  background: transparent;
 }
 .drawing-block.active {
   border-color: var(--line);
