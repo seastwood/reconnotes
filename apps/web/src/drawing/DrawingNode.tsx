@@ -281,7 +281,8 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
       onPointerDownCapture={(e: React.PointerEvent) => {
         // the ink area opens the drawing itself (so it can tell a first tap from writing)
         if ((e.target as HTMLElement).closest('.ink-input')) return
-        if (e.pointerType !== 'touch' || settings.get().fingerDrawing) inkUi.set({ activeDrawing: drawingId })
+        // a finger opens it only with a tap (onClickCapture), so scrolling past doesn't
+        if (e.pointerType !== 'touch') inkUi.set({ activeDrawing: drawingId })
       }}
       onClickCapture={() => {
         if (!active) inkUi.set({ activeDrawing: drawingId })

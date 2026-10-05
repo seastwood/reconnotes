@@ -77,6 +77,10 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   const [storedHeight, setHeight] = useState(() => getDrawingHeight(doc, drawingId))
   const height = overlay ? DRAWING_WIDTH * overlay.aspect : storedHeight
   const open = useInkUi((s) => s.activeDrawing === drawingId)
+  const openRef = useRef(open)
+  openRef.current = open
+  /** two or more fingers are down: they scroll, nothing draws */
+  const multiTouch = useRef(false)
   const [selection, setSelection] = useState<{ ids: Set<string>; bounds: Rect } | null>(null)
   const selectionRef = useRef(selection)
   selectionRef.current = selection
@@ -198,26 +202,66 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     if (!editable) return false
     if (e.pointerType === 'pen') return true
     if (e.pointerType === 'mouse') return e.button === 0 || e.buttons === 1
-    // touch: fingers scroll the page unless the user lets them draw
-    return settings.get().fingerDrawing
+    // touch: fingers scroll the page. With "draw with finger" (phones), one
+    // finger draws once the drawing is open; a second finger scrolls instead.
+    return settings.get().fingerDrawing && openRef.current && !multiTouch.current
   }
 
-  // iOS: stop the pencil from scrolling the page, but let fingers scroll.
+  // iOS: stop the Pencil (and a drawing finger) from scrolling the page, but
+  // let fingers scroll otherwise. In an open drawing with finger drawing on,
+  // two fingers scroll the note (and cancel the stroke the first one began).
   useEffect(() => {
     const el = liveRef.current!
+    let lastMid: number | null = null
     const onTouch = (e: TouchEvent) => {
+      if (!editable) return
       const t = e.touches[0] as Touch & { touchType?: string }
-      if (t?.touchType === 'stylus' || settings.get().fingerDrawing) {
-        if (editable) e.preventDefault()
+      if (t?.touchType === 'stylus') return e.preventDefault()
+      if (!settings.get().fingerDrawing || !openRef.current) return // fingers scroll normally
+      e.preventDefault()
+      if (e.touches.length >= 2) {
+        if (!multiTouch.current) {
+          multiTouch.current = true
+          cancelGesture()
+        }
+        const mid = (e.touches[0].clientY + e.touches[1].clientY) / 2
+        const scroller = el.closest('.editor-scroll')
+        if (lastMid !== null && scroller) scroller.scrollTop -= mid - lastMid
+        lastMid = mid
       }
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) lastMid = null
+      if (e.touches.length === 0) multiTouch.current = false
     }
     el.addEventListener('touchstart', onTouch, { passive: false })
     el.addEventListener('touchmove', onTouch, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
     return () => {
       el.removeEventListener('touchstart', onTouch)
       el.removeEventListener('touchmove', onTouch)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable])
+
+  /** Drop the stroke in progress (a second finger turned it into a scroll). */
+  const cancelGesture = () => {
+    const id = activePointer.current
+    if (id === null) return
+    activePointer.current = null
+    gesture.current = null
+    try {
+      liveRef.current?.releasePointerCapture(id)
+    } catch {
+      /* already released */
+    }
+    hiddenIds.current = new Set()
+    renderBase()
+    drawLive()
+  }
 
   const growIfNeeded = (y: number) => {
     if (overlay) return
@@ -492,7 +536,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   }
 
   const cssHeight = height * scale
-  const touchAction = settings.get().fingerDrawing ? 'none' : 'pan-y pinch-zoom'
+  // fingers draw only in an open drawing (and only with "draw with finger"); otherwise they scroll
+  const touchAction = settings.get().fingerDrawing && open ? 'none' : 'pan-y pinch-zoom'
 
   return (
     <>
