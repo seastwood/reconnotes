@@ -120,3 +120,26 @@ function blobToBase64(blob: Blob): Promise<string> {
     r.readAsDataURL(blob)
   })
 }
+
+interface ScribblePlugin {
+  setEnabled(options: { enabled: boolean }): Promise<void>
+}
+const Scribble = registerPlugin<ScribblePlugin>('Scribble')
+
+/**
+ * iOS app: keep iPadOS Scribble (which turns Pencil writing over text into
+ * typed text immediately) in line with the "When the Pencil touches typed
+ * text" setting. With "Start a drawing", Scribble is off and writing stays ink.
+ */
+export function syncScribbleSetting() {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('Scribble')) return
+  let last: boolean | null = null
+  const apply = () => {
+    const enabled = settings.get().pencilInText === 'scribble'
+    if (enabled === last) return
+    last = enabled
+    Scribble.setEnabled({ enabled }).catch(() => undefined)
+  }
+  apply()
+  settings.subscribe(apply)
+}

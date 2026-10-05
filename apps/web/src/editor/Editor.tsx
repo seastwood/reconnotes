@@ -22,9 +22,12 @@ interface Props {
   folderId: string | null
   onOpenNote: (id: string) => void
   onBack?: () => void
+  /** iPad/desktop: cycle folders / notes / full-screen note */
+  onTogglePanels?: () => void
+  fullScreen?: boolean
 }
 
-export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack }: Props) {
+export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   useEffect(() => () => undoManager.destroy(), [undoManager])
   const ctx = useMemo(() => ({ doc, noteId }), [doc, noteId])
@@ -86,7 +89,13 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack }: Props)
     if (e.pointerType !== 'pen' || !editor) return
     inkUi.set({ pencilSeen: true })
     const target = e.target as HTMLElement
-    if (target.closest('.drawing-block') || settings.get().pencilInText !== 'draw') return
+    // Only start a drawing when the Pencil touches text – never when it taps a
+    // control, a picture or an existing drawing.
+    if (
+      target.closest('.drawing-block, .image-block, .audio-block, .file-block, button, a, input, select, textarea, label') ||
+      settings.get().pencilInText !== 'draw'
+    )
+      return
     e.preventDefault()
     e.stopPropagation()
     const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
@@ -107,7 +116,15 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack }: Props)
     <NoteContext.Provider value={ctx}>
       <UndoContext.Provider value={undoManager}>
         <div className="editor">
-          <EditorToolbar editor={editor} noteId={noteId} folderId={folderId} onOpenNote={onOpenNote} onBack={onBack} />
+          <EditorToolbar
+            editor={editor}
+            noteId={noteId}
+            folderId={folderId}
+            onOpenNote={onOpenNote}
+            onBack={onBack}
+            onTogglePanels={onTogglePanels}
+            fullScreen={fullScreen}
+          />
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
             <div className="editor-tail" onClick={() => editor.commands.focus('end')} />

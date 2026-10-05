@@ -92,12 +92,88 @@ export function cleanOcrLine(raw: string): string {
   const one = unwrapModelOutput(raw)
     .replace(/^\s*(markdown|md|text)\b\s*/i, '')
     .replace(/\s*\n\s*/g, ' ')
-    .replace(/^["“](.*)["”]$/, '$1')
     .trim()
-  return collapseRepeats(one)
+  return collapseRepeats(cleanTranscript(one)).replace(/^["“](.*)["”]$/, '$1').trim()
 }
 
 /** Clean up a multi-line reply (whole page, or the clean-up pass). */
 export function cleanOcrText(raw: string): string {
-  return collapseRepeats(unwrapModelOutput(raw))
+  return collapseRepeats(cleanTranscript(unwrapModelOutput(raw)))
+}
+
+/**
+ * Commentary that vision models add around a transcription ("The image
+ * contains a single word "Me". It is written in a simple handwritten
+ * style…"). Each pattern matches one such sentence, up to its full stop.
+ */
+const COMMENTARY: RegExp[] = [
+  /\b(?:the|this) (?:image|picture|photo(?:graph)?|drawing|screenshot|sketch) (?:contains|shows|depicts|features|displays|has|is of|consists of|appears to (?:show|contain|be))\b[^.!?\n]*[.!?]?/gi,
+  /\b(?:it|the (?:text|word|words|writing|handwriting))(?: is| are| appears to be| seems to be)? (?:written|centered|centred|located|positioned|placed|drawn|aligned) (?:in|on|at|with|near|towards?)\b[^.!?\n]*[.!?]?/gi,
+  /\b(?:the )?(?:handwriting|writing|text) (?:is|appears|seems) (?:neat|clear|legible|simple|cursive|messy|bold|large|small|readable)\b[^.!?\n]*[.!?]?/gi,
+  /\bthere (?:are|is) no (?:other )?(?:visible )?(?:text|elements?|content|objects?|words?|distractions?|markings?)\b[^.!?\n]*[.!?]?/gi,
+  /\bno other (?:visible )?(?:text|elements?|content|words?) (?:is|are) (?:present|visible)\b[^.!?\n]*[.!?]?/gi,
+  /^\s*(?:here(?:'s| is) (?:the|a) (?:transcription|text|transcribed text)[^:\n]*:|(?:the )?transcription(?: is)?:|sure[,!][^:\n]*:)\s*/gim,
+]
+
+/**
+ * Remove LaTeX packaging some models put around plain words: $$Me$$,
+ * \(Me\), \[Me\], \text{Me}, and $Me$ (but not prices like "$5 and $10").
+ */
+export function stripMath(s: string): string {
+  return s
+    .replace(/\\(?:text|mathrm|textbf|mathbf|textit)\{([^{}]*)\}/g, '$1')
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1')
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '$1')
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '$1')
+    .replace(/\$(?=[^\s\d$])([^$\n]{1,80}?)(?<=\S)\$/g, '$1')
+}
+
+/** Strip model commentary and math wrappers; report whether anything was removed. */
+export function stripCommentary(text: string): { text: string; changed: boolean } {
+  let s = stripMath(text)
+  for (const re of COMMENTARY) s = s.replace(re, ' ')
+  s = s
+    .split('\n')
+    .map((l) => l.replace(/(\S)[ \t]{2,}/g, '$1 ').replace(/\s+$/, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { text: s, changed: s !== text.trim() }
+}
+
+/** A line made of one phrase repeated ("Me Me Me", "to do to do") → the phrase. */
+function collapseWholeLineRepeat(line: string): string {
+  const indent = /^\s*/.exec(line)![0]
+  const words = line.trim().split(/\s+/).filter(Boolean)
+  for (let p = 1; p <= words.length / 2; p++) {
+    if (words.length % p) continue
+    let ok = true
+    for (let i = p; i < words.length && ok; i += p) ok = same(words, 0, i, p)
+    if (ok) return indent + words.slice(0, p).join(' ')
+  }
+  return line
+}
+
+/**
+ * Remove what is not part of the transcription. When the reply had
+ * commentary or LaTeX in it, the model was rambling, and a word repeated
+ * across the ramble ("Me … $$Me$$ … $$Me$$") is kept once.
+ */
+export function cleanTranscript(text: string): string {
+  const { text: s, changed } = stripCommentary(text)
+  if (!changed) return s
+  const lines = s.split('\n').map(collapseWholeLineRepeat)
+  // the same line again, anywhere (the ramble repeats itself)
+  const seen = new Set<string>()
+  return lines
+    .filter((l) => {
+      const k = l.trim().toLowerCase()
+      if (!k) return true
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }

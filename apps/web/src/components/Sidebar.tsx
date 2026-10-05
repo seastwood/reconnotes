@@ -8,6 +8,7 @@ import {
   Inbox,
   MoreHorizontal,
   Search,
+  PanelLeftClose,
   Settings as SettingsIcon,
   Trash2,
 } from 'lucide-react'
@@ -29,6 +30,10 @@ import { safeLocalGet, safeLocalSet } from '../lib/store'
 export type View = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder'; folderId: string } | { kind: 'search'; query: string }
 
 interface Props {
+  /** shown floating over the notes list (medium screens) */
+  overlay?: boolean
+  /** hide the folders panel */
+  onClose?: () => void
   view: View
   onView: (v: View) => void
   onSettings: () => void
@@ -62,7 +67,7 @@ export function getDrag(e: React.DragEvent): DragPayload | null {
   }
 }
 
-export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
+export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFolder }: Props) {
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
@@ -203,13 +208,18 @@ export function Sidebar({ view, onView, onSettings, onMoveFolder }: Props) {
     })
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${overlay ? ' overlay' : ''}`}>
       <header className="sidebar-head">
         <h1>ReconNotes</h1>
         <SyncBadge />
         <button className="icon" onClick={onSettings} aria-label="Settings">
           <SettingsIcon size={18} />
         </button>
+        {onClose && (
+          <button className="icon" onClick={onClose} aria-label="Hide folders" title="Hide folders">
+            <PanelLeftClose size={18} />
+          </button>
+        )}
       </header>
       <form
         className="search"

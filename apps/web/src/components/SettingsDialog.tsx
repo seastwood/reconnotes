@@ -107,9 +107,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               Use Apple’s on-device recognition (fast, private, works offline)
             </label>
             <p className="hint">
-              “Convert to text” and search use the recognizer built into iPadOS/iOS. Your server’s AI agents are used only if it finds
-              nothing.
+              Your handwriting stays ink until you press “Convert to text” (on a drawing, a picture, or “Convert all handwriting” in the
+              note’s ⋯ menu). Apple’s recognizer runs on this device; your server’s AI agents are used only if it finds nothing.
             </p>
+            <label className="check">
+              <input type="checkbox" checked={s.backgroundOcr} onChange={(e) => settings.set({ backgroundOcr: e.target.checked })} />
+              Make handwriting searchable in the background (only stores hidden search text – never changes your note)
+            </label>
             {s.deviceOcr && (
               <label className="check">
                 <input type="checkbox" checked={s.deviceOcrCleanup} onChange={(e) => settings.set({ deviceOcrCleanup: e.target.checked })} />
@@ -129,7 +133,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             When the Pencil touches typed text
             <select value={s.pencilInText} onChange={(e) => settings.set({ pencilInText: e.target.value as PencilInTextMode })}>
               <option value="draw">Start a drawing there</option>
-              <option value="scribble">Use Scribble (handwriting becomes typed text)</option>
+              <option value="scribble">Use iPadOS Scribble (handwriting becomes typed text immediately)</option>
             </select>
           </label>
           <p className="hint">

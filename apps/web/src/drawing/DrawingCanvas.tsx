@@ -28,6 +28,12 @@ interface Props {
   drawingId: string
   undoManager: Y.UndoManager | null
   editable: boolean
+  /**
+   * Controls shown in a bar under the drawing while it's being edited. The
+   * bar's empty space is the resize handle. Kept outside the ink area so a
+   * Pencil tap on a control never draws.
+   */
+  footer?: React.ReactNode
 }
 
 const ERASER_RADIUS = 10
@@ -57,7 +63,7 @@ function displayColor(c: string, dark: boolean) {
  *  - Eraser (whole stroke or pixel), lasso select/move, and an undo history
  *    shared with the typed text.
  */
-export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) {
+export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
   const liveRef = useRef<HTMLCanvasElement>(null)
@@ -428,6 +434,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) 
 
   // Resize handle: drag to make the drawing taller or shorter.
   const onResizeDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, a')) return // a control in the bar, not a resize
     e.preventDefault()
     e.stopPropagation()
     const startY = e.clientY
@@ -451,6 +458,7 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) 
   const touchAction = settings.get().fingerDrawing ? 'none' : 'pan-y pinch-zoom'
 
   return (
+    <>
     <div ref={wrapRef} className="drawing-canvas" style={{ height: cssHeight || 200 }}>
       <canvas ref={baseRef} className="ink-layer" style={{ width: '100%', height: cssHeight }} />
       <canvas
@@ -463,7 +471,13 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable }: Props) 
         onPointerCancel={finish}
         onContextMenu={(e) => e.preventDefault()}
       />
-      {editable && <div className="drawing-resize" onPointerDown={onResizeDown} title="Drag to resize" />}
     </div>
+    {editable && footer && (
+      <div className="drawing-footer" onPointerDown={onResizeDown} title="Drag the bar to make the drawing taller or shorter">
+        <span className="resize-grip" aria-hidden="true" />
+        {footer}
+      </div>
+    )}
+    </>
   )
 }

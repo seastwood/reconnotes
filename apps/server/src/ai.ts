@@ -4,7 +4,7 @@ import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
-import { cleanOcrLine, cleanOcrText, collapseRepeats, unwrapModelOutput } from './text'
+import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
 export { stripThinking } from './agents'
 
@@ -39,9 +39,8 @@ const HANDWRITING_PROMPT = `Transcribe the handwriting in this image.
 
 - Preserve the writer's words exactly; fix only obvious letter-recognition ambiguity.
 - Use Markdown for structure the writer clearly intended: headings for underlined or boxed titles, "- " for bullets, "- [ ]" / "- [x]" for checkboxes, numbered lists, and tables.
-- Describe non-text content (diagrams, arrows, sketches, charts) briefly in square brackets, e.g. [diagram: flow from A to B].
 - If a word is illegible write [illegible].
-- Output only the transcription, with no preamble.`
+- Output ONLY the transcribed text. Do not describe the image, the handwriting style or the layout, do not explain, do not use LaTeX or $ signs, and do not repeat yourself.`
 
 /** The word HELLO in simple handwritten strokes, for testing an agent. */
 export function sampleHandwritingPng(): Buffer {
@@ -68,7 +67,7 @@ export function sampleHandwritingPng(): Buffer {
 }
 
 /** A minimal fallback instruction for OCR models that ignore long prompts. */
-const SHORT_HANDWRITING_PROMPT = 'Transcribe the handwritten text in this image.'
+const SHORT_HANDWRITING_PROMPT = 'Transcribe the handwritten text in this image. Output only the text.'
 
 /**
  * Dedicated OCR models are trained on a fixed task prompt and can ramble or
@@ -87,14 +86,13 @@ const PHOTO_PROMPT = `Transcribe all the text in this image – handwritten and 
 - Preserve the words exactly; fix only obvious letter-recognition ambiguity.
 - Use Markdown for structure that is clearly intended: headings for titles, "- " for bullets, "- [ ]" / "- [x]" for checkboxes, numbered lists, and tables.
 - Ignore the background (paper texture, lines, shadows, the desk) and anything cut off at the edges.
-- Describe non-text content (diagrams, arrows, sketches, charts) briefly in square brackets.
 - If a word is illegible write [illegible].
-- Output only the transcription, with no preamble.`
+- Output ONLY the transcribed text. Do not describe the image, do not explain, and do not use LaTeX or $ signs.`
 
-const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image.'
+const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image. Output only the text.'
 
 /** One line of a drawing, for line-by-line recognition. */
-const LINE_PROMPT = 'Transcribe the handwritten text in this image. It is a single line of handwriting: output it as one line of plain text, with no commentary.'
+const LINE_PROMPT = 'Transcribe the handwritten text in this image. It is a single line of handwriting: output only that line as plain text – no description of the image, no explanation, no LaTeX, no quotes.'
 
 /** Second pass: tidy OCR output into well-structured Markdown. */
 const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritten notes{IMAGE}. Clean it up:
@@ -102,7 +100,7 @@ const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritt
 - Fix obvious recognition mistakes (misread letters, words split or run together) using {SOURCE} and the context – but keep the writer's own words; don't reword, summarise or add anything.
 - Join fragments that belong on one line; keep genuinely separate lines and items separate.
 - Keep and improve the structure: a title/heading if the first line is one, bullet lists with the same nesting, "- [ ]" / "- [x]" checkboxes, numbered lists, tables.
-- Output only the Markdown.
+- Output only the cleaned-up Markdown: no comments about the text or image, no LaTeX.
 
 Recognised text:
 `
@@ -312,7 +310,7 @@ export class Ai {
         return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
       })
       const raw = unwrapModelOutput(result)
-      const tidied = collapseRepeats(raw)
+      const tidied = collapseRepeats(cleanTranscript(raw))
       log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${raw.length} chars)`)
       // Reject clean-ups that wander off: much longer than the input (before
       // or after collapsing repeats) means the model looped or invented text.

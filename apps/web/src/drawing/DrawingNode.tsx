@@ -2,13 +2,14 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { Loader2, ScanText, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, GripVertical, Loader2, ScanText, Trash2 } from 'lucide-react'
 import { getStrokes, getTranscripts, inkHash, newId, transcriptSourceKey } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
 import { useUndoManager } from '../editor/undo'
 import { inkUi, useInkUi } from './toolState'
 import { convertHandwriting, drawingImageUrl, recognizeDrawingLocally } from '../lib/ai'
 import { useDeviceOcr } from '../lib/deviceOcr'
+import { settings } from '../lib/settings'
 
 export interface NoteContextValue {
   doc: Y.Doc
@@ -66,7 +67,7 @@ export const DrawingNode = Node.create({
   },
 })
 
-function DrawingView({ node, editor, deleteNode, selected }: ReactNodeViewProps) {
+function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeViewProps) {
   const ctx = useContext(NoteContext)
   const um = useUndoManager()
   const drawingId = node.attrs.drawingId as string
@@ -78,7 +79,7 @@ function DrawingView({ node, editor, deleteNode, selected }: ReactNodeViewProps)
   // iOS app: recognise the handwriting on the device a few seconds after the
   // writer pauses, so the drawing is searchable (synced to every device).
   useEffect(() => {
-    if (!ctx || !drawingId || !useDeviceOcr() || !editor.isEditable) return
+    if (!ctx || !drawingId || !useDeviceOcr() || !settings.get().backgroundOcr || !editor.isEditable) return
     const strokes = getStrokes(ctx.doc, drawingId)
     let timer: ReturnType<typeof setTimeout> | null = null
     let running = false
@@ -128,24 +129,50 @@ function DrawingView({ node, editor, deleteNode, selected }: ReactNodeViewProps)
     }
   }
 
+  /** Move this drawing above the previous block or below the next one. */
+  const move = (dir: -1 | 1) => {
+    const pos = getPos()
+    if (typeof pos !== 'number') return
+    const { state } = editor
+    const $pos = state.doc.resolve(pos)
+    const index = $pos.index()
+    const parent = $pos.parent
+    const neighbour = parent.maybeChild(index + dir)
+    if (!neighbour) return
+    const self = state.doc.nodeAt(pos)!
+    const tr = state.tr.delete(pos, pos + self.nodeSize)
+    tr.insert(dir < 0 ? pos - neighbour.nodeSize : pos + neighbour.nodeSize, self)
+    editor.view.dispatch(tr.scrollIntoView())
+  }
+
+  const footer = active && editor.isEditable && (
+    <div className="drawing-footer-actions" onPointerDown={(e) => e.stopPropagation()}>
+      <span className="drag-grip" data-drag-handle="" draggable title="Drag to move this drawing" aria-label="Drag to move">
+        <GripVertical size={18} />
+      </span>
+      <button onClick={() => move(-1)} title="Move up" aria-label="Move drawing up">
+        <ArrowUp size={16} />
+      </button>
+      <button onClick={() => move(1)} title="Move down" aria-label="Move drawing down">
+        <ArrowDown size={16} />
+      </button>
+      <span className="spacer" />
+      <button onClick={convert} disabled={busy} title="Convert handwriting to text below this drawing">
+        {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} Convert to text
+      </button>
+      <button onClick={() => deleteNode()} title="Delete drawing" aria-label="Delete drawing" className="danger">
+        <Trash2 size={16} />
+      </button>
+    </div>
+  )
+
   return (
     <NodeViewWrapper
       className={`drawing-block${active ? ' active' : ''}${selected ? ' selected' : ''}`}
-      data-drag-handle=""
       contentEditable={false}
       onPointerDownCapture={() => inkUi.set({ activeDrawing: drawingId })}
     >
-      <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} />
-      {active && editor.isEditable && (
-        <div className="drawing-actions">
-          <button onClick={convert} disabled={busy} title="Convert handwriting to text below this drawing">
-            {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} Convert to text
-          </button>
-          <button onClick={() => deleteNode()} title="Delete drawing" className="danger">
-            <Trash2 size={16} />
-          </button>
-        </div>
-      )}
+      <DrawingCanvas doc={ctx.doc} drawingId={drawingId} undoManager={um} editable={editor.isEditable} footer={footer} />
       {error && (
         <div className="drawing-error" role="alert">
           {error}{' '}

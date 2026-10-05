@@ -36,19 +36,48 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 /// with detail = { kind: 'tap' | 'squeeze', action: <user preference>, x?, y? }.
 /// `action` is the user's choice in Settings › Apple Pencil, and x/y is where
 /// the pencil is hovering (in CSS pixels), so the palette can open next to it.
-class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDelegate {
+class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDelegate, UIScribbleInteractionDelegate {
+
+    /// Whether iPadOS Scribble (handwriting → typed text) may run in the
+    /// notes. Off by default so Pencil writing stays ink; the web app changes
+    /// it through the Scribble plugin when the user picks "Use Scribble".
+    static var scribbleEnabled = false
+    private var scribbleBlockers: [UIScribbleInteraction] = []
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         // On-device handwriting/text recognition for the web app (see TextRecognitionPlugin below).
         bridge?.registerPluginInstance(TextRecognitionPlugin())
+        bridge?.registerPluginInstance(ScribblePlugin())
         guard let webView = webView else { return }
+        installScribbleBlocker(in: webView)
+        // WebKit can create its content view lazily; check again once the page has loaded.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.installScribbleBlocker(in: webView) }
         let pencil = UIPencilInteraction()
         pencil.delegate = self
         webView.addInteraction(pencil)
         // Let the web app draw edge-to-edge and handle Pencil input itself.
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.allowsLinkPreview = false
+    }
+
+    // MARK: - Scribble
+
+    /// Attach a UIScribbleInteraction whose delegate can veto Scribble to
+    /// WebKit's content view (the view that hosts editable text).
+    private func installScribbleBlocker(in webView: WKWebView) {
+        let candidates = [webView.scrollView] + webView.scrollView.subviews.filter {
+            String(describing: type(of: $0)).hasPrefix("WKContent")
+        }
+        for view in candidates where !scribbleBlockers.contains(where: { $0.view === view }) {
+            let blocker = UIScribbleInteraction(delegate: self)
+            view.addInteraction(blocker)
+            scribbleBlockers.append(blocker)
+        }
+    }
+
+    func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
+        Self.scribbleEnabled
     }
 
     // MARK: - UIPencilInteractionDelegate
@@ -179,6 +208,25 @@ extension CGImagePropertyOrientation {
         case .leftMirrored: self = .leftMirrored
         case .rightMirrored: self = .rightMirrored
         @unknown default: self = .up
+        }
+    }
+}
+
+/// Lets the web app turn iPadOS Scribble on or off:
+///     Scribble.setEnabled({ enabled: false })
+@objc(ScribblePlugin)
+public class ScribblePlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "ScribblePlugin"
+    public let jsName = "Scribble"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "setEnabled", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func setEnabled(_ call: CAPPluginCall) {
+        let enabled = call.getBool("enabled") ?? false
+        DispatchQueue.main.async {
+            ReconBridgeViewController.scribbleEnabled = enabled
+            call.resolve()
         }
     }
 }

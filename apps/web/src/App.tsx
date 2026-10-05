@@ -43,7 +43,14 @@ export function App() {
   const wide = useMedia('(min-width: 1100px)')
   const [nav, setNavState] = useState<Nav>(() => safeLocalGet<Nav>('reconnotes.nav', { view: { kind: 'all' }, noteId: null }))
   const [pane, setPane] = useState<'folders' | 'list' | 'note'>(nav.noteId ? 'note' : 'folders')
-  const [showSidebar, setShowSidebar] = useState(true)
+  /** iPad/desktop: 3 = folders + notes + note, 2 = notes + note, 1 = note only (full screen) */
+  const [layout, setLayoutState] = useState<1 | 2 | 3>(() => safeLocalGet<{ v: 1 | 2 | 3 }>('reconnotes.layout', { v: 3 }).v)
+  const setLayout = (v: 1 | 2 | 3) => {
+    setLayoutState(v)
+    safeLocalSet('reconnotes.layout', { v })
+  }
+  /** medium screens: the folder list slides over the notes */
+  const [overlay, setOverlay] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [moving, setMoving] = useState<{ kind: 'note' | 'folder'; id: string } | null>(null)
 
@@ -66,36 +73,51 @@ export function App() {
     setNav({ ...nav, noteId: id })
     setPane('note')
   }
-  const sidebarVisible = narrow ? pane === 'folders' : wide || showSidebar
-  const listVisible = narrow ? pane === 'list' : true
+  const sidebarInline = !narrow && wide && layout === 3
+  const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
+  const listVisible = narrow ? pane === 'list' : layout >= 2
   const editorVisible = narrow ? pane === 'note' : true
 
+  /** Editor's sidebar button: cycle 3 → 2 → 1 → 3 columns (like Apple Notes). */
+  const cyclePanels = () => {
+    setOverlay(false)
+    if (wide) setLayout(layout === 3 ? 2 : layout === 2 ? 1 : 3)
+    else setLayout(layout >= 2 ? 1 : 2)
+  }
+  /** Notes list's sidebar button: show/hide the folders. */
+  const toggleFolders = () => {
+    if (wide) setLayout(layout === 3 ? 2 : 3)
+    else setOverlay(!overlay)
+  }
+
   return (
-    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}${sidebarVisible ? ' with-sidebar' : ''}`}>
+    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}>
       {sidebarVisible && (
-        <Sidebar
-          view={nav.view}
-          onView={(view) => {
-            setNav({ ...nav, view })
-            if (narrow) setPane('list')
-            else if (!wide && view.kind !== 'search') setShowSidebar(false)
-          }}
-          onSettings={() => setSettingsOpen(true)}
-          onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
-        />
+        <>
+          {overlay && !sidebarInline && <div className="sidebar-backdrop" onClick={() => setOverlay(false)} />}
+          <Sidebar
+            overlay={overlay && !sidebarInline}
+            view={nav.view}
+            onView={(view) => {
+              setNav({ ...nav, view })
+              if (narrow) setPane('list')
+              else if (overlay && view.kind !== 'search') setOverlay(false)
+              if (!narrow && layout === 1) setLayout(2)
+            }}
+            onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
+            onSettings={() => setSettingsOpen(true)}
+            onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
+          />
+        </>
       )}
       {listVisible && (
         <div className="list-col">
-          {!narrow && !wide && (
-            <button className="icon sidebar-toggle" onClick={() => setShowSidebar(!showSidebar)} aria-label="Toggle folders">
-              <PanelLeft size={20} />
-            </button>
-          )}
           <NoteList
             view={nav.view}
             noteId={nav.noteId}
             onOpen={openNote}
             onBack={narrow ? () => setPane('folders') : undefined}
+            onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
           />
         </div>
@@ -110,9 +132,22 @@ export function App() {
               folderId={note?.folderId ?? null}
               onOpenNote={openNote}
               onBack={narrow ? () => setPane('list') : undefined}
+              onTogglePanels={narrow ? undefined : cyclePanels}
+              fullScreen={!narrow && layout === 1}
             />
           ) : (
-            <div className="no-note">{narrow ? null : <p>Select a note or create a new one.</p>}</div>
+            <div className="no-note">
+              {narrow ? null : (
+                <>
+                  <p>Select a note or create a new one.</p>
+                  {layout === 1 && (
+                    <button className="text" onClick={() => setLayout(wide ? 3 : 2)}>
+                      <PanelLeft size={16} /> Show notes
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           )}
         </main>
       )}

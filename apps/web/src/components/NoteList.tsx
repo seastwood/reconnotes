@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { ArrowUpDown, ChevronLeft, FolderInput, Pin, SquarePen, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2 } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -24,6 +24,8 @@ interface Props {
   noteId: string | null
   onOpen: (id: string) => void
   onBack?: () => void
+  /** show/hide the folders panel (iPad and desktop) */
+  onToggleFolders?: () => void
   onMoveNote: (id: string) => void
 }
 
@@ -36,7 +38,7 @@ function formatDate(ts: number) {
   return d.toLocaleDateString()
 }
 
-export function NoteList({ view, noteId, onOpen, onBack, onMoveNote }: Props) {
+export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote }: Props) {
   const ws = useWorkspace()
   const [results, setResults] = useState<SearchResult[] | null>(null)
   const [sortMenu, setSortMenu] = useState(false)
@@ -102,6 +104,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onMoveNote }: Props) {
         {onBack && (
           <button className="icon" onClick={onBack} aria-label="Back to folders">
             <ChevronLeft size={22} />
+          </button>
+        )}
+        {onToggleFolders && (
+          <button className="icon" onClick={onToggleFolders} aria-label="Show folders" title="Show folders">
+            <PanelLeft size={20} />
           </button>
         )}
         <h2>{title}</h2>

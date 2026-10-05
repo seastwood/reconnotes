@@ -16,6 +16,8 @@ export interface Settings {
   deviceOcr: boolean
   /** …and then polish it with the server's clean-up agents when online */
   deviceOcrCleanup: boolean
+  /** iOS app: quietly recognise drawings for search (never changes the note) */
+  backgroundOcr: boolean
 }
 
 const KEY = 'reconnotes.settings'
@@ -32,6 +34,7 @@ function defaults(): Settings {
     theme: 'system',
     deviceOcr: true,
     deviceOcrCleanup: false,
+    backgroundOcr: true,
   }
 }
 

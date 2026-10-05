@@ -17,7 +17,7 @@ describe('collapseRepeats', () => {
   })
 })
 
-import { cleanOcrLine, cleanOcrText, unwrapModelOutput } from '../src/text'
+import { cleanOcrLine, cleanOcrText, stripMath, unwrapModelOutput } from '../src/text'
 
 describe('cleaning OCR model output', () => {
   // what GLM-OCR actually returned for the line "Seth"
@@ -42,5 +42,33 @@ describe('cleaning OCR model output', () => {
     const md = '# Leadership Meeting\n\n- Sprint goals\n  - how?'
     expect(cleanOcrText(md)).toBe(md)
     expect(unwrapModelOutput('```markdown\n' + md + '\n```')).toBe(md)
+  })
+})
+
+describe('commentary and LaTeX', () => {
+  const ramble =
+    'Me Me The image contains a single word "Me". It is written in a simple, handwritten style. The text is centered on the page. There are no other visible elements or distractions present in the image. $$Me$$ The image contains a single word "Me". It is written in a simple, handwritten style. $$Me$$ $$Me$$ The image contains a single word "Me".'
+
+  it('reduces a rambling reply to the transcription (line)', () => {
+    expect(cleanOcrLine(ramble)).toBe('Me')
+  })
+
+  it('reduces a rambling reply to the transcription (page)', () => {
+    expect(cleanOcrText(ramble)).toBe('Me')
+  })
+
+  it('unwraps LaTeX but keeps prices and normal text', () => {
+    expect(stripMath('$$Hello$$ and \\(world\\) \\text{ok}')).toBe('Hello and world ok')
+    expect(stripMath('costs $5 and $10')).toBe('costs $5 and $10')
+    expect(cleanOcrText('- buy milk\n- pay $20 rent\n- call mum')).toBe('- buy milk\n- pay $20 rent\n- call mum')
+  })
+
+  it('leaves genuine repeated words alone when there was no ramble', () => {
+    expect(cleanOcrLine('bye bye')).toBe('bye bye')
+    expect(cleanOcrText('Todo\n\nTodo')).toBe('Todo\n\nTodo')
+  })
+
+  it('removes a "Here is the transcription:" preamble', () => {
+    expect(cleanOcrText('Here is the transcription:\nShopping list\n- eggs')).toBe('Shopping list\n- eggs')
   })
 })

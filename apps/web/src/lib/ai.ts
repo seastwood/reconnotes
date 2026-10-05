@@ -98,6 +98,29 @@ export async function convertHandwriting(editor: Editor, noteId: string, drawing
 }
 
 /**
+ * Convert every drawing in the note, top to bottom; each drawing's text is
+ * inserted right below it. Returns how many drawings were converted and any
+ * errors.
+ */
+export async function convertAllHandwriting(editor: Editor, noteId: string): Promise<{ converted: number; errors: string[] }> {
+  const ids: string[] = []
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'drawing' && node.attrs.drawingId) ids.push(node.attrs.drawingId)
+  })
+  let converted = 0
+  const errors: string[] = []
+  for (const id of ids) {
+    try {
+      await convertHandwriting(editor, noteId, id)
+      converted++
+    } catch (e) {
+      errors.push((e as Error).message)
+    }
+  }
+  return { converted, errors }
+}
+
+/**
  * Recognise a drawing with Apple's on-device recognizer (iOS app). The
  * result is also stored as the drawing's transcript (synced, searchable) and
  * marked so the server doesn't redo it. Returns '' if nothing was found.

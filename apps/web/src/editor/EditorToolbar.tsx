@@ -10,11 +10,14 @@ import {
   Loader2,
   Mic,
   MoreHorizontal,
+  PanelLeft,
+  PanelLeftOpen,
   Paperclip,
   PenLine,
   Pin,
   PinOff,
   Redo2,
+  ScanText,
   Sparkles,
   Square,
   Strikethrough,
@@ -29,7 +32,7 @@ import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@re
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
 import { addAttachment } from '../lib/attachments'
-import { compileNote } from '../lib/ai'
+import { compileNote, convertAllHandwriting } from '../lib/ai'
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
 
@@ -39,6 +42,8 @@ interface Props {
   folderId: string | null
   onOpenNote: (id: string) => void
   onBack?: () => void
+  onTogglePanels?: () => void
+  fullScreen?: boolean
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -79,7 +84,7 @@ function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | null>(null)
@@ -145,6 +150,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
 
   return (
     <div className="editor-toolbar" onPointerDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}>
+      {onTogglePanels && (
+        <button
+          className="tb"
+          onClick={onTogglePanels}
+          aria-label={fullScreen ? 'Show notes' : 'Hide panels'}
+          title={fullScreen ? 'Show folders and notes' : 'Hide folders / full screen'}
+        >
+          {fullScreen ? <PanelLeftOpen size={20} /> : <PanelLeft size={20} />}
+        </button>
+      )}
       {onBack && (
         <button className="tb back" onClick={onBack} aria-label="Back">
           <ChevronLeft size={22} />
@@ -228,6 +243,17 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack }: 
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>
               {pinned ? <PinOff size={16} /> : <Pin size={16} />} {pinned ? 'Unpin' : 'Pin to top'}
+            </button>
+            <button
+              onClick={() =>
+                run('Converting handwriting…', async () => {
+                  const { converted, errors } = await convertAllHandwriting(editor, noteId)
+                  if (!converted && !errors.length) throw new Error('This note has no handwriting to convert.')
+                  if (errors.length) throw new Error(`Converted ${converted} drawing(s); ${errors.length} failed: ${errors[0]}`)
+                })
+              }
+            >
+              <ScanText size={16} /> Convert all handwriting to text
             </button>
             <button onClick={exportMarkdown}>
               <Download size={16} /> Export Markdown
