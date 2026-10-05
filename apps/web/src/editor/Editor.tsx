@@ -28,6 +28,8 @@ interface Props {
   doc: Y.Doc
   folderId: string | null
   onOpenNote: (id: string) => void
+  /** a tapped link to another note (kept in the back/forward trail) */
+  onFollowLink?: (id: string) => void
   onBack?: () => void
   /** iPad/desktop: cycle folders / notes / full-screen note */
   onTogglePanels?: () => void
@@ -38,11 +40,11 @@ interface Props {
   initialFind?: { query: string; n: number }
 }
 
-export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
+export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   const [historyOpen, setHistoryOpen] = useState(false)
-  const onOpenNoteRef = useRef(onOpenNote)
-  onOpenNoteRef.current = onOpenNote
+  const onFollowLinkRef = useRef(onFollowLink)
+  onFollowLinkRef.current = onFollowLink
   /** the [[ link picker: where it is, and what it replaces */
   const [picker, setPicker] = useState<{ x: number; y: number; top: number; range: { from: number; to: number } | null } | null>(null)
   const editorForPicker = useRef<TiptapEditor | null>(null)
@@ -82,7 +84,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         ImageNode,
         DueDate,
         NoteLink.configure({
-          onOpen: (id) => onOpenNoteRef.current(id),
+          onOpen: (id) => onFollowLinkRef.current(id),
           onTrigger: (range) => openLinkPicker(range),
         }),
         Hashtags.configure({ onTagClick: (tag, rect) => setTagChip({ tag, x: rect.left, y: rect.bottom }) }),
@@ -214,7 +216,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
             {/* The blank space below the text is part of the editable area (padding),
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
-            <LinkedFrom noteId={noteId} onOpen={onOpenNote} />
+            <LinkedFrom noteId={noteId} onOpen={onFollowLink} />
           </div>
           {tagChip && onOpenTag && (
             <button

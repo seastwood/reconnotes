@@ -33,16 +33,17 @@ function useTheme() {
 }
 
 /**
- * Horizontal swipes with a finger: from the left screen edge (→ onOpen), or
- * leftwards starting on a side panel (→ onClose). Pencil and mouse are
- * ignored, and so are mostly-vertical moves (scrolling).
+ * Horizontal swipes with a finger: in from the left screen edge (→ onLeftEdge),
+ * in from the right edge (→ onRightEdge), or leftwards starting on a side panel
+ * (→ onClose). Pencil and mouse are ignored, and so are mostly-vertical moves
+ * (scrolling).
  */
-function useEdgeSwipe(onOpen: () => void, onClose: () => void) {
-  const handlers = useRef({ onOpen, onClose })
-  handlers.current = { onOpen, onClose }
+function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void) {
+  const handlers = useRef({ onLeftEdge, onRightEdge, onClose })
+  handlers.current = { onLeftEdge, onRightEdge, onClose }
   useEffect(() => {
     const EDGE = 28
-    let start: { x: number; y: number; fromEdge: boolean; onPanel: boolean; t: number } | null = null
+    let start: { x: number; y: number; fromEdge: boolean; fromRight: boolean; onPanel: boolean; t: number } | null = null
     const touchType = (t: Touch) => (t as Touch & { touchType?: string }).touchType
     const onStart = (e: TouchEvent) => {
       const t = e.touches[0]
@@ -55,10 +56,11 @@ function useEdgeSwipe(onOpen: () => void, onClose: () => void) {
         x: t.clientX,
         y: t.clientY,
         fromEdge: t.clientX <= EDGE,
+        fromRight: t.clientX >= window.innerWidth - EDGE,
         onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]'),
         t: Date.now(),
       }
-      if (!start.fromEdge && !start.onPanel) start = null
+      if (!start.fromEdge && !start.fromRight && !start.onPanel) start = null
     }
     const onEnd = (e: TouchEvent) => {
       if (!start) return
@@ -68,7 +70,8 @@ function useEdgeSwipe(onOpen: () => void, onClose: () => void) {
       const quick = Date.now() - start.t < 800
       const horizontal = Math.abs(dx) > 60 && Math.abs(dy) < Math.abs(dx) * 0.6
       if (quick && horizontal) {
-        if (start.fromEdge && dx > 0) handlers.current.onOpen()
+        if (start.fromEdge && dx > 0) handlers.current.onLeftEdge()
+        else if (start.fromRight && dx < 0) handlers.current.onRightEdge()
         else if (start.onPanel && dx < 0) handlers.current.onClose()
       }
       start = null
@@ -138,11 +141,58 @@ export function App() {
 
   /** a note opened from search results opens with the find bar on the search text */
   const [findOnOpen, setFindOnOpen] = useState<{ noteId: string; query: string; n: number } | null>(null)
+  /**
+   * Notes reached by following links, like a browser's history: swipe in from
+   * the left edge to go back, from the right edge to go forward. Opening a note
+   * any other way (the list, search, a new note) starts over.
+   */
+  const [trail, setTrail] = useState<{ back: string[]; forward: string[] }>({ back: [], forward: [] })
   const openNote = (id: string) => {
     setFindOnOpen((f) => (nav.view.kind === 'search' && nav.view.query.trim() ? { noteId: id, query: nav.view.query.trim(), n: (f?.n ?? 0) + 1 } : null))
     setNav({ ...nav, noteId: id })
     setPane('note')
+    setTrail({ back: [], forward: [] })
   }
+  const followLink = (id: string) => {
+    if (id === nav.noteId) return
+    if (nav.noteId) setTrail({ back: [...trail.back, nav.noteId].slice(-100), forward: [] })
+    setFindOnOpen(null)
+    setNav({ ...nav, noteId: id })
+    setPane('note')
+  }
+  const isOpenable = (id: string) => {
+    const m = getNotes(workspaceDoc).get(id)
+    return Boolean(m && !readNote(m).trashedAt)
+  }
+  /** go one step back (or forward) along the trail; false if there's nowhere to go */
+  const step = (dir: 'back' | 'forward') => {
+    const from = [...trail[dir]]
+    const to = [...trail[dir === 'back' ? 'forward' : 'back']]
+    let id: string | undefined
+    while ((id = from.pop()) && !isOpenable(id));
+    if (!id) {
+      if (from.length !== trail[dir].length) setTrail(dir === 'back' ? { back: [], forward: to } : { back: to, forward: [] })
+      return false
+    }
+    if (nav.noteId) to.push(nav.noteId)
+    setTrail(dir === 'back' ? { back: from, forward: to } : { back: to, forward: from })
+    setFindOnOpen(null)
+    setNav({ ...nav, noteId: id })
+    setPane('note')
+    return true
+  }
+  // keyboard: ⌘[ and ⌘] (like Safari)
+  const stepRef = useRef(step)
+  stepRef.current = step
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
+      if (e.key === '[' && stepRef.current('back')) e.preventDefault()
+      else if (e.key === ']' && stepRef.current('forward')) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const sidebarInline = !narrow && wide && layout === 3
   const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
   const listVisible = narrow ? pane === 'list' : layout >= 2
@@ -171,7 +221,17 @@ export function App() {
     else if (sidebarInline) setLayout(2)
     else if (layout >= 2 && nav.noteId) setLayout(1)
   }
-  useEdgeSwipe(openNext, closeOne)
+  /** the note is on screen, so the edge swipes walk the link trail first */
+  const noteShown = Boolean(nav.noteId) && (narrow ? pane === 'note' : true)
+  useEdgeSwipe(
+    () => {
+      if (!(noteShown && step('back'))) openNext()
+    },
+    () => {
+      if (noteShown) step('forward')
+    },
+    closeOne,
+  )
 
   /** Notes list's sidebar button: show/hide the folders. */
   const toggleFolders = () => {
@@ -220,6 +280,7 @@ export function App() {
               doc={noteDoc.doc}
               folderId={note?.folderId ?? null}
               onOpenNote={openNote}
+              onFollowLink={followLink}
               onBack={narrow ? () => setPane('list') : undefined}
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
