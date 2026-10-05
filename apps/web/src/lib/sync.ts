@@ -3,6 +3,7 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import {
   WORKSPACE_DOC,
+  extractDue,
   extractNote,
   getNotes,
   noteDocName,
@@ -216,6 +217,8 @@ export class SyncManager {
         if (oldTags.join('\u0000') !== ex.tags.join('\u0000')) patch.tags = ex.tags
         const oldLinks = (meta.get('links') as string[] | undefined) ?? []
         if (oldLinks.join('\u0000') !== ex.links.join('\u0000')) patch.links = ex.links
+        const due = extractDue(h.doc)
+        if (JSON.stringify(meta.get('due') ?? []) !== JSON.stringify(due)) patch.due = due
         if (localChange) patch.updatedAt = Date.now()
         updateNote(ws, noteId, patch)
       }

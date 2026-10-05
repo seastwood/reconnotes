@@ -70,3 +70,11 @@ export function useNoteDoc(noteId: string | null): { doc: Y.Doc; ready: boolean;
   }, [noteId])
   return state
 }
+
+/** Listen for workspace changes outside React (e.g. to schedule reminders). */
+export function onWorkspaceChange(fn: (s: WorkspaceSnapshot) => void): () => void {
+  const l = () => fn(snapshot)
+  listeners.add(l)
+  if (snapshot.loaded) l()
+  return () => listeners.delete(l)
+}

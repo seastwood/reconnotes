@@ -126,6 +126,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
         {deviceSpeechAvailable() && (
           <section>
+            <h3>Reminders</h3>
+            <label className="check">
+              <input type="checkbox" checked={s.dueReminders !== false} onChange={(e) => settings.set({ dueReminders: e.target.checked })} />
+              Remind me at 9:00 on the day a checklist item is due (type “!friday”, “!tomorrow”, “!oct 12” in an item)
+            </label>
+          </section>
+        )}
+
+        {deviceSpeechAvailable() && (
+          <section>
             <h3>Audio transcription on this device</h3>
             <label className="check">
               <input type="checkbox" checked={s.deviceSpeech} onChange={(e) => settings.set({ deviceSpeech: e.target.checked })} />

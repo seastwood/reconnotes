@@ -1872,3 +1872,82 @@ button.link {
     max-height: 160px;
   }
 }
+
+/* ------------------------------------------------------------ due dates */
+.due-chip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  margin: 0 1px;
+  font: inherit;
+  font-size: 0.88em;
+  line-height: 1.45;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: 6px;
+  vertical-align: baseline;
+}
+.due-chip.soon button,
+.due-chip.today button {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.due-chip.overdue button {
+  color: #fff;
+  background: var(--danger, #d64545);
+}
+li[data-checked='true'] .due-chip button {
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.12);
+}
+.due-input {
+  margin: 4px 10px 6px;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.count.due-now {
+  color: #fff;
+  background: var(--danger, #d64545);
+  border-radius: 9px;
+  padding: 0 6px;
+}
+.due-group {
+  list-style: none;
+}
+.due-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.due-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 12px 12px 4px;
+}
+.due-group-label.overdue {
+  color: var(--danger, #d64545);
+}
+.due-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.due-row input[type='checkbox'] {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.due-row > div {
+  min-width: 0;
+}

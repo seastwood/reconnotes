@@ -36,6 +36,7 @@ export function noteToMarkdown(
         }
       } else if (child instanceof Y.XmlElement) {
         if (child.nodeName === 'hardBreak') s += '  \n'
+        else if (child.nodeName === 'dueDate') s += `!${child.getAttribute('date') as string}`
         else if (child.nodeName === 'noteLink') s += `[[${(child.getAttribute('title') as string) || 'note'}]]`
         else s += inline(child)
       }

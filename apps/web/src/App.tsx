@@ -10,6 +10,7 @@ import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
+import { startReminders } from './lib/reminders'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -121,6 +122,14 @@ export function App() {
     if (ws.loaded && nav.noteId && (!note || note.trashedAt)) setNav({ ...nav, noteId: null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, nav.noteId])
+
+  // iOS app: reminders for due items; tapping one opens its note
+  const openFromReminder = useRef<(id: string) => void>(() => undefined)
+  openFromReminder.current = (id) => {
+    setNav({ ...nav, noteId: id })
+    setPane('note')
+  }
+  useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
 
   const noteDoc = useNoteDoc(note && !note.trashedAt ? nav.noteId : null)
 

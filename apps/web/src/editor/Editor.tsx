@@ -19,6 +19,7 @@ import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
+import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { printNote } from '../lib/printNote'
 
@@ -79,6 +80,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onBack, onToggle
         TaskItem.configure({ nested: true }),
         DrawingNode,
         ImageNode,
+        DueDate,
         NoteLink.configure({
           onOpen: (id) => onOpenNoteRef.current(id),
           onTrigger: (range) => openLinkPicker(range),

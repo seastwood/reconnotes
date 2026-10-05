@@ -18,6 +18,7 @@ import {
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { searchNotes, type SearchResult } from '../lib/search'
 import { newNoteFromTemplate } from '../lib/templates'
+import { DueList } from './DueList'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 
 interface Props {
@@ -85,6 +86,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             ? `#${view.tag}`
             : view.kind === 'templates'
               ? 'Templates'
+              : view.kind === 'due'
+                ? 'Due'
               : (folder?.name ?? 'Folder')
 
   const setSort = (m: SortMode) => {
@@ -133,7 +136,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
           </button>
         )}
         <h2>{title}</h2>
-        {view.kind !== 'search' && view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && (
+        {view.kind !== 'search' && view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && (
           <div className="menu-anchor">
             <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
               <ArrowUpDown size={18} />
@@ -193,6 +196,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             </li>
           ))}
         {view.kind === 'search' && results && !results.length && <li className="empty-hint">No matches</li>}
+        {view.kind === 'due' && <DueList activeNoteId={noteId} onOpen={onOpen} />}
 
         {trashedFolders.map((f) => (
           <li key={f.id} className="note-row trashed-folder">

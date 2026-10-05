@@ -13,6 +13,7 @@ import {
   Trash2,
   Hash,
   LayoutTemplate,
+  CalendarDays,
 } from 'lucide-react'
 import {
   buildTree,
@@ -24,6 +25,7 @@ import {
   updateFolder,
   type SortMode,
   type TreeNode,
+  daysUntil,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { SyncBadge } from './SyncBadge'
@@ -36,6 +38,7 @@ export type View =
   | { kind: 'search'; query: string }
   | { kind: 'tag'; tag: string }
   | { kind: 'templates' }
+  | { kind: 'due' }
 
 interface Props {
   /** shown floating over the notes list (medium screens) */
@@ -96,6 +99,9 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
   }, [ws.notes])
   const liveCount = ws.notes.filter((n) => !n.trashedAt && !n.template).length
   const templateCount = ws.notes.filter((n) => !n.trashedAt && n.template).length
+  // open due items, and how many are due today or overdue
+  const dueOpen = ws.notes.filter((n) => !n.trashedAt && !n.template).flatMap((n) => n.due.filter((d) => !d.done))
+  const dueNow = dueOpen.filter((d) => daysUntil(d.date) <= 0).length
   const trashCount = ws.notes.filter((n) => n.trashedAt).length
   // #tags used in notes, with how many notes use each
   const tags = useMemo(() => {
@@ -260,6 +266,14 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onMoveFold
           <Inbox size={16} /> <span className="folder-name">All Notes</span>
           <span className="count">{liveCount}</span>
         </div>
+        {dueOpen.length > 0 && (
+          <div className={`folder-row special${view.kind === 'due' ? ' active' : ''}`} onClick={() => onView({ kind: 'due' })}>
+            <CalendarDays size={16} /> <span className="folder-name">Due</span>
+            <span className={`count${dueNow ? ' due-now' : ''}`} title={dueNow ? `${dueNow} due today or overdue` : undefined}>
+              {dueNow || dueOpen.length}
+            </span>
+          </div>
+        )}
         <div className="section-label">
           Folders
           <div className="menu-anchor">

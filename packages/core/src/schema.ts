@@ -65,6 +65,8 @@ export interface NoteData {
   template: boolean
   /** ids of the notes this note links to */
   links: string[]
+  /** due dates in the note (see due.ts) */
+  due: { id: string; date: string; text: string; done: boolean }[]
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -108,6 +110,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     tags: (m.get('tags') as string[] | undefined) ?? [],
     template: Boolean(m.get('template')),
     links: (m.get('links') as string[] | undefined) ?? [],
+    due: (m.get('due') as NoteData['due'] | undefined) ?? [],
   }
 }
 

@@ -20,6 +20,8 @@ export interface Settings {
   backgroundOcr: boolean
   /** iOS app: transcribe recordings with Apple's on-device speech recognition */
   deviceSpeech: boolean
+  /** iOS app: a notification at 9:00 on the day a checklist item is due */
+  dueReminders?: boolean
   /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */
   debugInput?: boolean
   /** settings format version, for one-off migrations */
