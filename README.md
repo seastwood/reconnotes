@@ -230,15 +230,17 @@ off or adds a polish pass with your clean-up agent.
 pictures, PDFs, recordings and other files: each becomes a new note. Nothing to set up.
 
 **Share → ReconNotes (share sheet).** To share links from Safari, photos from Photos, recordings
-from Voice Memos and so on, add the share extension once (an iOS app can't add it by itself):
+from Voice Memos and so on, add the share extension once, on the Mac:
 
-1. In Xcode: *File › New › Target… › Share Extension*, name it **ShareExtension**, finish, and
-   answer *Activate* when asked.
-2. In Terminal: `sh apps/web/ios/App/ShareExtension-src/install.sh` (puts ReconNotes' code into
-   the new extension).
-3. In Xcode, for **both** the *App* and the *ShareExtension* targets: *Signing & Capabilities ›
-   + Capability › App Groups*, then add **group.com.reconnotes.app** (same team for both).
-4. Run the app again.
+```bash
+gem install --user-install xcodeproj                      # once (or: sudo gem install xcodeproj)
+npm run ios:add-share-extension -w @reconnotes/web
+```
+
+This adds the *ShareExtension* target, embeds it in the app and gives both the App Group
+`group.com.reconnotes.app`, signed with the App target's team. Then run the app from Xcode as usual.
+(By hand instead: *File › New › Target › Share Extension* named **ShareExtension**, run
+`sh apps/web/ios/App/ShareExtension-src/install.sh`, and add the App Group to both targets.)
 
 Shared things land in a new note the next time you open ReconNotes. App Groups need a paid
 Apple developer account; with a free Apple ID, use *Open in ReconNotes* instead.

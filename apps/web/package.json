@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p .",
     "ios:sync": "vite build && cap sync ios",
-    "ios:open": "cap open ios"
+    "ios:open": "cap open ios",
+    "ios:add-share-extension": "ruby ios/scripts/add-share-extension.rb"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

@@ -1,0 +1,92 @@
+#!/usr/bin/env ruby
+# Adds the "Share → ReconNotes" extension to the Xcode project:
+#   - a ShareExtension target with ReconNotes' code (ios/App/ShareExtension-src)
+#   - embedded in the app, built with it, signed with the app's team
+#   - the App Group both need to hand shared items to the app
+#
+# Run on the Mac (once):  npm run ios:add-share-extension -w @reconnotes/web
+# Needs the xcodeproj gem: gem install --user-install xcodeproj  (or: sudo gem install xcodeproj)
+# Safe to run again: it updates the existing target instead of adding another.
+require 'fileutils'
+begin
+  require 'xcodeproj'
+rescue LoadError
+  abort "The xcodeproj Ruby gem is missing. Install it with:\n  gem install --user-install xcodeproj\n(or sudo gem install xcodeproj), then run this again."
+end
+
+IOS = File.expand_path('../App', __dir__)
+PROJECT = File.join(IOS, 'App.xcodeproj')
+NAME = 'ShareExtension'
+GROUP_ID = 'group.com.reconnotes.app'
+
+project = Xcodeproj::Project.open(PROJECT)
+app = project.targets.find { |t| t.name == 'App' } or abort 'No "App" target in the Xcode project'
+app_settings = app.build_configurations.first.build_settings
+bundle_id = app_settings['PRODUCT_BUNDLE_IDENTIFIER'] || 'com.reconnotes.app'
+team = app.build_configurations.map { |c| c.build_settings['DEVELOPMENT_TEAM'] }.compact.first
+deployment = app_settings['IPHONEOS_DEPLOYMENT_TARGET'] || '15.0'
+
+# --- files -------------------------------------------------------------------
+ext_dir = File.join(IOS, NAME)
+FileUtils.mkdir_p(ext_dir)
+FileUtils.cp(File.join(IOS, 'ShareExtension-src', 'ShareViewController.swift'), ext_dir)
+FileUtils.cp(File.join(IOS, 'ShareExtension-src', 'Info.plist'), ext_dir)
+
+def entitlements(path, group_id)
+  plist = File.exist?(path) ? (Xcodeproj::Plist.read_from_path(path) || {}) : {}
+  groups = Array(plist['com.apple.security.application-groups'])
+  groups << group_id unless groups.include?(group_id)
+  plist['com.apple.security.application-groups'] = groups
+  Xcodeproj::Plist.write_to_path(plist, path)
+end
+
+app_entitlements_rel = app_settings['CODE_SIGN_ENTITLEMENTS'] || 'App/App.entitlements'
+entitlements(File.join(IOS, app_entitlements_rel), GROUP_ID)
+entitlements(File.join(ext_dir, "#{NAME}.entitlements"), GROUP_ID)
+
+# --- the extension target ---------------------------------------------------------
+ext = project.targets.find { |t| t.name == NAME }
+unless ext
+  ext = project.new_target(:app_extension, NAME, :ios, deployment, nil, :swift)
+  group = project.main_group.find_subpath(NAME, true)
+  group.set_source_tree('<group>')
+  group.set_path(NAME)
+  swift = group.new_reference('ShareViewController.swift')
+  group.new_reference('Info.plist')
+  group.new_reference("#{NAME}.entitlements")
+  ext.add_file_references([swift])
+
+  # build it with the app and put it inside the app (PlugIns)
+  app.add_dependency(ext)
+  embed = app.copy_files_build_phases.find { |p| p.name == 'Embed Foundation Extensions' } ||
+          app.new_copy_files_build_phase('Embed Foundation Extensions')
+  embed.symbol_dst_subfolder_spec = :plug_ins
+  file = embed.add_file_reference(ext.product_reference, true)
+  file.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+end
+
+ext.build_configurations.each do |config|
+  s = config.build_settings
+  s['PRODUCT_NAME'] = '$(TARGET_NAME)'
+  s['PRODUCT_BUNDLE_IDENTIFIER'] = "#{bundle_id}.#{NAME}"
+  s['INFOPLIST_FILE'] = "#{NAME}/Info.plist"
+  s['GENERATE_INFOPLIST_FILE'] = 'YES'
+  s['INFOPLIST_KEY_CFBundleDisplayName'] = 'ReconNotes'
+  s['CODE_SIGN_ENTITLEMENTS'] = "#{NAME}/#{NAME}.entitlements"
+  s['CODE_SIGN_STYLE'] = 'Automatic'
+  s['DEVELOPMENT_TEAM'] = team if team
+  s['IPHONEOS_DEPLOYMENT_TARGET'] = deployment
+  s['SWIFT_VERSION'] = '5.0'
+  s['TARGETED_DEVICE_FAMILY'] = '1,2'
+  s['SKIP_INSTALL'] = 'YES'
+  s['MARKETING_VERSION'] = app_settings['MARKETING_VERSION'] || '1.0'
+  s['CURRENT_PROJECT_VERSION'] = app_settings['CURRENT_PROJECT_VERSION'] || '1'
+  s['LD_RUNPATH_SEARCH_PATHS'] = ['$(inherited)', '@executable_path/Frameworks', '@executable_path/../../Frameworks']
+end
+
+app.build_configurations.each { |c| c.build_settings['CODE_SIGN_ENTITLEMENTS'] ||= app_entitlements_rel }
+
+project.save
+puts "Share extension ready (#{bundle_id}.#{NAME}, App Group #{GROUP_ID})."
+puts team ? "Signed with team #{team}." : 'Open Xcode and pick your team for the ShareExtension target (Signing & Capabilities).'
+puts 'App Groups need a paid Apple developer account; with a free Apple ID use "Open in ReconNotes" instead.'
