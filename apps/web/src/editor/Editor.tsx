@@ -27,6 +27,7 @@ import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { ShareDialog } from '../components/ShareDialog'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
+import { takeQuickAction } from '../lib/appLinks'
 
 import { printNote } from '../lib/printNote'
 
@@ -188,6 +189,15 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     ])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, noteId, doc])
+
+  // opened by "Scan" in the widget / Siri: scan straight away
+  useEffect(() => {
+    if (!editor) return
+    const t = setTimeout(() => {
+      if (takeQuickAction(noteId, 'scan') && scannerAvailable()) void scanIntoNote(editor, noteId)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [editor, noteId])
 
   // Leave drawing mode when switching notes.
   useEffect(() => () => inkUi.set({ activeDrawing: null, palette: null }), [noteId])

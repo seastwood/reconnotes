@@ -5,6 +5,7 @@ import Speech
 import UniformTypeIdentifiers
 import QuickLook
 import VisionKit
+import AppIntents
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -19,6 +20,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         // Opened with a file ("Open in ReconNotes" / "Copy to ReconNotes") while not running
         ShareInboxPlugin.importFiles(connectionOptions.urlContexts.map(\.url).filter(\.isFileURL))
+        // …or with a reconnotes:// link (widget, Shortcuts, setup link)
+        connectionOptions.urlContexts.map(\.url).filter { !$0.isFileURL }.forEach(AppLinksPlugin.open)
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
@@ -29,6 +32,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             ShareInboxPlugin.importFiles(files)
             (window?.rootViewController as? CAPBridgeViewController)?.bridge?.triggerWindowJSEvent(eventName: "reconnotes:share-inbox")
         }
+        URLContexts.map(\.url).filter { !$0.isFileURL }.forEach(AppLinksPlugin.open)
         SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
     }
 
@@ -74,6 +78,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(ScribblePlugin())
         // Scan paper documents with the camera (see DocumentScannerPlugin below).
         bridge?.registerPluginInstance(DocumentScannerPlugin())
+        // reconnotes:// links from the widget, Siri / Shortcuts and setup links (see AppLinksPlugin below).
+        bridge?.registerPluginInstance(AppLinksPlugin())
         Self.current = self
         guard let webView = webView else { return }
         installScribbleBlocker(in: webView)
@@ -739,5 +745,116 @@ public class DocumentScannerPlugin: CAPPlugin, CAPBridgedPlugin, VNDocumentCamer
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         return UIGraphicsImageRenderer(size: target, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+    }
+}
+
+
+// MARK: - reconnotes:// links, Siri and Shortcuts
+
+/// Links that start something in the app – from the Home Screen widget,
+/// Siri / the Shortcuts app, or a setup link:
+///
+///     reconnotes://new[?text=…]   reconnotes://record   reconnotes://scan
+///     reconnotes://open?note=<id> reconnotes://search?q=…
+///     reconnotes://connect?data=…
+///
+/// They wait here until the web app takes them (it may still be starting),
+/// and the web app is told when one arrives.
+@objc(AppLinksPlugin)
+public class AppLinksPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "AppLinksPlugin"
+    public let jsName = "AppLinks"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "take", returnType: CAPPluginReturnPromise)
+    ]
+    private static var pending: [String] = []
+    private static let lock = NSLock()
+
+    static func open(_ url: URL) {
+        guard url.scheme?.lowercased() == "reconnotes" else { return }
+        lock.lock()
+        pending.append(url.absoluteString)
+        lock.unlock()
+        DispatchQueue.main.async {
+            ReconBridgeViewController.current?.bridge?.triggerWindowJSEvent(eventName: "reconnotes:app-link")
+        }
+    }
+
+    @objc func take(_ call: CAPPluginCall) {
+        Self.lock.lock()
+        let urls = Self.pending
+        Self.pending = []
+        Self.lock.unlock()
+        call.resolve(["urls": urls])
+    }
+}
+
+/// "New note in ReconNotes", "Record a ReconNotes voice note", "Scan into
+/// ReconNotes" – for Siri, Spotlight, the Action button and the Shortcuts app.
+@available(iOS 16.0, *)
+struct NewNoteIntent: AppIntent {
+    static var title: LocalizedStringResource = "New Note"
+    static var description = IntentDescription("Start a new note in ReconNotes, optionally with some text in it.")
+    static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Text")
+    var text: String?
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        var link = URLComponents(string: "reconnotes://new")!
+        if let text = text, !text.isEmpty { link.queryItems = [URLQueryItem(name: "text", value: text)] }
+        if let url = link.url { AppLinksPlugin.open(url) }
+        return .result()
+    }
+}
+
+@available(iOS 16.0, *)
+struct RecordVoiceNoteIntent: AppIntent {
+    static var title: LocalizedStringResource = "Record a Voice Note"
+    static var description = IntentDescription("Start a new note and begin recording.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        AppLinksPlugin.open(URL(string: "reconnotes://record")!)
+        return .result()
+    }
+}
+
+@available(iOS 16.0, *)
+struct ScanDocumentIntent: AppIntent {
+    static var title: LocalizedStringResource = "Scan a Document"
+    static var description = IntentDescription("Scan paper pages into a new note.")
+    static var openAppWhenRun: Bool = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        AppLinksPlugin.open(URL(string: "reconnotes://scan")!)
+        return .result()
+    }
+}
+
+@available(iOS 16.0, *)
+struct ReconNotesShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: NewNoteIntent(),
+            phrases: ["New note in \(.applicationName)", "Start a \(.applicationName) note", "Take a note in \(.applicationName)"],
+            shortTitle: "New Note",
+            systemImageName: "square.and.pencil"
+        )
+        AppShortcut(
+            intent: RecordVoiceNoteIntent(),
+            phrases: ["Record a \(.applicationName) voice note", "Record in \(.applicationName)"],
+            shortTitle: "Record",
+            systemImageName: "mic"
+        )
+        AppShortcut(
+            intent: ScanDocumentIntent(),
+            phrases: ["Scan into \(.applicationName)", "Scan a document with \(.applicationName)"],
+            shortTitle: "Scan",
+            systemImageName: "doc.viewfinder"
+        )
     }
 }

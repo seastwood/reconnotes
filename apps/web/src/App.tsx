@@ -20,6 +20,10 @@ import { createFolder, createNote, listNotes, updateNote } from '@reconnotes/cor
 import { pinNotes, trashNotes } from './lib/noteActions'
 import { newNoteFromTemplate } from './lib/templates'
 import { isKeptOffline, setKeepOffline } from './lib/offline'
+import { quickAction, startAppLinks, type LinkAction } from './lib/appLinks'
+import * as Y from 'yjs'
+import { getContent, noteDocName } from '@reconnotes/core'
+import { sync } from './lib/sync'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -146,6 +150,29 @@ export function App() {
   useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
   // iOS app: things shared to ReconNotes become notes
   useEffect(() => startShareInbox((id) => openFromReminder.current(id)), [])
+  // widget, Siri / Shortcuts and home-screen shortcuts: new note, record, scan…
+  const onLink = useRef<(a: LinkAction) => void>(() => undefined)
+  onLink.current = (a) => {
+    if (a.kind === 'open') return openFromReminder.current(a.noteId)
+    if (a.kind === 'search') {
+      setNav({ ...nav, view: { kind: 'search', query: a.query } })
+      if (narrow) setPane('list')
+      return
+    }
+    const id = createNote(workspaceDoc, { folderId: nav.view.kind === 'folder' ? nav.view.folderId : null })
+    if (a.text) {
+      const { handle, close } = sync.open(noteDocName(id))
+      void handle.loaded.then(() => {
+        const p = new Y.XmlElement('paragraph')
+        p.insert(0, [new Y.XmlText(a.text!)])
+        getContent(handle.doc).insert(0, [p])
+        close()
+      })
+    }
+    if (a.then) quickAction.set({ noteId: id, action: a.then })
+    openFromReminder.current(id)
+  }
+  useEffect(() => startAppLinks((a) => onLink.current(a)), [])
 
   const noteDoc = useNoteDoc(note && !note.trashedAt ? nav.noteId : null)
 

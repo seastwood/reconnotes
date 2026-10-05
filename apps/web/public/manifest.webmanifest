@@ -7,7 +7,42 @@
   "background_color": "#f7f5ef",
   "theme_color": "#f7f5ef",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New note",
+      "short_name": "Note",
+      "url": "/#new",
+      "icons": [
+        {
+          "src": "/icon-180.png",
+          "sizes": "180x180",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Record a voice note",
+      "short_name": "Record",
+      "url": "/#record",
+      "icons": [
+        {
+          "src": "/icon-180.png",
+          "sizes": "180x180",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }

@@ -49,6 +49,7 @@ import { workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
 import { trashNotes } from '../lib/noteActions'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
+import { takeQuickAction } from '../lib/appLinks'
 import { Capacitor } from '@capacitor/core'
 
 const isNativeApp = Capacitor.isNativePlatform()
@@ -310,7 +311,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className="tb hide-sm" onClick={() => cameraRef.current?.click()} aria-label="Take photo" title="Take photo">
         <Camera size={20} />
       </button>
-      <AudioRecorder editor={editor} onError={setError} />
+      <AudioRecorder editor={editor} noteId={noteId} onError={setError} />
       <button className="tb" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
         <Paperclip size={20} />
       </button>
@@ -440,7 +441,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   )
 }
 
-function AudioRecorder({ editor, onError }: { editor: Editor; onError: (msg: string) => void }) {
+function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: string; onError: (msg: string) => void }) {
   const pickRef = useRef<HTMLInputElement>(null)
   const [rec, setRec] = useState<MediaRecorder | null>(null)
   const [secs, setSecs] = useState(0)
@@ -493,6 +494,18 @@ function AudioRecorder({ editor, onError }: { editor: Editor; onError: (msg: str
       )
     }
   }
+
+  // opened by "Record" in the widget / Siri: start straight away
+  const startRef = useRef(start)
+  startRef.current = start
+  // (once this has stayed on screen a moment: a new note's editor can be
+  // set up twice while it loads, and the first one mustn't take the mic)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (takeQuickAction(noteId, 'record')) void startRef.current()
+    }, 400)
+    return () => clearTimeout(t)
+  }, [noteId])
 
   const picker = (
     <input
