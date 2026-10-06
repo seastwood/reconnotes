@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
+import { SearchResults } from './SearchResults'
 import {
   ChevronDown,
   ChevronRight,
@@ -18,6 +19,7 @@ import {
   Command as CommandIcon,
   Activity,
   Loader2,
+  X,
 } from 'lucide-react'
 import {
   buildTree,
@@ -43,7 +45,6 @@ export type View =
   | { kind: 'all' }
   | { kind: 'trash' }
   | { kind: 'folder'; folderId: string }
-  | { kind: 'search'; query: string }
   | { kind: 'tag'; tag: string }
   | { kind: 'templates' }
   | { kind: 'due' }
@@ -60,6 +61,12 @@ interface Props {
   /** open the ⌘K command window */
   onCommands?: () => void
   onMoveFolder: (folderId: string) => void
+  /** the search text: while there is some, matching notes show here instead of the folders */
+  search: string
+  onSearch: (query: string) => void
+  /** a search result was tapped */
+  onOpenResult: (noteId: string) => void
+  activeNoteId: string | null
 }
 
 export const SORT_LABELS: Record<SortMode, string> = {
@@ -91,11 +98,11 @@ export function getDrag(e: React.DragEvent): DragPayload | null {
   }
 }
 
-export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder }: Props) {
+export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder, search, onSearch, onOpenResult, activeNoteId }: Props) {
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
-  const [query, setQuery] = useState('')
+  const searchBox = useRef<HTMLInputElement>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const offlineFolders = useOffline((s) => s.folders)
@@ -274,30 +281,48 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           </button>
         )}
       </header>
-      <form
-        className="search"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (query.trim()) onView({ kind: 'search', query })
-        }}
-      >
-        <Search size={16} />
-        <input
-          type="search"
-          placeholder="Search everything"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            if (e.target.value.trim()) onView({ kind: 'search', query: e.target.value })
-            else if (view.kind === 'search') onView({ kind: 'all' })
+      <div className="search-wrap">
+        <form
+          className="search"
+          onSubmit={(e) => {
+            e.preventDefault()
+            // put the keyboard away to see the results
+            searchBox.current?.blur()
           }}
-        />
-        {onCommands && (
-          <button type="button" className="search-commands" onClick={onCommands} aria-label="Commands" title="Commands and quick jump (⌘K)">
-            <CommandIcon size={15} />
+        >
+          <Search size={16} />
+          <input
+            ref={searchBox}
+            type="search"
+            enterKeyHint="search"
+            placeholder="Search everything"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && (onSearch(''), searchBox.current?.blur())}
+          />
+          {search ? (
+            <button type="button" className="search-commands" onClick={() => (onSearch(''), searchBox.current?.focus())} aria-label="Clear search" title="Clear search">
+              <X size={15} />
+            </button>
+          ) : (
+            onCommands && (
+              <button type="button" className="search-commands" onClick={onCommands} aria-label="Commands" title="Commands and quick jump (⌘K)">
+                <CommandIcon size={15} />
+              </button>
+            )
+          )}
+        </form>
+        {search && (
+          <button className="text search-cancel" onClick={() => (onSearch(''), searchBox.current?.blur())}>
+            Cancel
           </button>
         )}
-      </form>
+      </div>
+      {search.trim() ? (
+        <div className="folders sidebar-results">
+          <SearchResults query={search} activeNoteId={activeNoteId} onOpen={onOpenResult} />
+        </div>
+      ) : (
       <nav className="folders">
         <div className={`folder-row special${view.kind === 'all' ? ' active' : ''}`} onClick={() => onView({ kind: 'all' })}>
           <Inbox size={16} /> <span className="folder-name">All Notes</span>
@@ -382,6 +407,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           <span className="count">{trashCount || ''}</span>
         </div>
       </nav>
+      )}
     </aside>
   )
 }

@@ -156,9 +156,22 @@ try {
   // search (local index + server)
   await q.click('button[aria-label="Back"]')
   await q.click('button[aria-label="Back to folders"]')
-  await q.fill('.search input', 'beams')
-  await q.waitForSelector('.note-row:has-text("Site survey")', { timeout: 5000 })
+  // typing stays in the search box; results show in place of the folders
+  await q.click('.search input')
+  await q.keyboard.type('b')
+  await q.waitForTimeout(300)
+  if (!(await q.evaluate(() => document.activeElement?.matches('.search input')))) throw new Error('typing in search left the search box')
+  await q.keyboard.type('eams')
+  await q.waitForSelector('.sidebar-results .note-row:has-text("Site survey")', { timeout: 5000 })
   await q.screenshot({ path: `${SHOTS}/5-iphone-search.png` })
+  // open a result, come back to the results, then cancel back to the folders
+  await q.click('.sidebar-results .note-row:has-text("Site survey")')
+  await q.waitForSelector('.ProseMirror')
+  await q.click('button[aria-label="Back"]')
+  await q.waitForSelector('.sidebar-results .note-row:has-text("Site survey")')
+  if ((await q.inputValue('.search input')) !== 'beams') throw new Error('search text lost')
+  await q.click('.search-cancel')
+  await q.waitForSelector('nav.folders')
   console.log('search ok')
 
   // dark mode

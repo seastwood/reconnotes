@@ -145,7 +145,7 @@ export function App() {
 
   const setNav = (n: Nav) => {
     setNavState(n)
-    if (n.view.kind !== 'search') safeLocalSet('reconnotes.nav', n)
+    safeLocalSet('reconnotes.nav', n)
   }
 
   // If the open note was deleted (here or on another device), close it.
@@ -153,9 +153,9 @@ export function App() {
   const note = meta ? readNote(meta) : null
   useEffect(() => {
     if (!ws.loaded || !nav.noteId || (note && !note.trashedAt)) return
-    // back to the list of the folder it was in (search results stay, to carry on with them)
+    // back to the list of the folder it was in
     const folder = note?.folderId ? ws.folders.find((f) => f.id === note.folderId && !f.trashedAt) : undefined
-    const view: View = nav.view.kind === 'search' || !note ? nav.view : folder ? { kind: 'folder', folderId: folder.id } : nav.view.kind === 'folder' ? { kind: 'all' } : nav.view
+    const view: View = !note ? nav.view : folder ? { kind: 'folder', folderId: folder.id } : nav.view.kind === 'folder' ? { kind: 'all' } : nav.view
     setNav({ ...nav, view, noteId: null })
     if (narrow && pane === 'note') setPane('list')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,11 +174,7 @@ export function App() {
   const onLink = useRef<(a: LinkAction) => void>(() => undefined)
   onLink.current = (a) => {
     if (a.kind === 'open') return openFromReminder.current(a.noteId)
-    if (a.kind === 'search') {
-      setNav({ ...nav, view: { kind: 'search', query: a.query } })
-      if (narrow) setPane('list')
-      return
-    }
+    if (a.kind === 'search') return showSearch(a.query)
     const id = createNote(workspaceDoc, { folderId: nav.view.kind === 'folder' ? nav.view.folderId : null })
     if (a.text) {
       const { handle, close } = sync.open(noteDocName(id))
@@ -204,11 +200,24 @@ export function App() {
    * any other way (the list, search, a new note) starts over.
    */
   const [trail, setTrail] = useState<{ back: string[]; forward: string[] }>({ back: [], forward: [] })
-  const openNote = (id: string) => {
-    setFindOnOpen((f) => (nav.view.kind === 'search' && nav.view.query.trim() ? { noteId: id, query: nav.view.query.trim(), n: (f?.n ?? 0) + 1 } : null))
+  /** the search text in the folders panel (its results show there) */
+  const [search, setSearch] = useState('')
+  /** the open note came from the search results: going back returns to them */
+  const [fromSearch, setFromSearch] = useState(false)
+  const openNote = (id: string, query?: string) => {
+    const q = query?.trim()
+    setFindOnOpen((f) => (q ? { noteId: id, query: q, n: (f?.n ?? 0) + 1 } : null))
+    setFromSearch(Boolean(q))
     setNav({ ...nav, noteId: id })
     setPane('note')
     setTrail({ back: [], forward: [] })
+  }
+  /** search from elsewhere (⌘K, a Shortcut): the folders panel shows the results */
+  const showSearch = (query: string) => {
+    setSearch(query)
+    if (narrow) setPane('folders')
+    else if (wide) setLayout(3)
+    else setOverlay(true)
   }
   const followLink = (id: string) => {
     if (id === nav.noteId) return
@@ -275,7 +284,7 @@ export function App() {
    * goes back a screen.
    */
   const openNext = () => {
-    if (narrow) setPane(pane === 'note' ? 'list' : 'folders')
+    if (narrow) setPane(pane === 'note' && !(fromSearch && search.trim()) ? 'list' : 'folders')
     else if (layout === 1) setLayout(2)
     else if (wide) setLayout(3)
     else setOverlay(true)
@@ -391,13 +400,20 @@ export function App() {
           onView={(view) => {
             setNav({ ...nav, view })
             if (narrow) setPane('list')
-            else if (overlay && view.kind !== 'search') setOverlay(false)
+            else if (overlay) setOverlay(false)
             if (!narrow && layout === 1) setLayout(2)
           }}
           onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
           onSettings={() => setSettingsOpen(true)}
           onCommands={() => setPaletteOpen(true)}
           onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
+          search={search}
+          onSearch={setSearch}
+          activeNoteId={nav.noteId}
+          onOpenResult={(id) => {
+            openNote(id, search)
+            if (overlay && !sidebarInline) setOverlay(false)
+          }}
         />
       </Panel>
       <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
@@ -431,7 +447,7 @@ export function App() {
               folderId={note?.folderId ?? null}
               onOpenNote={openNote}
               onFollowLink={followLink}
-              onBack={narrow ? () => setPane('list') : undefined}
+              onBack={narrow ? () => setPane(fromSearch && search.trim() ? 'folders' : 'list') : undefined}
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
               initialFind={findOnOpen?.noteId === nav.noteId ? findOnOpen : undefined}
@@ -469,11 +485,7 @@ export function App() {
           onOpenNote={openNote}
           onOpenFolder={(folderId) => showView({ kind: 'folder', folderId })}
           onOpenTag={(tag) => showView({ kind: 'tag', tag })}
-          onSearch={(query) => {
-            setNav({ ...nav, view: { kind: 'search', query } })
-            if (narrow) setPane('list')
-            else if (layout === 1) setLayout(2)
-          }}
+          onSearch={showSearch}
         />
       )}
     </div>

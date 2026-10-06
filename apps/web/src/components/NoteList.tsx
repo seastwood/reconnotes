@@ -16,10 +16,8 @@ import {
   type SortMode,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
-import { searchNotes, type SearchResult } from '../lib/search'
 import { newNoteFromTemplate } from '../lib/templates'
 import { DueList } from './DueList'
-import { AskPanel } from './AskPanel'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
@@ -48,9 +46,6 @@ function formatDate(ts: number) {
 
 export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote, onMoveNotes }: Props) {
   const ws = useWorkspace()
-  const [results, setResults] = useState<SearchResult[] | null>(null)
-  /** "Ask your notes" for the current search text */
-  const [asked, setAsked] = useState<string | null>(null)
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -76,16 +71,6 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
   const allSort = (getSettings(workspaceDoc).get('allSort') as SortMode) ?? 'updated'
   const sort: SortMode = folder ? folder.sort : view.kind === 'all' ? allSort : 'updated'
 
-  useEffect(() => {
-    if (view.kind !== 'search') return setResults(null)
-    let alive = true
-    const t = setTimeout(() => void searchNotes(view.query).then((r) => alive && setResults(r)), 150)
-    return () => {
-      alive = false
-      clearTimeout(t)
-    }
-  }, [view])
-
   const notes: NoteData[] = useMemo(() => {
     if (view.kind === 'trash') return sortNotes(ws.notes.filter((n) => n.trashedAt), 'updated')
     if (view.kind === 'templates') return sortNotes(ws.notes.filter((n) => !n.trashedAt && n.template), 'title')
@@ -104,9 +89,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
       ? 'All Notes'
       : view.kind === 'trash'
         ? 'Recently Deleted'
-        : view.kind === 'search'
-          ? 'Search'
-          : view.kind === 'tag'
+        : view.kind === 'tag'
             ? `#${view.tag}`
             : view.kind === 'templates'
               ? 'Templates'
@@ -154,7 +137,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
   }
 
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
-  const canSelect = notes.length > 0 && view.kind !== 'search' && view.kind !== 'due'
+  const canSelect = notes.length > 0 && view.kind !== 'due'
   const ids = [...selected].filter((id) => notes.some((n) => n.id === id))
 
   const clickRow = (e: React.MouseEvent, n: NoteData) => {
@@ -227,7 +210,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             <CircleCheck size={19} />
           </button>
         )}
-        {view.kind !== 'search' && view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && (
+        {view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && (
           <div className="menu-anchor">
             <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
               <ArrowUpDown size={18} />
@@ -297,26 +280,6 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
       </header>
 
       <ul className="notes">
-        {view.kind === 'search' && view.query.trim().length > 2 && asked !== view.query.trim() && (
-          <li className="note-row ask-row" onClick={() => setAsked(view.query.trim())}>
-            <div className="note-title">
-              <Sparkles size={15} /> Ask your notes
-            </div>
-            <div className="note-snippet">“{view.query.trim()}” – an answer from your notes, with sources</div>
-          </li>
-        )}
-        {view.kind === 'search' && asked === view.query.trim() && <AskPanel question={asked} onOpen={onOpen} />}
-        {view.kind === 'search' &&
-          results?.filter((r) => !ws.notes.find((n) => n.id === r.noteId)?.template).map((r) => (
-            <li key={r.noteId} className={`note-row${r.noteId === noteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
-              <div className="note-title">
-                {r.title || 'Untitled'}
-                {r.meaning && <span className="related-badge" title="Found by meaning – no exact word match">related</span>}
-              </div>
-              <div className="note-snippet">{r.snippet}</div>
-            </li>
-          ))}
-        {view.kind === 'search' && results && !results.length && <li className="empty-hint">No matches</li>}
         {view.kind === 'due' && <DueList activeNoteId={noteId} onOpen={onOpen} />}
 
         {trashedFolders.map((f) => (
@@ -390,7 +353,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
             )}
           </NoteRow>
         ))}
-        {view.kind !== 'search' && view.kind !== 'due' && !notes.length && !trashedFolders.length && (
+        {view.kind !== 'due' && !notes.length && !trashedFolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
         )}
         {view.kind === 'folder' && notes.length > 0 && (
