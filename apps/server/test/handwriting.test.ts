@@ -245,6 +245,7 @@ describe('keeping recordings, files and tags through compile', () => {
     const { keepCompileExtras } = await import('../src/ai')
     const md = keepCompileExtras('# Plan\n\nSee ⟦AUDIO:aaa⟧ and ⟦FILE:zzz⟧ here. ⟦AUDIO:aaa⟧\n\n#Work stuff', ['⟦AUDIO:aaa⟧', '⟦FILE:bbb⟧'], ['work', 'home'])
     expect(md).toBe('# Plan\n\nSee\n\n⟦AUDIO:aaa⟧\n\nand here. \n\n#Work stuff\n\n⟦FILE:bbb⟧\n\n#home\n')
+    expect(keepCompileExtras('About [[shopping list]].', [], [], ['Shopping list', 'Budget', 'Budget'])).toBe('About [[shopping list]].\n\nLinked: [[Budget]]\n')
   })
 })
 

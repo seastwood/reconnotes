@@ -149,7 +149,7 @@ const COMPILE_PROMPT = `You will receive a personal note made of typed text, ima
 - Organise with headings, bullet lists, checklists ("- [ ]" / "- [x]") and tables where it helps; fix spelling and obvious grammar slips.
 - Describe diagrams or sketches briefly in square brackets.
 - Lines like ⟦AUDIO:…⟧ or ⟦FILE:…⟧ are attached recordings and files: copy each one exactly, on its own line, where it belongs in the document.
-- Keep every #tag (such as #work) exactly as written.
+- Keep every #tag (such as #work), every link to another note (such as [[Shopping list]]) and every due date (such as !2026-10-14) exactly as written, next to the text they belong to.
 - Do not add facts, commentary or a preamble. Output only the Markdown document.`
 
 /**
@@ -488,7 +488,7 @@ export const compileMarker = (kind: 'audio' | 'file', id: string) => `⟦${kind.
  * #tags (models sometimes drop or mangle them): each marker on its own line,
  * unknown or repeated ones removed, missing ones and tags added at the end.
  */
-export function keepCompileExtras(markdown: string, markers: string[], tags: string[]): string {
+export function keepCompileExtras(markdown: string, markers: string[], tags: string[], links: string[] = []): string {
   const wanted = new Set(markers)
   const seen = new Set<string>()
   let md = markdown.replace(MARKER, (found) => {
@@ -500,6 +500,9 @@ export function keepCompileExtras(markdown: string, markers: string[], tags: str
   md = md.replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n').trim()
   const missing = markers.filter((m) => !seen.has(m))
   if (missing.length) md += '\n\n' + missing.join('\n\n')
+  const linked = new Set([...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1].trim().toLowerCase()))
+  const unlinked = [...new Set(links)].filter((l) => !linked.has(l.trim().toLowerCase()))
+  if (unlinked.length) md += '\n\nLinked: ' + unlinked.map((l) => `[[${l}]]`).join(' ')
   const have = new Set(extractTags(md))
   const lost = tags.filter((t) => !have.has(t))
   if (lost.length) md += '\n\n' + lost.map((t) => `#${t}`).join(' ')

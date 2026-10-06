@@ -308,7 +308,8 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       }
     }
     const note = extractNote(doc)
-    const markdown = keepCompileExtras(await sync.enqueue(() => ai.compile(parts)), markers, note.tags)
+    const links = [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1])
+    const markdown = keepCompileExtras(await sync.enqueue(() => ai.compile(parts)), markers, note.tags, links)
     json(res, 200, { markdown, title: note.title })
   })
 

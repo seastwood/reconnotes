@@ -2,7 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { generateJSON } from '@tiptap/core'
 import { prosemirrorJSONToYXmlFragment } from '@tiptap/y-tiptap'
 import { marked } from 'marked'
-import { createNote, getContent, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
+import { createNote, getContent, getNotes, newId, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
 import { recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
@@ -283,19 +283,60 @@ export async function compileNote(editor: Editor, noteId: string, folderId: stri
   return id
 }
 
-type NodeJSON = { type: string; attrs?: Record<string, unknown>; content?: NodeJSON[]; text?: string }
+type NodeJSON = { type: string; attrs?: Record<string, unknown>; content?: NodeJSON[]; text?: string; marks?: unknown[] }
 
 /**
  * Turn the compiled document's ⟦AUDIO:id⟧ / ⟦FILE:id⟧ lines back into the
- * original note's recordings and files (same attachment, same settings).
+ * original note's recordings and files (same attachment, same settings), and
+ * its [[links]] and !due dates back into real links and due items.
  */
 function keepAttachments(doc: NodeJSON, editor: Editor): NodeJSON {
   const originals = new Map<string, NodeJSON>()
+  const links = new Map<string, { noteId: string; title: string }>() // by title, lower case
+  const dues = new Map<string, Record<string, unknown>>() // date -> attrs
   editor.state.doc.descendants((node) => {
     if ((node.type.name === 'audio' || node.type.name === 'file') && node.attrs.attachmentId) {
       originals.set(`${node.type.name}:${node.attrs.attachmentId}`, node.toJSON() as NodeJSON)
+    } else if (node.type.name === 'noteLink' && node.attrs.noteId) {
+      links.set(String(node.attrs.title || 'note').trim().toLowerCase(), { noteId: node.attrs.noteId, title: node.attrs.title })
+    } else if (node.type.name === 'dueDate' && node.attrs.date && !dues.has(node.attrs.date)) {
+      dues.set(node.attrs.date, node.attrs)
     }
   })
+  // links the model added or retitled: any other note with that exact title
+  const linkTo = (title: string): { noteId: string; title: string } | undefined => {
+    const key = title.trim().toLowerCase()
+    if (links.has(key)) return links.get(key)
+    for (const [id, m] of getNotes(sync.workspace.doc)) {
+      const n = readNote(m)
+      if (!n.trashedAt && n.title.trim().toLowerCase() === key) return { noteId: id, title: n.title }
+    }
+  }
+  const inlineParts = (n: NodeJSON): NodeJSON[] => {
+    const text = n.text ?? ''
+    const out: NodeJSON[] = []
+    let last = 0
+    for (const m of text.matchAll(/\[\[([^\]\n]+)\]\]|!(\S+)/g)) {
+      let node: NodeJSON | null = null
+      let len = m[0].length
+      if (m[1]) {
+        const target = linkTo(m[1])
+        if (target) node = { type: 'noteLink', attrs: target }
+      } else {
+        const date = m[2].replace(/[.,;:)]+$/, '')
+        const attrs = dues.get(date)
+        if (attrs) node = { type: 'dueDate', attrs: { ...attrs, id: newId() } }
+        len = date.length + 1
+      }
+      if (!node) continue
+      if (m.index! > last) out.push({ ...n, text: text.slice(last, m.index) })
+      out.push(node)
+      last = m.index! + len
+    }
+    if (!out.length) return [n]
+    if (last < text.length) out.push({ ...n, text: text.slice(last) })
+    return out
+  }
   const marker = (n: NodeJSON) => {
     if (n.type !== 'paragraph' || !n.content?.length || !n.content.every((c) => c.type === 'text')) return null
     const m = /^\s*⟦(AUDIO|FILE):([a-z0-9]+)⟧\s*$/.exec(n.content.map((c) => c.text ?? '').join(''))
@@ -309,6 +350,8 @@ function keepAttachments(doc: NodeJSON, editor: Editor): NodeJSON {
       const [type, attachmentId] = key.split(':')
       return [{ type, attrs: { attachmentId } }]
     }
+    if (n.type === 'text') return inlineParts(n)
+    if (n.type === 'codeBlock') return [n]
     return [n.content ? { ...n, content: n.content.flatMap(walk) } : n]
   }
   return walk(doc)[0]
