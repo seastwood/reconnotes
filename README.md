@@ -284,6 +284,10 @@ membership (Apple doesn't allow push for apps signed with a free Apple ID).
 Each device gets notifications for the jobs it started, and none while it's open on screen (it
 shows the result itself). Builds from Xcode and TestFlight builds both work.
 
+Signing with a free Apple ID (Personal Team)? Xcode will refuse the push capability – take it off
+again with `npm run ios:disable-push -w @reconnotes/web` and use ntfy or the Home Assistant
+companion app instead (*Settings › Notifications › Server notifications*).
+
 **Siri and Shortcuts.** *"New note in ReconNotes"*, *"Record a ReconNotes voice note"* and
 *"Scan into ReconNotes"* work with Siri, Spotlight, the Action button and the Shortcuts app with no
 setup. The links `reconnotes://new?text=…`, `reconnotes://record` and `reconnotes://scan` also work
