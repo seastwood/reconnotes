@@ -32,6 +32,7 @@ unless project.main_group.recursive_children.any? { |f| f.respond_to?(:path) && 
   group.new_reference(File.basename(rel))
 end
 app.build_configurations.each { |c| c.build_settings['CODE_SIGN_ENTITLEMENTS'] = rel }
+app.build_configurations.each { |c| c.build_settings['DEVELOPMENT_TEAM'] = ENV['TEAM'] } if ENV['TEAM']
 # record the capability so Xcode shows it under Signing & Capabilities
 attrs = project.root_object.attributes['TargetAttributes'] ||= {}
 t = attrs[app.uuid] ||= {}

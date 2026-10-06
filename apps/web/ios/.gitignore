@@ -11,3 +11,9 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# made on your Mac by `npm run ios:setup` (share extension, widget, push) – not shared
+App/ShareExtension/
+App/ReconNotesWidget/
+App/App/App.entitlements
+App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/

@@ -21,7 +21,9 @@ project = Xcodeproj::Project.open(PROJECT)
 app = project.targets.find { |t| t.name == 'App' } or abort 'No "App" target in the Xcode project'
 app_settings = app.build_configurations.first.build_settings
 bundle_id = app_settings['PRODUCT_BUNDLE_IDENTIFIER'] || 'com.reconnotes.app'
-team = app.build_configurations.map { |c| c.build_settings['DEVELOPMENT_TEAM'] }.compact.first
+# TEAM=ABCDE12345 sets the signing team (on the app too), e.g. after resetting the Xcode project
+team = ENV['TEAM'] || app.build_configurations.map { |c| c.build_settings['DEVELOPMENT_TEAM'] }.compact.first
+app.build_configurations.each { |c| c.build_settings['DEVELOPMENT_TEAM'] = team } if ENV['TEAM']
 
 ext_dir = File.join(IOS, NAME)
 FileUtils.mkdir_p(ext_dir)
