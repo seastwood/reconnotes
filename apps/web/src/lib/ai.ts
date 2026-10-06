@@ -3,11 +3,11 @@ import { generateJSON } from '@tiptap/core'
 import { marked } from 'marked'
 import * as Y from 'yjs'
 import { getNotes, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
-import { recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
+import { preferServerOcr, recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
 import { attachmentBlob, flushUploads } from './attachments'
-import { localJobId, recordJob, runJob, submitJob, waitJob } from './jobs'
+import { JobCancelled, localJobId, recordJob, runJob, submitJob, waitJob } from './jobs'
 import { deviceCanDecode, speechToParagraphs, transcribeOnDevice, useDeviceSpeech } from './speech'
 
 /**
@@ -80,6 +80,18 @@ const APPLE_TEXT = 'Apple text recognition (on this device)'
  */
 export async function convertHandwriting(editor: Editor, noteId: string, drawingId: string) {
   const startedAt = Date.now()
+  // your server's model first when you chose that; Apple's recognizer if it can't (offline, failed)
+  let serverError: Error | null = null
+  if (useDeviceOcr() && preferServerOcr()) {
+    try {
+      await flushNote(noteId)
+      await runJob({ kind: 'convert-drawing', noteId, input: { drawingId } })
+      return
+    } catch (e) {
+      if (e instanceof JobCancelled) throw e
+      serverError = e as Error
+    }
+  }
   const text = useDeviceOcr() ? await recognizeDrawingLocally(noteId, drawingId) : ''
   if (text) {
     let at: number | null = null
@@ -93,13 +105,33 @@ export async function convertHandwriting(editor: Editor, noteId: string, drawing
     if (at === null) throw new Error('Drawing no longer exists')
     const id = localJobId()
     insertConverted(editor, at, text, id)
-    recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input: { drawingId }, result: { noteId, text: text.slice(0, 1500) }, agent: APPLE_TEXT, startedAt })
+    recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input: { drawingId }, result: { noteId, text: text.slice(0, 1500) }, agent: serverError ? `${APPLE_TEXT} – the server couldn’t: ${serverError.message.slice(0, 120)}` : APPLE_TEXT, startedAt })
     return
   }
+  if (serverError) throw serverError
   // web app, Apple recognition switched off, or it found nothing: the server's agents
   if (useDeviceOcr() && !isSyncConfigured()) throw new Error('No handwriting was recognised in this drawing.')
   await flushNote(noteId)
   await runJob({ kind: 'convert-drawing', noteId, input: { drawingId } })
+}
+
+/** Apple's recognizer only (the fallback when the server couldn't read a drawing). */
+async function convertOnDevice(editor: Editor, noteId: string, drawingId: string) {
+  const startedAt = Date.now()
+  const text = await recognizeDrawingLocally(noteId, drawingId)
+  if (!text) throw new Error('No handwriting was recognised in this drawing.')
+  let at: number | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'drawing' && node.attrs.drawingId === drawingId) {
+      at = pos + node.nodeSize
+      return false
+    }
+    return at === null
+  })
+  if (at === null) throw new Error('Drawing no longer exists')
+  const id = localJobId()
+  insertConverted(editor, at, text, id)
+  recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input: { drawingId }, result: { noteId, text: text.slice(0, 1500) }, agent: APPLE_TEXT, startedAt })
 }
 
 /**
@@ -114,12 +146,22 @@ export async function convertAllHandwriting(editor: Editor, noteId: string): Pro
   })
   let converted = 0
   const errors: string[] = []
-  if (!useDeviceOcr() && isSyncConfigured()) {
+  if ((!useDeviceOcr() || preferServerOcr()) && isSyncConfigured()) {
     await flushNote(noteId)
     const jobs = await Promise.all(ids.map((drawingId) => submitJob({ kind: 'convert-drawing', noteId, input: { drawingId } })))
-    for (const r of await Promise.allSettled(jobs.map((j) => waitJob(j.id)))) {
+    const results = await Promise.allSettled(jobs.map((j) => waitJob(j.id)))
+    for (const [i, r] of results.entries()) {
       if (r.status === 'fulfilled') converted++
-      else errors.push((r.reason as Error).message)
+      else if (r.reason instanceof JobCancelled) continue
+      else if (useDeviceOcr()) {
+        // the server couldn't read this one: try Apple's recognizer
+        try {
+          await convertOnDevice(editor, noteId, ids[i])
+          converted++
+        } catch {
+          errors.push((r.reason as Error).message)
+        }
+      } else errors.push((r.reason as Error).message)
     }
     return { converted, errors }
   }
@@ -214,6 +256,18 @@ export async function convertImage(editor: Editor, noteId: string, attachmentId:
   const blob = await attachmentBlob(attachmentId)
   if (!blob) throw new Error('This picture hasn’t been downloaded to this device yet.')
   const image = await prepareImage(blob)
+  // your server's model first when you chose that; Apple's recognizer if it can't
+  let serverError: Error | null = null
+  if (useDeviceOcr() && preferServerOcr()) {
+    try {
+      await flushNote(noteId)
+      await runJob({ kind: 'convert-picture', noteId, input: { attachmentId, mime: image.type || 'image/jpeg' }, file: await toBase64(image) })
+      return
+    } catch (e) {
+      if (e instanceof JobCancelled) throw e
+      serverError = e as Error
+    }
+  }
   if (useDeviceOcr()) {
     // Apple's recognizer on the device (iOS app)
     let text = (await recognizeImageOnDevice(image)).trim()
@@ -226,6 +280,7 @@ export async function convertImage(editor: Editor, noteId: string, attachmentId:
       recordJob({ id, kind: 'convert-picture', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: APPLE_TEXT, startedAt })
       return
     }
+    if (serverError) throw serverError
     if (!isSyncConfigured()) throw new Error('No text was recognised in this picture.')
   }
   if (!isSyncConfigured()) throw new Error('Connect a ReconNotes server in Settings to use AI features.')

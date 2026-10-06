@@ -9,7 +9,7 @@ import {
   unionBounds,
   type Stroke,
 } from '@reconnotes/core'
-import { settings } from './settings'
+import { isSyncConfigured, settings } from './settings'
 import { inkUi } from '../drawing/toolState'
 
 /**
@@ -49,6 +49,12 @@ export function deviceOcrAvailable(): boolean {
 /** Available and switched on in Settings. */
 export function useDeviceOcr(): boolean {
   return deviceOcrAvailable() && settings.get().deviceOcr !== false
+}
+
+/** Your server's handwriting models go first; Apple's recognizer is the fallback (offline, or they fail). */
+export function preferServerOcr(): boolean {
+  // offline: straight to Apple instead of waiting for the server
+  return settings.get().ocrFirst === 'server' && isSyncConfigured() && navigator.onLine !== false
 }
 
 async function recognize(pngBase64: string): Promise<VisionLine[]> {

@@ -140,13 +140,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <input type="checkbox" checked={s.deviceOcr} onChange={(e) => settings.set({ deviceOcr: e.target.checked })} />
               Use Apple’s on-device recognition (fast, private, works offline)
             </label>
+            {s.deviceOcr && (
+              <label>
+                “Convert to text” uses
+                <select value={s.ocrFirst ?? 'device'} onChange={(e) => settings.set({ ocrFirst: e.target.value as 'device' | 'server' })}>
+                  <option value="device">Apple first – your server’s models if it finds nothing</option>
+                  <option value="server">Your server’s models first – Apple when offline or they fail</option>
+                </select>
+              </label>
+            )}
             <p className="hint">
               Your handwriting stays ink until you press “Convert to text” (on a drawing, a picture, or “Convert all handwriting” in the
-              note’s ⋯ menu). Apple’s recognizer runs on this device; your server’s AI agents are used only if it finds nothing.
+              note’s ⋯ menu).{' '}
+              {s.ocrFirst === 'server'
+                ? 'Your server’s handwriting agents read it (Settings › AI); Apple’s recognizer on this device steps in when the server can’t be reached or finds nothing. The Jobs list shows which one did each conversion.'
+                : 'Apple’s recognizer runs on this device; your server’s AI agents are used only if it finds nothing. The Jobs list shows which one did each conversion.'}
             </p>
             <label className="check">
               <input type="checkbox" checked={s.backgroundOcr} onChange={(e) => settings.set({ backgroundOcr: e.target.checked })} />
               Make handwriting searchable in the background (only stores hidden search text – never changes your note)
+              {s.ocrFirst === 'server' ? ' – with your server’s models first, the server does this' : ''}
             </label>
             {s.deviceOcr && (
               <label className="check">

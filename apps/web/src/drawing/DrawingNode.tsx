@@ -9,7 +9,7 @@ import { DrawingCanvas } from './DrawingCanvas'
 import { DRAW_ORIGIN, useUndoManager } from '../editor/undo'
 import { inkUi, useInkUi } from './toolState'
 import { convertHandwriting, drawingImageUrl, recognizeDrawingLocally } from '../lib/ai'
-import { useDeviceOcr } from '../lib/deviceOcr'
+import { preferServerOcr, useDeviceOcr } from '../lib/deviceOcr'
 import { settings } from '../lib/settings'
 import { useFindInNode, useInkMatches } from '../editor/findHighlights'
 
@@ -88,7 +88,8 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
   // iOS app: recognise the handwriting on the device a few seconds after the
   // writer pauses, so the drawing is searchable (synced to every device).
   useEffect(() => {
-    if (!ctx || !drawingId || !useDeviceOcr() || !settings.get().backgroundOcr || !editor.isEditable) return
+    // (with your server's models first, the server makes it searchable instead)
+    if (!ctx || !drawingId || !useDeviceOcr() || preferServerOcr() || !settings.get().backgroundOcr || !editor.isEditable) return
     const strokes = getStrokes(ctx.doc, drawingId)
     let timer: ReturnType<typeof setTimeout> | null = null
     let running = false

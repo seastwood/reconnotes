@@ -14,6 +14,8 @@ export interface Settings {
   theme: Theme
   /** iOS app: recognise handwriting with Apple's on-device recognizer */
   deviceOcr: boolean
+  /** "Convert to text": Apple's recognizer first (server models if it finds nothing), or the server's models first (Apple when offline or they fail) */
+  ocrFirst?: 'device' | 'server'
   /** …and then polish it with the server's clean-up agents when online */
   deviceOcrCleanup: boolean
   /** iOS app: quietly recognise drawings for search (never changes the note) */
