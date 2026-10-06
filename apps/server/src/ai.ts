@@ -1,4 +1,5 @@
 import { Resvg } from '@resvg/resvg-js'
+import { extraInstructions, jobSignal, withExtra } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
@@ -193,7 +194,7 @@ export class Ai {
     const task = action === 'clean' && this.agents.available('format') ? 'format' : 'compile'
     const limit = action === 'clean' ? Math.min(8192, Math.ceil(markdown.length / 2) + 512) : 1500
     const { result, agent } = await this.agents.run(task, async (backend) => {
-      const raw = await backend.generate([{ text: NOTE_ACTION_PROMPTS[action] + markdown.slice(0, 60_000) }], limit)
+      const raw = await backend.generate([{ text: withExtra(NOTE_ACTION_PROMPTS[action], 'start') + markdown.slice(0, 60_000) }], limit)
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
     log.info(`note action "${action}" via "${agent.name}" (${markdown.length} → ${result.length} chars)`)
@@ -203,7 +204,7 @@ export class Ai {
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
   async ask(prompt: string): Promise<{ text: string; agent: string }> {
     const { result, agent } = await this.agents.run('compile', async (backend) => {
-      const raw = await backend.generate([{ text: prompt }], 2000)
+      const raw = await backend.generate([{ text: withExtra(prompt) }], 2000)
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
     log.info(`answered a question via "${agent.name}" (${prompt.length} chars of notes → ${result.length})`)
@@ -252,11 +253,12 @@ export class Ai {
     // Try the agent's own prompt (or the detailed built-in one); if the model
     // returns nothing, try once more with a minimal instruction, which many
     // OCR models handle better.
+    const extra = !opts.line && !this.agents.available('format') ? extraInstructions() : ''
     const prompts = [
       ...new Set([
-        agent.prompt.trim() ||
+        (agent.prompt.trim() ||
           knownOcrPrompt(agent.model) ||
-          (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT),
+          (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT)) + (extra ? `\n\nAdditional instructions from the user: ${extra}` : ''),
         opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
       ]),
     ]
@@ -384,7 +386,7 @@ export class Ai {
           FORMAT_PROMPT.replace('{IMAGE}', agent.vision && image ? ' (the original image is attached)' : '').replace(
             '{SOURCE}',
             agent.vision && image ? 'the image' : 'common sense',
-          ) + text
+          ) + (extraInstructions() ? `(Additional instructions from the user – follow these: ${extraInstructions()})\n\n` : '') + text
         // The tidied text should be about as long as the input; leave some room for Markdown.
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
         return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
@@ -394,12 +396,14 @@ export class Ai {
       log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${raw.length} chars)`)
       // Reject clean-ups that wander off: much longer than the input (before
       // or after collapsing repeats) means the model looped or invented text.
-      if (!tidied.trim() || raw.length > text.length * 2 + 200 || tidied.length < raw.length * 0.7) {
+      const wandered = extraInstructions() ? raw.length > text.length * 3 + 1000 : raw.length > text.length * 2 + 200 || tidied.length < raw.length * 0.7
+      if (!tidied.trim() || wandered) {
         log.warn(`clean-up by "${agent.name}" rejected (${text.length} → ${tidied.length} chars); keeping the recognised text`)
         return text
       }
       return tidied
     } catch (err) {
+      if (jobSignal()?.aborted) throw err
       log.warn(`clean-up skipped: ${(err as Error).message}`)
       return text
     }
@@ -471,7 +475,7 @@ export class Ai {
           }
         }
       } else input.push({ text: await asText() })
-      input.push({ text: COMPILE_PROMPT })
+      input.push({ text: withExtra(COMPILE_PROMPT) })
       return backend.generate(input, 32000)
     })
     return result

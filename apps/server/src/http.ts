@@ -28,6 +28,8 @@ import { exportZip } from './exportZip'
 import type { Caller, Devices } from './devices'
 import { SHARE_HEADERS, Shares, drawingSvg, noteHas, sharePage, sharedNote } from './shares'
 import { importNotes, unpack } from './importNotes'
+import type { Jobs } from './jobs'
+import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
 
@@ -85,7 +87,7 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 
 const ID = '([a-z0-9]{8,64})'
 
-export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices) {
+export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
   const shares = new Shares(store)
   const routes: [string, RegExp, Handler][] = []
@@ -185,7 +187,12 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { noteId, drawingId } = await readJson<{ noteId: string; drawingId: string }>(req)
     if (!/^[a-z0-9]{8,64}$/.test(noteId ?? '') || !/^[a-z0-9]{8,64}$/.test(drawingId ?? ''))
       throw new HttpError(400, 'noteId and drawingId required')
-    const { text, agent } = await sync.enqueue(() => sync.recogniseDrawing(noteId, drawingId, { requireText: true }))
+    const title = sync.noteMeta().get(noteId)?.title || 'Untitled'
+    const { text, agent } = await jobs.run(
+      { kind: 'convert-drawing', title, noteId, input: { noteId, drawingId }, device: deviceName(req) },
+      () => sync.recogniseDrawing(noteId, drawingId, { requireText: true }),
+      (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
+    )
     json(res, 200, { text, agent })
   })
 
@@ -198,7 +205,11 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const mime = (req.headers['content-type'] ?? '').split(';')[0].trim()
     if (!isAiImage(mime)) throw new HttpError(415, 'Send a PNG, JPEG, GIF or WebP image')
     const data = await readBody(req, 25 * 1024 * 1024)
-    const { text, agent } = await sync.enqueue(() => ai.transcribePhoto(data, mime))
+    const { text, agent } = await jobs.run(
+      { kind: 'convert-picture', title: 'Picture', device: deviceName(req) },
+      () => ai.transcribePhoto(data, mime),
+      (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
+    )
     json(res, 200, { text, agent })
   })
 
@@ -206,7 +217,12 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('POST', '/api/ai/ask', async (req, res) => {
     const { question } = await readJson<{ question: string }>(req)
     if (!String(question ?? '').trim()) throw new HttpError(400, 'Ask a question')
-    const result = await sync.enqueue(() => askNotes(store, sync, ai, String(question).trim().slice(0, 1000)))
+    const q = String(question).trim().slice(0, 1000)
+    const result = await jobs.run(
+      { kind: 'ask', title: q, input: { question: q }, device: deviceName(req) },
+      () => askNotes(store, sync, ai, q),
+      (r) => ({ result: r as unknown as Record<string, unknown>, agent: r.agent }),
+    )
     json(res, 200, result)
   })
 
@@ -224,7 +240,12 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       markdown = noteToMarkdown(doc, { attachmentText: true })
     }
     if (!markdown.trim()) throw new HttpError(400, 'There is no text to work with.')
-    const result = await sync.enqueue(() => ai.noteAction(action, markdown))
+    const title = noteId ? sync.noteMeta().get(noteId)?.title || 'Untitled' : markdown.slice(0, 60)
+    const result = await jobs.run(
+      { kind: action, title, noteId: noteId ?? null, input: action === 'clean' ? { text: markdown } : { noteId }, device: deviceName(req) },
+      () => ai.noteAction(action, markdown),
+      (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
+    )
     json(res, 200, result)
   })
 
@@ -238,7 +259,11 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     if (!att || !store.hasBlob(att.id)) throw new HttpError(409, "This recording hasn't reached the server yet – try again once it has synced.")
     if (att.text_status === 'done' && att.text?.trim()) return json(res, 200, { text: att.text, agent: null })
     const data = fs.readFileSync(store.blobPath(att.id))
-    const { text, agent } = await sync.enqueue(() => ai.transcribeAudio(data, att.mime, att.name))
+    const { text, agent } = await jobs.run(
+      { kind: 'transcribe', title: att.name || 'Recording', device: deviceName(req) },
+      () => ai.transcribeAudio(data, att.mime, att.name),
+      (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
+    )
     store.setAttachmentText(att.id, text, 'done')
     sync.reindexNotesFor(att.id)
     json(res, 200, { text, agent })
@@ -260,7 +285,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const text = String(input.text ?? '')
     const image = input.image ? Buffer.from(input.image, 'base64') : null
     const mime = input.mime && isAiImage(input.mime) ? input.mime : 'image/png'
-    const tidied = await sync.enqueue(() => ai.tidy(text, image, mime))
+    const tidied = await jobs.run({ kind: 'tidy', title: text.slice(0, 60) || 'Text', device: deviceName(req) }, () => ai.tidy(text, image, mime), (t) => ({ result: { text: t.slice(0, 1500) } }))
     json(res, 200, { text: tidied, cleaned: tidied !== text })
   })
 
@@ -280,37 +305,101 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { noteId } = await readJson<{ noteId: string }>(req)
     const doc = sync.getDoc(noteDocName(noteId))
     if (!doc) throw new HttpError(404, 'note not found')
-    // recordings and files go through as marker lines the client turns back into them
-    const markers: string[] = []
-    // Splice the real drawings and pictures into the note's text, in order.
-    const md = noteToMarkdown(doc, {
-      drawingPlaceholder: (id) => `\u0000DRAWING:${id}\u0000`,
-      imagePlaceholder: (id) => `\u0000IMAGE:${id}\u0000`,
-      attachmentPlaceholder: (kind, id) => {
-        markers.push(compileMarker(kind, id))
-        return compileMarker(kind, id)
-      },
-    })
-    const parts: CompilePart[] = []
-    for (const piece of md.split(/\u0000/)) {
-      const m = /^(DRAWING|IMAGE):([a-z0-9]+)$/.exec(piece)
-      if (!m) {
-        parts.push({ text: piece })
-      } else if (m[1] === 'DRAWING') {
-        const strokes = getStrokes(doc, m[2]).toArray()
-        const png = renderDrawingPng(strokes)
-        if (png) parts.push({ image: png, mime: 'image/png', kind: 'drawing', strokes })
-      } else {
-        const att = store.getAttachment(m[2])
-        if (att && isAiImage(att.mime) && store.hasBlob(att.id)) {
-          parts.push({ image: fs.readFileSync(store.blobPath(att.id)), mime: att.mime, kind: 'photo' })
-        } else parts.push({ text: '\n[picture not available on the server yet]\n' })
-      }
+    const out = await jobs.run(
+      { kind: 'compile', title: extractNote(doc).title || 'Untitled', noteId, device: deviceName(req) },
+      () => compileMarkdown(store, ai, doc),
+      (r) => ({ result: { text: r.markdown.slice(0, 1500) } }),
+    )
+    json(res, 200, out)
+  })
+
+  // --- Jobs: every AI request and background step ---------------------------
+  const deviceName = (req: http.IncomingMessage): string | null => {
+    const c = callers.get(req)
+    return c?.kind === 'device' ? (devices.list().find((d) => d.id === c.id)?.name ?? 'Device') : null
+  }
+  const jobsPayload = () => ({ jobs: jobs.list(), paused: jobs.queuePaused, version: jobs.version, counts: jobs.counts(), kinds: JOB_KINDS })
+  const jobOr404 = (id: string) => {
+    const j = jobs.get(id)
+    if (!j) throw new HttpError(404, 'job not found')
+    return j
+  }
+
+  route('GET', '/api/jobs', (_req, res) => json(res, 200, jobsPayload()))
+
+  /** Wait (up to 25 s) for any change to the jobs, then send the list. */
+  route('GET', '/api/jobs/changes', async (_req, res, _p, url) => {
+    await jobs.nextChange(Number(url.searchParams.get('since') ?? 0), 25_000)
+    json(res, 200, jobsPayload())
+  })
+
+  /** Ask for a job. A picture or image to work on can come along (base64). */
+  route('POST', '/api/jobs', async (req, res) => {
+    const body = await readBody(req, 30 * 1024 * 1024)
+    let spec: { kind?: string; title?: string; noteId?: string; input?: Record<string, unknown>; prompt?: string; file?: string }
+    try {
+      spec = JSON.parse(body.toString('utf8'))
+    } catch {
+      throw new HttpError(400, 'invalid JSON')
     }
-    const note = extractNote(doc)
-    const links = [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1])
-    const markdown = keepCompileExtras(await sync.enqueue(() => ai.compile(parts)), markers, note.tags, links)
-    json(res, 200, { markdown, title: note.title })
+    const kind = String(spec.kind ?? '')
+    if (!JOB_KINDS[kind] || kind === 'recognise' || kind === 'extract-text') throw new HttpError(400, 'unknown job kind')
+    const noteId = spec.noteId && /^[a-z0-9]{8,64}$/.test(spec.noteId) ? spec.noteId : null
+    const title = String(spec.title ?? '').trim() || (noteId ? sync.noteMeta().get(noteId)?.title : '') || JOB_KINDS[kind]
+    const job = jobs.submit({ kind, title, noteId, input: { ...(spec.input ?? {}), ...(noteId ? { noteId } : {}) }, prompt: spec.prompt ?? null, device: deviceName(req) })
+    // the job starts on the next tick, so the file is in place first
+    if (spec.file) fs.writeFileSync(jobs.filePath(job.id), Buffer.from(spec.file, 'base64'))
+    json(res, 201, { job })
+  })
+
+  /** Work done on a device (e.g. Apple's recognizer), shown in the list too. */
+  route('POST', '/api/jobs/record', async (req, res) => {
+    const b = await readJson<{ id?: string; kind: string; title: string; noteId?: string; input?: Record<string, unknown>; result?: Record<string, unknown>; agent?: string; error?: string; startedAt?: number; finishedAt?: number }>(req)
+    if (!JOB_KINDS[b.kind]) throw new HttpError(400, 'unknown job kind')
+    const job = jobs.record({ ...b, title: String(b.title ?? JOB_KINDS[b.kind]), noteId: b.noteId ?? null, device: deviceName(req) })
+    json(res, 201, { job })
+  })
+
+  route('GET', `/api/jobs/${ID}`, (_req, res, [id]) => json(res, 200, { job: jobOr404(id) }))
+
+  /** Wait (up to 50 s) for a job to finish. */
+  route('GET', `/api/jobs/${ID}/wait`, async (_req, res, [id]) => {
+    jobOr404(id)
+    const job = await Promise.race([jobs.wait(id), new Promise<null>((r) => setTimeout(() => r(null), 50_000))])
+    json(res, 200, { job: job ?? jobs.get(id) })
+  })
+
+  route('POST', `/api/jobs/${ID}/cancel`, (_req, res, [id]) => json(res, 200, { job: jobs.cancel(jobOr404(id).id) }))
+  route('POST', `/api/jobs/${ID}/pause`, (_req, res, [id]) => json(res, 200, { job: jobs.pause(jobOr404(id).id) }))
+  route('POST', `/api/jobs/${ID}/resume`, (_req, res, [id]) => json(res, 200, { job: jobs.resume(jobOr404(id).id) }))
+  route('POST', `/api/jobs/${ID}/run-next`, (_req, res, [id]) => json(res, 200, { job: jobs.runNext(jobOr404(id).id) }))
+  route('POST', `/api/jobs/${ID}/redo`, async (req, res, [id]) => {
+    const { prompt } = await readJson<{ prompt?: string }>(req)
+    jobOr404(id)
+    try {
+      json(res, 201, { job: jobs.redo(id, prompt?.trim() ? prompt.trim().slice(0, 2000) : null, deviceName(req)) })
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message)
+    }
+  })
+  route('POST', `/api/jobs/${ID}/remove-result`, async (_req, res, [id]) => {
+    const job = jobOr404(id)
+    if (job.status !== 'done') throw new HttpError(400, 'This job has no result to remove.')
+    await removeJobResult(sync, jobs, job)
+    json(res, 200, { job: jobs.get(id) })
+  })
+  route('DELETE', `/api/jobs/${ID}`, (_req, res, [id]) => {
+    jobs.remove(id)
+    json(res, 200, { ok: true })
+  })
+  route('POST', '/api/jobs/clear-finished', (_req, res) => {
+    jobs.clearFinished()
+    json(res, 200, jobsPayload())
+  })
+  route('POST', '/api/jobs/pause-all', async (req, res) => {
+    const { paused } = await readJson<{ paused: boolean }>(req)
+    jobs.setPaused(Boolean(paused))
+    json(res, 200, jobsPayload())
   })
 
   // --- AI agent management ------------------------------------------------

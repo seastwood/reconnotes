@@ -3,6 +3,7 @@ import { newId } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { log } from './log'
+import { jobSignal, reportAgent, timeoutSignal } from './jobs'
 import { parseWyomingUri, toPcm, wyomingDescribe, wyomingTranscribe } from './wyoming'
 import { spawn } from 'node:child_process'
 
@@ -126,7 +127,7 @@ class AnthropicBackend implements Backend {
       messages: [{ role: 'user', content }],
       ...(ADAPTIVE.test(model) ? { thinking: { type: 'adaptive' as const }, output_config: { effort: this.agent.effort } } : {}),
       ...(FALLBACK_OK.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
-    })
+    }, { signal: jobSignal() })
     const msg = await stream.finalMessage()
     if (msg.stop_reason === 'refusal') throw new Error('the model declined to process this content')
     return msg.content
@@ -283,7 +284,7 @@ class OllamaBackend implements Backend {
     const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(this.agent.timeoutSec * 1000),
+      signal: timeoutSignal(this.agent.timeoutSec * 1000),
       body: JSON.stringify({ model: this.agent.model, stream: false, ...body }),
     })
     if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
@@ -346,7 +347,7 @@ class OpenAiBackend implements Backend {
         'Content-Type': 'application/json',
         ...(this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {}),
       },
-      signal: AbortSignal.timeout(this.agent.timeoutSec * 1000),
+      signal: timeoutSignal(this.agent.timeoutSec * 1000),
       body: JSON.stringify({
         model: this.agent.model,
         max_tokens: maxTokens,
@@ -372,7 +373,7 @@ class OpenAiBackend implements Backend {
       method: 'POST',
       headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},
       // a long recording takes a while, even on a GPU
-      signal: AbortSignal.timeout(Math.max(this.agent.timeoutSec, 900) * 1000),
+      signal: timeoutSignal(Math.max(this.agent.timeoutSec, 900) * 1000),
       body: form,
     })
     if (!res.ok) throw new Error(`server returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
@@ -808,11 +809,14 @@ export class AgentRegistry {
     if (!chain.length) throw new NoAgentError(task)
     const failures: string[] = []
     for (const agent of chain) {
+      if (jobSignal()?.aborted) throw jobSignal()!.reason
+      reportAgent(agent.model ? `${agent.name} (${agent.model})` : agent.name)
       try {
         const result = await fn(makeBackend(agent), agent)
         this.status.set(agent.id, { ...this.statusOf(agent.id), lastOkAt: Date.now() })
         return { result, agent }
       } catch (err) {
+        if (jobSignal()?.aborted) throw jobSignal()!.reason
         const msg = describeError(err)
         failures.push(`${agent.name}: ${msg}`)
         this.status.set(agent.id, { ...this.statusOf(agent.id), lastError: msg, lastErrorAt: Date.now() })

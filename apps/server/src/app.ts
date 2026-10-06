@@ -8,6 +8,8 @@ import { createHttpServer } from './http'
 import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
 import { Devices } from './devices'
+import { Jobs } from './jobs'
+import { registerJobHandlers } from './jobHandlers'
 
 export interface App {
   config: Config
@@ -15,6 +17,7 @@ export interface App {
   sync: SyncEngine
   ai: Ai
   devices: Devices
+  jobs: Jobs
   server: http.Server
   close(): Promise<void>
 }
@@ -27,7 +30,11 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   const ai = new Ai(new AgentRegistry(store, config), config)
   const devices = new Devices(store, config.token)
   const sync = new SyncEngine(config, store, ai, devices)
-  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices)
+  const jobs = new Jobs(store)
+  sync.jobs = jobs
+  registerJobHandlers(config, store, sync, ai, jobs)
+  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs)
+  jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   return {
@@ -36,6 +43,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     sync,
     ai,
     devices,
+    jobs,
     server,
     async close() {
       stopBackups()

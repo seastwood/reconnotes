@@ -19,6 +19,7 @@ import { Ai, renderDrawingPng } from './ai'
 import { log } from './log'
 import { maybeSnapshot } from './versions'
 import type { Devices } from './devices'
+import type { Jobs } from './jobs'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -37,7 +38,8 @@ export function safeEqual(a: string, b: string): boolean {
 export class SyncEngine {
   readonly hocuspocus: Hocuspocus
   private hwTimers = new Map<string, NodeJS.Timeout>()
-  private queue: Promise<unknown> = Promise.resolve()
+  /** set by createApp: background work goes through the job queue */
+  jobs!: Jobs
 
   constructor(
     private config: Config,
@@ -104,13 +106,6 @@ export class SyncEngine {
     } finally {
       await conn.disconnect()
     }
-  }
-
-  /** Run background work one job at a time (AI calls are slow and cost money). */
-  enqueue<T>(job: () => Promise<T>): Promise<T> {
-    const p = this.queue.then(job, job)
-    this.queue = p.catch(() => undefined)
-    return p
   }
 
   private afterStore(name: string, doc: Y.Doc) {
@@ -181,9 +176,8 @@ export class SyncEngine {
       key,
       setTimeout(() => {
         this.hwTimers.delete(key)
-        void this.enqueue(() => this.recogniseDrawing(noteId, drawingId)).catch((err) =>
-          log.error('handwriting recognition failed', key, err),
-        )
+        const title = this.noteMeta().get(noteId)?.title || 'Untitled'
+        this.jobs.submit({ kind: 'recognise', title, noteId, input: { noteId, drawingId }, origin: 'auto', dedupeKey: `recognise:${key}` })
       }, this.config.handwritingDebounceMs),
     )
   }

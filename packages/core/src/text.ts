@@ -131,3 +131,23 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
   const text = nonEmpty.join('\n')
   return { title, snippet, text, attachments, drawings, tags: extractTags(text), links: [...links] }
 }
+
+/** Spoken text (one long run) → paragraphs of a few sentences each. */
+export function speechToParagraphs(text: string): string {
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g)
+  if (!sentences) return text.trim()
+  const paras: string[] = []
+  let cur = ''
+  for (const s of sentences.map((x) => x.trim()).filter(Boolean)) {
+    cur = cur ? `${cur} ${s}` : s
+    if (cur.length > 320) {
+      paras.push(cur)
+      cur = ''
+    }
+  }
+  if (cur) paras.push(cur)
+  return paras.join('\n\n')
+}

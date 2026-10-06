@@ -43,7 +43,7 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
 export function queueAttachment(config: Config, store: Store, ai: Ai, sync: SyncEngine, id: string) {
   const att = store.getAttachment(id)
   if (!att || att.text_status !== 'pending') return
-  void sync.enqueue(() => processAttachment(config, store, ai, sync, att))
+  sync.jobs.submit({ kind: 'extract-text', title: att.name || 'File', input: { attachmentId: id }, origin: 'auto', dedupeKey: `extract:${id}` })
 }
 
 /** Resume work interrupted by a restart. */

@@ -207,9 +207,13 @@ const baseTitle = (p: string) => path.posix.basename(p).replace(MD, '').trim() |
 
 // --- Markdown → the note's rich text (the editor's node names) -------------
 
-interface Ctx {
+export interface Ctx {
   attach(href: string): { id: string; name: string; mime: string; size: number } | null
   noteFor(target: string): string | null
+  /** a paragraph that is only this text becomes this block instead (e.g. ⟦AUDIO:id⟧) */
+  blockFor?(text: string): Y.XmlElement | null
+  /** "!2026-10-14" → a due date's attributes */
+  dueFor?(date: string): Record<string, unknown> | null
 }
 
 type Inline = Y.XmlText | Y.XmlElement
@@ -247,12 +251,20 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
   const out: (Inline | { block: Y.XmlElement })[] = []
   const push = (t: string, m: Marks = marks) => {
     // [[Note title]] / [[Note|label]] links between notes
+    // and !due dates, when the caller knows them
     let last = 0
-    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g)) {
-      const id = ctx.noteFor(match[1].trim())
-      if (!id) continue
+    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]|!(\d{4}-\d{2}-\d{2}[^\s.,;:)]*)/g)) {
+      let node: Y.XmlElement | null = null
+      if (match[3] !== undefined) {
+        const attrs = ctx.dueFor?.(match[3])
+        if (attrs) node = el('dueDate', { ...attrs, id: newId() })
+      } else {
+        const id = ctx.noteFor(match[1].trim())
+        if (id) node = el('noteLink', { noteId: id, title: (match[2] ?? match[1]).trim() })
+      }
+      if (!node) continue
       if (match.index! > last) out.push(text(t.slice(last, match.index), m))
-      out.push(el('noteLink', { noteId: id, title: (match[2] ?? match[1]).trim() }))
+      out.push(node)
       last = match.index! + match[0].length
     }
     if (last < t.length) out.push(text(t.slice(last), m))
@@ -310,7 +322,9 @@ function paragraphs(tokens: Token[] | undefined, ctx: Ctx): Y.XmlElement[] {
   const out: Y.XmlElement[] = []
   let run: Inline[] = []
   const flush = () => {
-    if (run.some((n) => !(n instanceof Y.XmlText) || runText.get(n)?.trim())) out.push(para(run))
+    const only = ctx.blockFor && run.every((n) => n instanceof Y.XmlText) ? ctx.blockFor(run.map((n) => runText.get(n as Y.XmlText) ?? '').join('').trim()) : null
+    if (only) out.push(only)
+    else if (run.some((n) => !(n instanceof Y.XmlText) || runText.get(n)?.trim())) out.push(para(run))
     run = []
   }
   for (const n of inlines(tokens, ctx)) {
