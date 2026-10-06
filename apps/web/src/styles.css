@@ -3005,11 +3005,14 @@ a.button {
 /* iPad / computer: the notes / Jobs column widened over the note area (the
    note stays open underneath, just hidden, and comes back as it was) */
 .app.list-expanded .panel-list {
-  flex: 1;
+  /* the space left, never the width of its longest line */
+  flex: 1 1 0;
+  min-width: 0;
 }
 .app.list-expanded .panel-list .list-col {
   width: auto;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   border-right: 0;
 }
 .app.list-expanded .panel-editor {
