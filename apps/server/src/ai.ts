@@ -132,7 +132,7 @@ const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritt
 
 - Fix obvious recognition mistakes (misread letters, words split or run together) using {SOURCE} and the context – but keep the writer's own words; don't reword, summarise or add anything.
 - Join fragments that belong on one line; keep genuinely separate lines and items separate. Handwriting often wraps: a line that just continues the sentence above it (often a little indented) belongs to that line or item – it is not a new bullet or sub-item.
-- Keep and improve the structure: a title/heading if the first line is one, bullet lists with the same nesting, "- [ ]" / "- [x]" checkboxes, numbered lists, tables.
+- Rebuild the structure from the meaning: a title/heading if the first line is one, bullet lists, "- [ ]" / "- [x]" checkboxes, numbered lists, tables. The OCR's line breaks and indents are often wrong where handwriting wraps: text that continues a sentence belongs to that item, not a new or nested one. Only nest an item when it is clearly a sub-point. Drop stray marks the OCR read as text (a lone "-", "—", "*" or quote mark).
 - Output only the cleaned-up Markdown: no comments about the text or image, no LaTeX.
 
 Recognised text:

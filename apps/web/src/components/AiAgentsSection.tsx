@@ -478,13 +478,14 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
         <label>
           Reading style for drawings
           <select value={form.reading ?? 'auto'} onChange={(e) => set({ reading: e.target.value as ReadingMode })}>
-            <option value="auto">Automatic ({kind === 'anthropic' ? 'whole page' : 'line by line'})</option>
+            <option value="auto">Automatic ({/ocr/i.test(form.model ?? '') ? 'line by line for this OCR model' : 'whole page'})</option>
             <option value="lines">Line by line – best for OCR models</option>
             <option value="page">Whole page at once – best for general vision models</option>
           </select>
           <span className="hint">
-            Line by line finds each written line, bullet and indent from your pen strokes and reads the lines one at a time, so OCR models
-            don’t break lines apart or lose the list structure.
+            Whole page suits general vision models (qwen2.5vl, llava, Claude): they see the context that joins wrapped lines. Line by line
+            finds each written line from your pen strokes and reads them one at a time – for OCR-only models (GLM-OCR, DeepSeek-OCR) that
+            break apart on a whole page.
           </span>
         </label>
       )}

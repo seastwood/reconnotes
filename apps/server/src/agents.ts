@@ -53,8 +53,13 @@ export interface AgentConfig {
 /** Resolve "auto": Claude reads whole pages well; other (often OCR) models do better line by line. */
 export function readingMode(a: AgentConfig): 'page' | 'lines' {
   if (a.reading === 'page' || a.reading === 'lines') return a.reading
-  return a.kind === 'anthropic' ? 'page' : 'lines'
+  // OCR-only models (GLM-OCR, DeepSeek-OCR…) read one line at a time best; general
+  // vision models (qwen2.5vl, llava, Claude…) need the whole page for context –
+  // read line by line, wrapped handwriting falls apart into separate items
+  return isOcrModel(a.model) ? 'lines' : 'page'
 }
+
+export const isOcrModel = (model: string) => /ocr/i.test(model)
 
 export interface AgentStatus {
   lastOkAt: number | null
