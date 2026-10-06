@@ -49,6 +49,7 @@ import { showToast } from '../lib/toast'
 import { useWorkspace } from '../lib/workspace'
 import { Popover } from './Popover'
 import { AiHealthLine, BenchTable } from './AiHealth'
+import { AskAnswer, type AskResult } from './AskPanel'
 import { samplesApi, type BenchResult } from '../lib/agents'
 
 const ICONS: Record<string, typeof Sparkles> = {
@@ -396,7 +397,13 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
           )}
           {text && j.status === 'done' && (
             <div className="job-result">
-              <pre>{text}</pre>
+              {j.kind === 'ask' && typeof j.result?.answer === 'string' ? (
+                <div className="ask-panel">
+                  <AskAnswer result={j.result as unknown as AskResult} onOpen={onOpenNote} />
+                </div>
+              ) : (
+                <pre>{text}</pre>
+              )}
               <button className="text" onClick={() => copy(text)}>
                 <Copy size={13} /> Copy
               </button>

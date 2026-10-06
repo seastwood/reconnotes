@@ -329,10 +329,10 @@ export function App() {
     if (narrow) setPane('list')
     else if (layout === 1) setLayout(2)
   }
-  const appRef = useRef({ nav, showView, openNote, setTheme: (t: 'light' | 'dark' | 'system') => settings.set({ theme: t }) })
-  appRef.current = { nav, showView, openNote, setTheme: (t) => settings.set({ theme: t }) }
+  const appRef = useRef({ nav, showView, openNote, showSearch, setTheme: (t: 'light' | 'dark' | 'system') => settings.set({ theme: t }) })
+  appRef.current = { nav, showView, openNote, showSearch, setTheme: (t) => settings.set({ theme: t }) }
   // the buttons on "job finished" messages
-  useEffect(() => setJobNavigator({ openNote: (id) => appRef.current.openNote(id), showJobs: () => appRef.current.showView({ kind: 'jobs' }) }), [])
+  useEffect(() => setJobNavigator({ openNote: (id) => appRef.current.openNote(id), showJobs: () => appRef.current.showView({ kind: 'jobs' }), showSearch: (q) => appRef.current.showSearch(q) }), [])
   const templatesKey = ws.notes.filter((n) => n.template && !n.trashedAt).map((n) => `${n.id}:${n.title}`).join('|')
   const openNoteMeta = note && !note.trashedAt ? note : null
   useEffect(() => {

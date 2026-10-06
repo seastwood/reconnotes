@@ -54,6 +54,20 @@ async function addNote(id: string, lines: string[]) {
   })
 }
 
+describe('excerpts', () => {
+  it('keeps the start of a long note and the lines about the question', async () => {
+    const { excerpt } = await import('../src/ask')
+    const lines = ['# Leadership meeting', 'Attendees: all', ...Array.from({ length: 300 }, (_, i) => `filler line ${i} about nothing in particular`)]
+    lines[150] = '- [ ] Order safety glasses for the shop'
+    const out = excerpt(lines.join('\n'), ['safety', 'glasses'], 600)
+    expect(out.length).toBeLessThanOrEqual(600)
+    expect(out).toContain('# Leadership meeting')
+    expect(out).toContain('Order safety glasses')
+    expect(out).toContain('filler line 147') // the line before, for context
+    expect(out).not.toContain('filler line 10 ')
+  })
+})
+
 describe('ask your notes', () => {
   it('answers from the matching notes and cites them', async () => {
     await addNote('asknote000001', ['Monday plan', 'Team A sorts the T8 bins with all the parts'])

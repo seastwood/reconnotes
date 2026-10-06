@@ -282,13 +282,31 @@ button.text {
   background: rgba(127, 127, 127, 0.14);
   color: var(--muted);
 }
-.search input {
+.search input,
+.search textarea {
   border: 0;
   background: none;
   outline: none;
   flex: 1;
   min-width: 0;
   color: var(--text);
+}
+.search textarea {
+  font: inherit;
+  line-height: 1.35;
+  padding: 0;
+  margin: 0;
+  resize: none;
+  max-height: calc(1.35em * 5);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.search {
+  align-items: flex-start;
+}
+.search > svg,
+.search > .search-commands {
+  margin-top: 2px;
 }
 
 .folders {

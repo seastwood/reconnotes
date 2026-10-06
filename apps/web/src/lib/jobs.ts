@@ -142,6 +142,11 @@ async function refresh() {
 const mine = new Set<string>()
 /** jobs whose caller is waiting for them (shows its own message, no toast) */
 const awaited = new Set<string>()
+/** Someone on screen is showing this job's result: no "finished" toast for it (while `on`). */
+export function watchingJob(id: string, on: boolean) {
+  if (on) awaited.add(id)
+  else awaited.delete(id)
+}
 
 export interface JobRequest {
   kind: string
@@ -236,7 +241,7 @@ export async function deleteJob(id: string) {
 
 // --- telling you when it's done -------------------------------------------------
 
-type Navigator = { openNote(id: string): void; showJobs(): void }
+type Navigator = { openNote(id: string): void; showJobs(): void; showSearch?(query: string): void }
 let nav: Navigator | null = null
 /** The app tells us how to open a note or the job list (for the toasts' buttons). */
 export function setJobNavigator(n: Navigator) {
@@ -275,7 +280,10 @@ function announce(j: Job) {
     return
   }
   if (awaited.has(j.id)) return
-  if (j.status === 'done') {
+  if (j.status === 'done' && j.kind === 'ask' && nav?.showSearch) {
+    const q = String(j.input.question ?? '')
+    showActionToast('Your notes have an answer', 'Show', () => nav?.showSearch?.(q))
+  } else if (j.status === 'done') {
     const note = productNote(j)
     if (note) showActionToast(`${label} finished – ${j.title}`, 'Open', () => nav?.openNote(note))
     else showActionToast(`${label} finished`, 'Jobs', () => nav?.showJobs())

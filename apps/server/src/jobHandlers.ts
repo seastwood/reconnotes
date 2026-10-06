@@ -256,7 +256,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   jobs.register('ask', async (job) => {
     const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning)
-    return { result: r as unknown as Record<string, unknown>, agent: r.agent }
+    return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 
   jobs.register('compile', async (job) => {

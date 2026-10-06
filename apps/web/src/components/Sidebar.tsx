@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
 import { SearchResults } from './SearchResults'
 import {
@@ -102,7 +102,14 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
-  const searchBox = useRef<HTMLInputElement>(null)
+  const searchBox = useRef<HTMLTextAreaElement>(null)
+  // the box grows with a long search (a question), up to a few lines
+  useLayoutEffect(() => {
+    const el = searchBox.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [search])
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const offlineFolders = useOffline((s) => s.folders)
@@ -291,14 +298,20 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           }}
         >
           <Search size={16} />
-          <input
+          <textarea
             ref={searchBox}
-            type="search"
+            rows={1}
             enterKeyHint="search"
             placeholder="Search everything"
+            aria-label="Search everything"
             value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Escape' && (onSearch(''), searchBox.current?.blur())}
+            autoCapitalize="off"
+            onChange={(e) => onSearch(e.target.value.replace(/\n/g, ' '))}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') (onSearch(''), searchBox.current?.blur())
+              // Return searches (puts the keyboard away) instead of adding a line
+              if (e.key === 'Enter') (e.preventDefault(), searchBox.current?.blur())
+            }}
           />
           {search ? (
             <button type="button" className="search-commands" onClick={() => (onSearch(''), searchBox.current?.focus())} aria-label="Clear search" title="Clear search">

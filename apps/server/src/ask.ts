@@ -25,8 +25,36 @@ export interface AskSource {
   title: string
 }
 
-const PER_NOTE = 6000
-const TOTAL = 30000
+// kept small: on a home GPU, reading the notes is most of the wait
+const PER_NOTE = 3500
+const TOTAL = 16000
+
+/**
+ * A long note cut down to the parts about the question: its first lines,
+ * and the lines that share words with it (with a line either side).
+ */
+export function excerpt(md: string, words: string[], limit: number): string {
+  if (md.length <= limit) return md
+  const lines = md.split('\n')
+  const hits = (l: string) => {
+    const low = l.toLowerCase()
+    return words.some((w) => low.includes(w))
+  }
+  const keep = new Set<number>([0, 1, 2])
+  lines.forEach((l, i) => {
+    if (hits(l)) for (const j of [i - 1, i, i + 1]) if (j >= 0 && j < lines.length) keep.add(j)
+  })
+  let out = ''
+  let last = -1
+  for (const i of [...keep].sort((a, b) => a - b)) {
+    const piece = (last >= 0 && i > last + 1 ? '…\n' : '') + lines[i] + '\n'
+    if (out.length + piece.length > limit) break
+    out += piece
+    last = i
+  }
+  // nothing matched beyond the start: the beginning of the note
+  return out.trim().length > 40 ? out : md.slice(0, limit)
+}
 
 export async function askNotes(
   store: Store,
@@ -69,7 +97,7 @@ export async function askNotes(
   for (const id of ids) {
     const doc = sync.getDoc(noteDocName(id))
     if (!doc) continue
-    const md = noteToMarkdown(doc, { attachmentText: true }).slice(0, PER_NOTE)
+    const md = excerpt(noteToMarkdown(doc, { attachmentText: true }), words, PER_NOTE)
     if (!md.trim()) continue
     if (context.length + md.length > TOTAL) break
     const n = sources.length + 1
