@@ -3,6 +3,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
+import { shortDate, timeRange, todayLabel } from './timeRange'
 
 /**
  * Ask your notes
@@ -14,7 +15,7 @@ import type { MeaningIndex } from './semantic'
  */
 
 const STOP = new Set(
-  'a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about any all also did didnt dont get got just know like make need should tell than want'.split(
+  'a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about any all also did didnt dont get got just know like make need should tell than want note notes wrote write written work worked working yesterday today tonight week month last past previous day days morning afternoon evening monday tuesday wednesday thursday friday saturday sunday'.split(
     ' ',
   ),
 )
@@ -62,8 +63,13 @@ export async function askNotes(
   ai: Ai,
   question: string,
   meaning?: MeaningIndex | null,
+  /** the asker's clock: their time zone (Date#getTimezoneOffset) and now */
+  when: { tzOffset?: number; now?: number } = {},
 ): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
   const meta = sync.noteMeta()
+  const now = when.now ?? Date.now()
+  const tz = when.tzOffset ?? 0
+  const range = timeRange(question, now, tz)
   const usable = (id: string) => {
     const m = meta.get(id)
     return m && !m.trashedAt && !m.template
@@ -83,13 +89,20 @@ export async function askNotes(
     .map(([id]) => id)
     .filter(usable)
     .slice(0, 8)
-  // nothing matched (e.g. "what did I work on this week?"): the latest notes
-  if (!ids.length)
+  // a question about a time ("yesterday", "last week", "on 10/5"): the notes
+  // written or edited then – those that also match its words first
+  if (range) {
+    const then = notesActiveIn(store, meta, range.from, range.to).filter(usable)
+    ids = then.sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0) || meta.get(b)!.updatedAt - meta.get(a)!.updatedAt).slice(0, 8)
+  }
+  // nothing matched: the latest notes
+  if (!ids.length && !range)
     ids = [...meta.values()]
       .filter((n) => usable(n.id))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 6)
       .map((n) => n.id)
+  if (!ids.length && range) return { answer: `You didn't write or edit any notes ${range.label}.`, sources: [], agent: '' }
   if (!ids.length) return { answer: "You don't have any notes yet.", sources: [], agent: '' }
 
   const sources: AskSource[] = []
@@ -105,8 +118,7 @@ export async function askNotes(
     const m = meta.get(id)!
     sources.push({ n, noteId: id, title: shortTitle(m.title) })
     texts.set(n, md)
-    const updated = new Date(m.updatedAt).toISOString().slice(0, 10)
-    context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (last edited ${updated}) ===\n${md}`
+    context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)}) ===\n${md}`
   }
 
   const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
@@ -114,9 +126,12 @@ export async function askNotes(
 - Be brief and direct. Start with the answer, not a restatement of the question.
 - When the answer is several things, write a Markdown list, one item per line starting with "- ".
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
+- When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
 - Answer in the language of the question.
+
+Today is ${todayLabel(now, tz)}.${range ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
 
 Question: ${question}
 
@@ -175,4 +190,14 @@ function usedSources(answer: string, sources: AskSource[], texts: Map<number, st
     .filter((x) => x.n >= Math.ceil(best * 0.5))
     .slice(0, 4)
     .map((x) => x.s)
+}
+
+/** Notes created or edited between `from` and `to` (from their dates and the version history). */
+function notesActiveIn(store: Store, meta: Map<string, { id: string; createdAt: number; updatedAt: number }>, from: number, to: number): string[] {
+  const ids = new Set<string>()
+  for (const m of meta.values()) if ((m.updatedAt >= from && m.updatedAt < to) || (m.createdAt >= from && m.createdAt < to)) ids.add(m.id)
+  // snapshots are taken while a note is being edited: a note worked on then, edited again since
+  const rows = store.db.prepare("SELECT DISTINCT doc_name FROM versions WHERE created_at >= ? AND created_at < ? AND doc_name LIKE 'note:%'").all(from, to) as { doc_name: string }[]
+  for (const r of rows) ids.add(r.doc_name.slice('note:'.length))
+  return [...ids].filter((id) => meta.has(id))
 }

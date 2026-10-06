@@ -41,7 +41,7 @@ export function AskPanel({ question, onOpen }: { question: string; onOpen: (note
     // wait for the job list, so an earlier ask of the same question is found
     if (!loaded || job || submitted === question) return
     setSubmitted(question)
-    submitJob({ kind: 'ask', title: question, input: { question } })
+    submitJob({ kind: 'ask', title: question, input: { question, tzOffset: new Date().getTimezoneOffset() } })
       .then((j) => watchingJob(j.id, true))
       .catch((e) => setError((e as Error).message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,7 +74,7 @@ export function AskPanel({ question, onOpen }: { question: string; onOpen: (note
         <button
           className="text"
           onClick={() =>
-            void submitJob({ kind: 'ask', title: question, input: { question } })
+            void submitJob({ kind: 'ask', title: question, input: { question, tzOffset: new Date().getTimezoneOffset() } })
               .then((j) => watchingJob(j.id, true))
               .catch((e) => setError((e as Error).message))
           }

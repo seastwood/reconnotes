@@ -255,7 +255,10 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   })
 
   jobs.register('ask', async (job) => {
-    const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning)
+    const tzOffset = Number(job.input.tzOffset)
+    const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning, {
+      tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
+    })
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 
