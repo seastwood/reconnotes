@@ -22,6 +22,8 @@ import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type
 import { askNotes } from './ask'
 import { processAttachment } from './attachments'
 import type { Job, Jobs } from './jobs'
+import { reportProgress } from './jobs'
+import { runBench, type Samples } from './bench'
 import type { AiTask } from './agents'
 import { guessedWords } from './vocabulary'
 import { markdownToNodes, type Ctx } from './importNotes'
@@ -46,6 +48,7 @@ export const JOB_KINDS: Record<string, string> = {
   recognise: 'Read handwriting for search',
   'extract-text': 'Read file for search',
   embed: 'Index for search by meaning',
+  benchmark: 'Test models on your handwriting',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -130,9 +133,10 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   ask: 'compile',
   tidy: 'format',
   embed: 'embed',
+  benchmark: 'handwriting',
 }
 
-export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs) {
+export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
   const modelOf = (task: AiTask | null) => {
     const a = task ? ai.agents.chain(task)[0] : undefined
     return a ? `${a.kind}|${a.baseUrl}|${a.model}` : null
@@ -346,6 +350,13 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const full = extractNote(doc, store.attachmentTexts(ex.attachments))
     const made = await meaning.indexNote(noteId, full.title, full.text)
     return { result: { noteId, passages: made } }
+  })
+
+  jobs.register('benchmark', async () => {
+    if (!samples) throw new Error('The test bench isn’t available.')
+    const results = await runBench(ai, samples, reportProgress)
+    const best = results[0]
+    return { result: { results, text: best ? `Best: ${best.name} (${best.model}) – ${best.accuracy}% right, ${best.avgSeconds}s each` : '' } }
   })
 
   jobs.register('extract-text', async (job) => {

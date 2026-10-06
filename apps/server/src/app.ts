@@ -12,6 +12,7 @@ import { Jobs } from './jobs'
 import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
 import { Notifier } from './notify'
 import { MeaningIndex } from './semantic'
+import { Samples } from './bench'
 
 export interface App {
   config: Config
@@ -35,10 +36,11 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   const jobs = new Jobs(store)
   sync.jobs = jobs
   sync.meaning = new MeaningIndex(store, ai.agents)
-  registerJobHandlers(config, store, sync, ai, jobs)
+  const samples = new Samples(store)
+  registerJobHandlers(config, store, sync, ai, jobs, samples)
   const notifier = new Notifier(store)
   jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
-  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier)
+  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   sync.embedMissing()

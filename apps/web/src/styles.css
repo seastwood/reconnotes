@@ -3338,3 +3338,125 @@ a.button {
 .learned s {
   color: var(--muted);
 }
+
+/* AI health: Settings › AI and the top of Jobs */
+.ai-health {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 14px;
+}
+.ai-health.down,
+.ai-health.degraded {
+  border-color: var(--danger);
+}
+.ai-health-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.ai-health-head span {
+  flex: 1;
+  min-width: 0;
+}
+.ai-health ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+.ai-health li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+}
+.ai-health li svg {
+  flex: none;
+  margin-top: 3px;
+}
+.ai-loaded {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--accent-text);
+  background: var(--active);
+}
+.ai-health-err {
+  color: var(--danger);
+}
+.ai-health-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--danger);
+  background: var(--active);
+}
+
+/* model test bench */
+.bench-samples {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+.bench-samples li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 0;
+}
+.bench-title {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.bench-edit {
+  flex: 1;
+}
+.bench-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text);
+}
+.bench .row button:not(.text) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--accent-text);
+}
+.bench-table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.bench-table th,
+.bench-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.bench-table td:not(:first-child),
+.bench-table th:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}

@@ -82,6 +82,7 @@ interface JobContext {
   job: Job
   signal: AbortSignal
   setAgent(name: string): void
+  setProgress(text: string): void
 }
 const context = new AsyncLocalStorage<JobContext>()
 
@@ -118,6 +119,11 @@ export function isRedo(): boolean {
 /** Tell the job list which AI agent is being tried. */
 export function reportAgent(name: string) {
   context.getStore()?.setAgent(name)
+}
+
+/** Say how far the running job has got ("sample 2 of 5"). */
+export function reportProgress(text: string) {
+  context.getStore()?.setProgress(text)
 }
 
 export class JobCancelledError extends Error {
@@ -546,6 +552,10 @@ export class Jobs {
       setAgent: (name) => {
         this.liveAgent.set(job.id, name)
         this.progress.set(job.id, `Trying ${name}`)
+        this.changed()
+      },
+      setProgress: (text) => {
+        this.progress.set(job.id, text)
         this.changed()
       },
     }

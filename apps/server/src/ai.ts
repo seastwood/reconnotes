@@ -287,7 +287,7 @@ export class Ai {
     backend: Backend,
     agent: AgentConfig,
     png: Buffer,
-    opts: { requireText?: boolean; mime?: string; photo?: boolean; line?: boolean } = {},
+    opts: { requireText?: boolean; mime?: string; photo?: boolean; line?: boolean; noCache?: boolean } = {},
   ): Promise<string> {
     // Try the agent's own prompt (or the detailed built-in one); if the model
     // returns nothing, try once more with a minimal instruction, which many
@@ -309,7 +309,7 @@ export class Ai {
     const empties: string[] = []
     let explanation: string | undefined
     // the same image read the same way before: use that (a redo or extra instructions read it afresh)
-    const cacheKey = opts.line || extraInstructions() || isRedo() ? null : createHash('sha1').update(`${agent.kind}|${agent.baseUrl}|${agent.model}|${prompts[0]}|`).update(png).digest('hex')
+    const cacheKey = opts.line || opts.noCache || extraInstructions() || isRedo() ? null : createHash('sha1').update(`${agent.kind}|${agent.baseUrl}|${agent.model}|${prompts[0]}|`).update(png).digest('hex')
     const saved = cacheKey ? this.savedReading(cacheKey) : null
     if (saved) {
       log.info(`handwriting via "${agent.name}": unchanged image, using the earlier reading`)

@@ -8,6 +8,9 @@ import {
   Copy,
   Eraser,
   FileSearch,
+  FlaskConical,
+  Network,
+  BookmarkPlus,
   FileText,
   ListChecks,
   ListStart,
@@ -45,6 +48,8 @@ import { isSyncConfigured } from '../lib/settings'
 import { showToast } from '../lib/toast'
 import { useWorkspace } from '../lib/workspace'
 import { Popover } from './Popover'
+import { AiHealthLine, BenchTable } from './AiHealth'
+import { samplesApi, type BenchResult } from '../lib/agents'
 
 const ICONS: Record<string, typeof Sparkles> = {
   'convert-drawing': PenLine,
@@ -58,6 +63,8 @@ const ICONS: Record<string, typeof Sparkles> = {
   tidy: WandSparkles,
   recognise: Search,
   'extract-text': FileSearch,
+  embed: Network,
+  benchmark: FlaskConical,
 }
 
 /** 75 s → "1:15", 3700 s → "1:01:40" */
@@ -182,6 +189,7 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders }: Props) {
       <div className="notes jobs-scroll">
         {!isSyncConfigured() && <p className="empty-hint">Jobs run on your ReconNotes server. Connect one in Settings to use AI features.</p>}
         {error && isSyncConfigured() && <p className="jobs-error">Can’t reach the server: {error}</p>}
+        {!error && isSyncConfigured() && <AiHealthLine />}
         {paused && (
           <div className="jobs-paused">
             <Pause size={14} /> The queue is paused – nothing new starts.
@@ -395,6 +403,8 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
             </div>
           )}
 
+          {j.kind === 'benchmark' && j.status === 'done' && Array.isArray(j.result?.results) && <BenchTable results={j.result.results as BenchResult[]} />}
+
           {redoing && (
             <div className="job-redo">
               <textarea
@@ -487,6 +497,17 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                 })}
               >
                 <Eraser size={14} /> Remove result
+              </button>
+            )}
+            {j.status === 'done' && !j.result?.removed && (j.kind === 'convert-drawing' || j.kind === 'convert-picture') && (
+              <button
+                onClick={run(async () => {
+                  await samplesApi.fromJob(j.id)
+                  showToast('Saved as a test sample – compare models in Settings › AI')
+                })}
+                title="Fix the text in the note first: it’s used as the right answer when testing models"
+              >
+                <BookmarkPlus size={14} /> Save as test sample
               </button>
             )}
             {isFinished(j) && (

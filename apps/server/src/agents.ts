@@ -48,6 +48,8 @@ export interface AgentConfig {
    * line at a time (OCR models, which are poor at page layout).
    */
   reading: ReadingMode
+  /** Claude only: stop using this agent once it has cost this much (US$) this month; 0 = no limit */
+  monthlyLimitUsd?: number
 }
 
 /** Resolve "auto": Claude reads whole pages well; other (often OCR) models do better line by line. */
@@ -68,7 +70,44 @@ export interface AgentStatus {
 }
 
 /** What the app sees: never the API key itself. */
-export type AgentView = Omit<AgentConfig, 'apiKey'> & { hasApiKey: boolean; apiKeyHint: string; status: AgentStatus }
+export type AgentView = Omit<AgentConfig, 'apiKey'> & { hasApiKey: boolean; apiKeyHint: string; status: AgentStatus; spentThisMonthUsd: number }
+
+// --- Claude spending ------------------------------------------------------------
+
+/** US$ per million tokens [input, output] (Anthropic's API prices); unknown models count as Opus-priced. */
+const PRICES: [RegExp, number, number][] = [
+  [/fable|mythos/, 10, 50],
+  [/opus-5-5/, 4, 20],
+  [/opus/, 5, 25],
+  [/sonnet-5|sonnet-4-?6|sonnet/, 2, 10],
+  [/haiku/, 1, 5],
+]
+const pricesFor = (model: string) => {
+  const hit = PRICES.find(([re]) => re.test(model))
+  return hit && /sonnet-4-?6/.test(model) ? ([3, 15] as const) : hit ? ([hit[1], hit[2]] as const) : ([5, 25] as const)
+}
+
+/** What a Claude request cost, from its reported usage (cache writes ×1.25, cache reads ×0.1 of the input price). */
+export function claudeCost(model: string, u: { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null }): number {
+  const [inP, outP] = pricesFor(model)
+  return ((u.input_tokens ?? 0) * inP + (u.cache_creation_input_tokens ?? 0) * inP * 1.25 + (u.cache_read_input_tokens ?? 0) * inP * 0.1 + (u.output_tokens ?? 0) * outP) / 1e6
+}
+
+const SPEND_KEY = 'claude.spend'
+let spendStore: Store | null = null
+const month = () => new Date().toISOString().slice(0, 7)
+/** Spending per agent this month (US$). */
+export function spentThisMonth(agentId: string): number {
+  const s = spendStore?.getSetting<{ month: string; byAgent: Record<string, number> }>(SPEND_KEY)
+  return s && s.month === month() ? (s.byAgent[agentId] ?? 0) : 0
+}
+function recordSpend(agentId: string, usd: number) {
+  if (!spendStore || !usd) return
+  const s = spendStore.getSetting<{ month: string; byAgent: Record<string, number> }>(SPEND_KEY)
+  const cur = s && s.month === month() ? s : { month: month(), byAgent: {} as Record<string, number> }
+  cur.byAgent[agentId] = (cur.byAgent[agentId] ?? 0) + usd
+  spendStore.setSetting(SPEND_KEY, cur)
+}
 
 export interface AiSettings {
   routing: Record<AiTask, string[]>
@@ -131,6 +170,9 @@ class AnthropicBackend implements Backend {
       return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: p.pdf.toString('base64') } }
     })
     const model = this.agent.model
+    const limit = this.agent.monthlyLimitUsd ?? 0
+    if (limit > 0 && spentThisMonth(this.agent.id) >= limit)
+      throw new Error(`reached its monthly spending limit ($${limit.toFixed(2)}) – raise it in Settings › AI, or wait for next month`)
     const stream = this.client.beta.messages.stream({
       model,
       max_tokens: maxTokens,
@@ -139,6 +181,7 @@ class AnthropicBackend implements Backend {
       ...(FALLBACK_OK.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
     }, { signal: jobSignal() })
     const msg = await stream.finalMessage()
+    recordSpend(this.agent.id, claudeCost(msg.model || model, msg.usage))
     if (msg.stop_reason === 'refusal') throw new Error('the model declined to process this content')
     return msg.content
       .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
@@ -754,6 +797,7 @@ export class AgentRegistry {
     private store: Store,
     config: Config,
   ) {
+    spendStore = store
     if (store.getSetting(AGENTS_KEY) === null) this.seedFromEnv(config)
     this.adoptTranscribeEnv(config)
   }
@@ -962,6 +1006,7 @@ function withDefaults(a: Partial<AgentConfig>): AgentConfig {
     prompt: a.prompt ?? '',
     effort: effortOf(a.effort ?? 'medium'),
     reading: a.reading === 'page' || a.reading === 'lines' ? a.reading : 'auto',
+    monthlyLimitUsd: Number(a.monthlyLimitUsd) > 0 ? Number(a.monthlyLimitUsd) : 0,
   }
 }
 
@@ -997,6 +1042,7 @@ export function validateAgent(input: Partial<AgentConfig>): AgentConfig {
   a.timeoutSec = Math.min(1800, Math.max(5, Number(a.timeoutSec) || 300))
   a.enabled = Boolean(a.enabled)
   a.vision = Boolean(a.vision)
+  a.monthlyLimitUsd = Math.max(0, Math.min(100000, Number(a.monthlyLimitUsd) || 0))
   return a
 }
 
@@ -1007,6 +1053,7 @@ function toView(a: AgentConfig, status?: AgentStatus): AgentView {
     hasApiKey: apiKey.length > 0,
     apiKeyHint: apiKey.length > 8 ? `…${apiKey.slice(-4)}` : apiKey ? '…' : '',
     status: status ?? { lastOkAt: null, lastError: null, lastErrorAt: null },
+    spentThisMonthUsd: a.kind === 'anthropic' ? Math.round(spentThisMonth(a.id) * 100) / 100 : 0,
   }
 }
 

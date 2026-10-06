@@ -34,6 +34,8 @@ import type { Notifier } from './notify'
 import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
+import { aiHealth } from './health'
+import type { Samples } from './bench'
 
 export const VERSION = '0.1.0'
 
@@ -89,7 +91,7 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 
 const ID = '([a-z0-9]{8,64})'
 
-export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs, notifier: Notifier) {
+export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs, notifier: Notifier, samples?: Samples) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
   const shares = new Shares(store)
   const routes: [string, RegExp, Handler][] = []
@@ -466,6 +468,41 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { from, to } = await readJson<{ from: string; to: string }>(req)
     ai.vocabulary?.forget(String(from), String(to))
     json(res, 200, ai.vocabulary?.get())
+  })
+
+  // --- is the AI working? ----------------------------------------------------
+  route('GET', '/api/ai/health', async (_req, res, _p, url) => json(res, 200, await aiHealth(ai.agents, jobs, url.searchParams.get('fresh') === '1')))
+
+  // --- test samples: your handwriting with the right text, to compare models --
+  const benchSamples = () => {
+    if (!samples) throw new HttpError(404, 'not available')
+    return samples
+  }
+  route('GET', '/api/ai/samples', (_req, res) => json(res, 200, { samples: benchSamples().list() }))
+  route('POST', '/api/ai/samples', async (req, res) => {
+    const { jobId } = await readJson<{ jobId: string }>(req)
+    try {
+      json(res, 201, { sample: benchSamples().fromJob(jobOr404(String(jobId)), sync, jobs) })
+    } catch (e) {
+      if (e instanceof HttpError) throw e
+      throw new HttpError(400, (e as Error).message)
+    }
+  })
+  route('GET', `/api/ai/samples/${ID}/image`, (_req, res, [id]) => {
+    const img = benchSamples().image(id)
+    if (!img) throw new HttpError(404, 'sample not found')
+    res.writeHead(200, { 'Content-Type': img.mime, 'Cache-Control': 'private, max-age=86400' })
+    res.end(img.image)
+  })
+  route('PUT', `/api/ai/samples/${ID}`, async (req, res, [id]) => {
+    const { truth } = await readJson<{ truth: string }>(req)
+    if (!String(truth ?? '').trim()) throw new HttpError(400, 'The right text can’t be empty.')
+    benchSamples().setTruth(id, String(truth))
+    json(res, 200, { samples: benchSamples().list() })
+  })
+  route('DELETE', `/api/ai/samples/${ID}`, (_req, res, [id]) => {
+    benchSamples().remove(id)
+    json(res, 200, { samples: benchSamples().list() })
   })
 
   route('POST', '/api/ai/warm', async (_req, res) => {

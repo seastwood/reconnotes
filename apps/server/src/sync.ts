@@ -49,7 +49,7 @@ export class SyncEngine {
 
   constructor(
     private config: Config,
-    private store: Store,
+    readonly store: Store,
     private ai: Ai,
     private devices?: Devices,
   ) {

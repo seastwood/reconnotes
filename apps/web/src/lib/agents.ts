@@ -18,6 +18,9 @@ export interface Agent {
   prompt: string
   effort: 'low' | 'medium' | 'high'
   reading: ReadingMode
+  /** Claude: stop using it once it has cost this much this month (US$); 0 = no limit */
+  monthlyLimitUsd?: number
+  spentThisMonthUsd?: number
   hasApiKey: boolean
   apiKeyHint: string
   status: { lastOkAt: number | null; lastError: string | null; lastErrorAt: number | null }
@@ -115,6 +118,40 @@ export const vocabApi = {
   get: () => call<Vocab>('GET', '/api/ai/vocabulary'),
   setWords: (words: string[]) => call<Vocab>('PUT', '/api/ai/vocabulary', { words }),
   forget: (from: string, to: string) => call<Vocab>('POST', '/api/ai/vocabulary/forget', { from, to }),
+}
+
+export interface AiHealth {
+  checkedAt: number
+  status: 'ok' | 'degraded' | 'down' | 'none'
+  summary: string
+  agents: { id: string; name: string; kind: AgentKind; model: string; enabled: boolean; ok: boolean | null; error: string | null; ms: number | null; loaded?: boolean; spentUsd?: number }[]
+  ollama: { url: string; ok: boolean; version: string | null; loaded: { name: string; vramMb: number; sizeMb: number; until: string | null }[] }[]
+  queue: { running: number; queued: number; paused: number; waitingToRetry: number }
+}
+/** Can the AI agents be reached right now, and what's loaded? */
+export const aiHealth = (fresh = false) => call<AiHealth>('GET', `/api/ai/health${fresh ? '?fresh=1' : ''}`)
+
+export interface Sample {
+  id: string
+  title: string
+  truth: string
+  createdAt: number
+}
+export interface BenchResult {
+  agentId: string
+  name: string
+  model: string
+  accuracy: number
+  avgSeconds: number
+  errors: number
+  samples: { title: string; accuracy: number; text: string; error?: string }[]
+}
+/** Your handwriting with the right text, for comparing models. */
+export const samplesApi = {
+  list: () => call<{ samples: Sample[] }>('GET', '/api/ai/samples'),
+  fromJob: (jobId: string) => call<{ sample: Sample }>('POST', '/api/ai/samples', { jobId }),
+  setTruth: (id: string, truth: string) => call<{ samples: Sample[] }>('PUT', `/api/ai/samples/${id}`, { truth }),
+  remove: (id: string) => call<{ samples: Sample[] }>('DELETE', `/api/ai/samples/${id}`),
 }
 
 /** Read all handwriting and pictures again for search (after changing models). */

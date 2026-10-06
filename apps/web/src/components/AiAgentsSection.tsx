@@ -19,6 +19,7 @@ import {
   type ReadingMode,
 } from '../lib/agents'
 import { apiUrl, settings } from '../lib/settings'
+import { AiHealthBox, TestBenchSection } from './AiHealth'
 
 /**
  * Settings › AI agents: add Claude / Ollama / OpenAI-compatible endpoints,
@@ -86,6 +87,7 @@ export function AiAgentsSection() {
   return (
     <div className="ai-agents">
       {error && <p className="status error-text">{error}</p>}
+      {state.agents.length > 0 && <AiHealthBox />}
 
       <div className="agent-list">
         {state.agents.map((a) =>
@@ -240,6 +242,7 @@ export function AiAgentsSection() {
           </label>
           <RereadButton />
           <VocabularySection />
+          <TestBenchSection />
         </>
       )}
     </div>
@@ -502,6 +505,23 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
             <option value="medium">Medium</option>
             <option value="high">High – most careful</option>
           </select>
+        </label>
+      )}
+      {kind === 'anthropic' && (
+        <label>
+          Monthly spending limit (US$)
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={form.monthlyLimitUsd ?? 0}
+            onChange={(e) => set({ monthlyLimitUsd: Math.max(0, Number(e.target.value) || 0) })}
+          />
+          <span className="hint">
+            {agent?.spentThisMonthUsd !== undefined ? `Spent this month: about $${agent.spentThisMonthUsd.toFixed(2)}. ` : ''}
+            Once it reaches the limit, Claude isn’t used until next month and the next agent in each list takes over – put Claude last to use it only
+            when your own models fail. 0 = no limit.
+          </span>
         </label>
       )}
       <button type="button" className="link" onClick={() => setAdvanced(!advanced)}>
