@@ -161,7 +161,7 @@ on the server and never sent back to your devices.
 | Task | What it does |
 | --- | --- |
 | Handwriting to text | *Convert to text*, plus automatic recognition so handwriting is searchable |
-| Clean up converted text | Optional second pass: a general model fixes misread words and tidies lists and headings |
+| Clean up converted text | Second pass: a general model fixes misread words, rejoins wrapped lines and tidies lists and headings. With no agent here, *Convert to text* uses a *Compile notes* text model that isn't also a handwriting reader |
 | Text from images | Reads text in photos, screenshots and charts so search finds them |
 | Text from PDFs | Extracts PDF text for search (Claude only) |
 | Compile notes | Turns a whole note into a clean document |

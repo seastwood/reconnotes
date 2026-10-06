@@ -164,8 +164,10 @@ describe('guarding against repetition loops', () => {
       headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ noteId: 'noteloop000000000001', drawingId: 'drawingloop0000001' }),
     })
-    expect(calls.length).toBeGreaterThan(0)
-    expect(calls.every((c) => c.prompt === 'Text Recognition:')).toBe(true)
+    // (the other agents may tidy the result afterwards; the reading itself uses GLM's own prompt)
+    const reads = calls.filter((c) => c.model === 'glm-ocr:q8_0')
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.every((c) => c.prompt === 'Text Recognition:')).toBe(true)
   })
 })
 

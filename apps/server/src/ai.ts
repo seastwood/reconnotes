@@ -131,7 +131,7 @@ export type NoteAction = keyof typeof NOTE_ACTION_PROMPTS
 const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritten notes{IMAGE}. Clean it up:
 
 - Fix obvious recognition mistakes (misread letters, words split or run together) using {SOURCE} and the context – but keep the writer's own words; don't reword, summarise or add anything.
-- Join fragments that belong on one line; keep genuinely separate lines and items separate.
+- Join fragments that belong on one line; keep genuinely separate lines and items separate. Handwriting often wraps: a line that just continues the sentence above it (often a little indented) belongs to that line or item – it is not a new bullet or sub-item.
 - Keep and improve the structure: a title/heading if the first line is one, bullet lists with the same nesting, "- [ ]" / "- [x]" checkboxes, numbered lists, tables.
 - Output only the cleaned-up Markdown: no comments about the text or image, no LaTeX.
 
@@ -394,9 +394,15 @@ export class Ai {
    * text is returned as is.
    */
   async tidy(text: string, image: Buffer | null, mime: string): Promise<string> {
-    if (!this.agents.available('format') || !text.trim()) return text
+    // no "Clean up converted text" agent: the "Compile notes" (text) models do it –
+    // they're much better at joining wrapped lines and fixing structure than OCR models
+    // (but not models that are also the handwriting readers: they'd just read it the same way again)
+    const readers = new Set(this.agents.chain('handwriting').map((a) => `${a.kind}|${a.baseUrl}|${a.model}`))
+    const notReader = (a: AgentConfig) => !readers.has(`${a.kind}|${a.baseUrl}|${a.model}`)
+    const task = this.agents.available('format') ? 'format' : this.agents.chain('compile').some(notReader) ? 'compile' : null
+    if (!task || !text.trim()) return text
     try {
-      const { result, agent } = await this.agents.run('format', (backend, agent) => {
+      const { result, agent } = await this.agents.run(task, (backend, agent) => {
         const prompt =
           FORMAT_PROMPT.replace('{IMAGE}', agent.vision && image ? ' (the original image is attached)' : '').replace(
             '{SOURCE}',
@@ -405,7 +411,7 @@ export class Ai {
         // The tidied text should be about as long as the input; leave some room for Markdown.
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
         return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
-      })
+      }, task === 'compile' ? notReader : undefined)
       const raw = unwrapModelOutput(result)
       const tidied = collapseRepeats(cleanTranscript(raw))
       log.info(`cleaned up converted text via "${agent.name}" (${text.length} → ${raw.length} chars)`)

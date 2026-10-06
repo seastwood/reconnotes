@@ -807,8 +807,13 @@ export class AgentRegistry {
    * Run a task with failover: try each agent in priority order until one
    * succeeds. Returns the result and the agent that produced it.
    */
-  async run<T>(task: AiTask, fn: (backend: Backend, agent: AgentConfig) => Promise<T>): Promise<{ result: T; agent: AgentConfig }> {
-    const chain = this.chain(task)
+  async run<T>(
+    task: AiTask,
+    fn: (backend: Backend, agent: AgentConfig) => Promise<T>,
+    /** only some of the task's agents (e.g. leave out the ones that just did the reading) */
+    only?: (agent: AgentConfig) => boolean,
+  ): Promise<{ result: T; agent: AgentConfig }> {
+    const chain = only ? this.chain(task).filter(only) : this.chain(task)
     if (!chain.length) throw new NoAgentError(task)
     const failures: string[] = []
     for (const agent of chain) {

@@ -252,6 +252,26 @@ describe('keeping recordings, files and tags through compile', () => {
   })
 })
 
+describe('cleaning up converted text', () => {
+  it('uses a text model from "Compile notes" when there is no clean-up agent, and drops leaked role names', async () => {
+    const { unwrapModelOutput } = await import('../src/text')
+    expect(unwrapModelOutput('system\n- Nearly sort all metal')).toBe('- Nearly sort all metal')
+    const reader = app.ai.agents.agents().find((a) => a.name === 'OCR')!
+    const writer = app.ai.agents.save({ name: 'Writer', kind: 'ollama', baseUrl: ollamaUrl, model: 'qwen2.5:7b' })
+    const before = app.ai.agents.settings().routing
+    app.ai.agents.updateSettings({ routing: { ...before, handwriting: [reader.id], format: [], compile: [reader.id, writer.id] } })
+    mode = 'answer'
+    requests.length = 0
+    await convert()
+    app.ai.agents.remove(writer.id)
+    app.ai.agents.updateSettings({ routing: { ...app.ai.agents.settings().routing, compile: before.compile.filter((id) => id !== writer.id) } })
+    const models = (requests as unknown as { model?: string; url?: string }[]).filter((r) => r.url !== '/api/show').map((r) => r.model)
+    // read by the OCR model, tidied by the text model – not by the reader again
+    expect(models[0]).toBe(reader.model)
+    expect(models.slice(1)).toEqual(['qwen2.5:7b'])
+  })
+})
+
 describe('compile only keeps what is in the note', () => {
   it('drops lines the model made up, and refuses a mostly made-up document', async () => {
     const { dropInvented } = await import('../src/ai')

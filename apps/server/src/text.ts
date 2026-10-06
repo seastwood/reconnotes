@@ -84,6 +84,8 @@ export function unwrapModelOutput(raw: string): string {
   if (fenced && fenced[1].trim()) s = fenced[1]
   s = s.replace(/```[a-zA-Z]*/g, '')
   s = s.replace(/^\s*(markdown|md|text)\s*\n/i, '')
+  // chat-format role names some local models leak at the start ("system", "assistant")
+  s = s.replace(/^(?:\s*(?:system|assistant|user|model)\s*:?\s*\n)+/i, '')
   return s.trim()
 }
 
