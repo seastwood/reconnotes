@@ -43,6 +43,10 @@ body,
 }
 /* The page itself never scrolls (panels scroll inside), so iOS can't push
    the toolbars out of view when the keyboard or Scribble appears. */
+/* what shows around the app: behind Safari's status bar and toolbar */
+html {
+  background: var(--bg);
+}
 html,
 body {
   overflow: hidden;

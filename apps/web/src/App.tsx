@@ -46,6 +46,15 @@ function useTheme() {
   const systemDark = useMedia('(prefers-color-scheme: dark)')
   useEffect(() => {
     document.documentElement.dataset.theme = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme
+    // Safari (and the home-screen app) colour the status bar and toolbar areas with
+    // the theme colour: follow the app's appearance, not just the phone's
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+    if (!bg) return
+    const metas = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')]
+    metas.slice(1).forEach((m) => m.remove())
+    const meta = metas[0] ?? document.head.appendChild(Object.assign(document.createElement('meta'), { name: 'theme-color' }))
+    meta.removeAttribute('media')
+    meta.content = bg
   }, [theme, systemDark])
 }
 
