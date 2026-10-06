@@ -139,6 +139,9 @@ class AnthropicBackend implements Backend {
 }
 
 /** A model answered, but with nothing usable. `details` says what it did. */
+/** The model looked and says there's no writing in the image. */
+export class NoTextError extends Error {}
+
 export class EmptyReplyError extends Error {
   constructor(
     readonly details: string,
@@ -817,6 +820,7 @@ export class AgentRegistry {
         return { result, agent }
       } catch (err) {
         if (jobSignal()?.aborted) throw jobSignal()!.reason
+        if (err instanceof NoTextError) throw err // nothing written there: another model won't find more
         const msg = describeError(err)
         failures.push(`${agent.name}: ${msg}`)
         this.status.set(agent.id, { ...this.statusOf(agent.id), lastError: msg, lastErrorAt: Date.now() })

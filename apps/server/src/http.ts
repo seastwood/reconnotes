@@ -311,7 +311,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       () => compileMarkdown(store, ai, doc),
       (r) => ({ result: { text: r.markdown.slice(0, 1500) } }),
     )
-    json(res, 200, out)
+    json(res, 200, { markdown: out.markdown, title: out.title })
   })
 
   // --- Jobs: every AI request and background step ---------------------------

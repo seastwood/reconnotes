@@ -6,7 +6,9 @@ import {
   extractNote,
   getContent,
   getNotes,
+  getDrawingMeta,
   getStrokes,
+  getTranscripts,
   noteDocName,
   noteToMarkdown,
   readNote,
@@ -195,8 +197,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   jobs.register('compile', async (job) => {
     const noteId = job.input.noteId as string
     const doc = noteDoc(noteId)
-    const { markdown, title } = await compileMarkdown(store, ai, doc)
-    // links, due dates, recordings and files come back as the real thing
+    const { markdown, title, dropped } = await compileMarkdown(store, ai, doc)
+    // links, due dates, recordings, files, pictures and drawings come back as the real thing
     const originals = new Map<string, Y.XmlElement>()
     const dues = new Map<string, Record<string, unknown>>()
     const links = new Map<string, string>()
@@ -204,7 +206,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       for (const c of p.toArray()) {
         if (!(c instanceof Y.XmlElement)) continue
         const id = c.getAttribute('attachmentId') as string | undefined
-        if ((c.nodeName === 'audio' || c.nodeName === 'file') && id) originals.set(compileMarker(c.nodeName, id), c)
+        if ((c.nodeName === 'audio' || c.nodeName === 'file' || c.nodeName === 'image') && id) originals.set(compileMarker(c.nodeName, id), c)
+        if (c.nodeName === 'drawing' && c.getAttribute('drawingId')) originals.set(compileMarker('drawing', c.getAttribute('drawingId') as string), c)
         if (c.nodeName === 'dueDate' && !dues.has(c.getAttribute('date') as string)) dues.set(c.getAttribute('date') as string, c.getAttributes())
         if (c.nodeName === 'noteLink') links.set(String(c.getAttribute('title') || 'note').trim().toLowerCase(), c.getAttribute('noteId') as string)
         walk(c)
@@ -216,8 +219,16 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       const n = readNote(m)
       if (!n.trashedAt && n.title) titles.set(n.title.trim().toLowerCase(), id)
     })
+    // drawings (and ink on pictures) live beside the content: copy their strokes over too
+    const inks = new Set<string>()
     const ctx: Partial<Ctx> = {
-      blockFor: (t) => originals.get(t)?.clone() ?? null,
+      blockFor: (t) => {
+        const el = originals.get(t)
+        if (!el) return null
+        const ink = el.getAttribute('drawingId') as string | undefined
+        if (ink) inks.add(ink)
+        return el.clone()
+      },
       dueFor: (date) => dues.get(date) ?? null,
       noteFor: (t) => links.get(t.trim().toLowerCase()) ?? titles.get(t.trim().toLowerCase()) ?? null,
     }
@@ -236,6 +247,15 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       if (frag.length) frag.delete(0, frag.length)
       const nodes = markdownToNodes(markdown, { attach: () => null, noteFor: () => null, ...ctx })
       if (nodes.length) frag.insert(0, nodes)
+      const meta = getDrawingMeta(doc)
+      for (const id of inks) {
+        const strokes = getStrokes(d, id)
+        if (strokes.length) strokes.delete(0, strokes.length)
+        strokes.push(getStrokes(doc, id).toArray().map((st) => ({ ...st, pts: [...st.pts] })))
+        if (meta.has(id)) getDrawingMeta(d).set(id, { ...meta.get(id)! })
+        const t = getTranscripts(doc).get(id)
+        if (t) getTranscripts(d).set(id, t)
+      }
     })
     const out = sync.getDoc(noteDocName(target!))
     if (out) {
@@ -245,7 +265,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       )
     }
     replaced(job)
-    return { result: { noteId: target!, sourceNoteId: noteId } }
+    // lines the model made up and the check took out, so you can see them
+    return { result: { noteId: target!, sourceNoteId: noteId, ...(dropped.length ? { removedLines: dropped.slice(0, 20) } : {}) } }
   })
 
   // background work, so everything the server does shows in the list
@@ -279,8 +300,8 @@ export async function removeJobResult(sync: SyncEngine, jobs: Jobs, job: Job) {
 }
 
 /** The note in reading order (drawings and pictures as images), compiled to Markdown by the AI. */
-export async function compileMarkdown(store: Store, ai: Ai, doc: Y.Doc): Promise<{ markdown: string; title: string }> {
-  // recordings and files go through as marker lines that become them again
+export async function compileMarkdown(store: Store, ai: Ai, doc: Y.Doc): Promise<{ markdown: string; title: string; dropped: string[] }> {
+  // recordings, files, pictures and drawings go through as marker lines that become them again
   const markers: string[] = []
   const md = noteToMarkdown(doc, {
     drawingPlaceholder: (id) => `\u0000DRAWING:${id}\u0000`,
@@ -290,6 +311,8 @@ export async function compileMarkdown(store: Store, ai: Ai, doc: Y.Doc): Promise
       return compileMarker(kind, id)
     },
   })
+    // the drawing is read again (or seen) as part of compiling: no need for its old transcript too
+    .replace(/(\u0000DRAWING:[a-z0-9]+\u0000)\n> ✍️[^\n]*(?:\n> [^\n]*)*/g, '$1')
   const parts: CompilePart[] = []
   for (const piece of md.split(/\u0000/)) {
     const m = /^(DRAWING|IMAGE):([a-z0-9]+)$/.exec(piece)
@@ -298,17 +321,20 @@ export async function compileMarkdown(store: Store, ai: Ai, doc: Y.Doc): Promise
     } else if (m[1] === 'DRAWING') {
       const strokes = getStrokes(doc, m[2]).toArray()
       const png = renderDrawingPng(strokes)
-      if (png) parts.push({ image: png, mime: 'image/png', kind: 'drawing', strokes })
+      if (png) {
+        parts.push({ image: png, mime: 'image/png', kind: 'drawing', strokes, id: m[2] })
+        markers.push(compileMarker('drawing', m[2]))
+      }
     } else {
+      markers.push(compileMarker('image', m[2]))
       const att = store.getAttachment(m[2])
       if (att && isAiImage(att.mime) && store.hasBlob(att.id)) {
-        parts.push({ image: fs.readFileSync(store.blobPath(att.id)), mime: att.mime, kind: 'photo' })
-      } else parts.push({ text: '\n[picture not available on the server yet]\n' })
+        parts.push({ image: fs.readFileSync(store.blobPath(att.id)), mime: att.mime, kind: 'photo', id: m[2] })
+      } else parts.push({ text: `\n${compileMarker('image', m[2])}\n(picture not on the server yet)\n` })
     }
   }
   const note = extractNote(doc)
   const links = [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1])
-  const markdown = keepCompileExtras(await ai.compile(parts), markers, note.tags, links)
-  return { markdown, title: note.title }
+  const { markdown, dropped } = await ai.compile(parts)
+  return { markdown: keepCompileExtras(markdown, markers, note.tags, links), title: note.title, dropped }
 }
-

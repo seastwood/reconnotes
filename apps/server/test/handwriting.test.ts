@@ -45,6 +45,8 @@ beforeAll(async () => {
         return reply('Buy milk')
       case 'empty':
         return reply('')
+      case 'no-text':
+        return reply('NO TEXT')
       case 'think-only':
         return isGenerate ? reply('') : reply('', 'I see strokes that might be letters', 40)
       case 'think-then-answer':
@@ -234,7 +236,8 @@ describe('compiling a note with pictures', () => {
     const sent = requests as unknown as { messages?: { content: string; images?: string[] }[] }[]
     const last = sent[sent.length - 1].messages![0]
     expect(last.images ?? []).toHaveLength(0) // the compile request itself is text only
-    expect(last.content).toMatch(/Meeting notes[\s\S]*\[handwritten section\][\s\S]*Buy milk[\s\S]*\[picture, transcribed\]/)
+    // instructions first, then the note between clear marks, each drawing and picture marked where it was
+    expect(last.content).toMatch(/^Below, between[\s\S]*=== NOTE ===\nMeeting notes[\s\S]*⟦DRAWING:drawinghw000000001⟧\nBuy milk[\s\S]*⟦IMAGE:attcompile000000001⟧\nBuy milk[\s\S]*=== END OF NOTE ===/)
     // the drawing and the picture were each read before that
     expect(sent.slice(0, -1).filter((r) => r.messages?.[0].images?.length).length).toBeGreaterThanOrEqual(2)
   })
@@ -246,6 +249,32 @@ describe('keeping recordings, files and tags through compile', () => {
     const md = keepCompileExtras('# Plan\n\nSee ⟦AUDIO:aaa⟧ and ⟦FILE:zzz⟧ here. ⟦AUDIO:aaa⟧\n\n#Work stuff', ['⟦AUDIO:aaa⟧', '⟦FILE:bbb⟧'], ['work', 'home'])
     expect(md).toBe('# Plan\n\nSee\n\n⟦AUDIO:aaa⟧\n\nand here. \n\n#Work stuff\n\n⟦FILE:bbb⟧\n\n#home\n')
     expect(keepCompileExtras('About [[shopping list]].', [], [], ['Shopping list', 'Budget', 'Budget'])).toBe('About [[shopping list]].\n\nLinked: [[Budget]]\n')
+  })
+})
+
+describe('compile only keeps what is in the note', () => {
+  it('drops lines the model made up, and refuses a mostly made-up document', async () => {
+    const { dropInvented } = await import('../src/ai')
+    const note = 'Groceries\nBuy milk and eggs for the weekend\nCall the plumber about the leak'
+    const out = dropInvented('# Groceries\n\n- [ ] Buy milk and eggs for the weekend\n- [ ] Schedule quarterly budget review meeting with finance team\n- [ ] Call the plumber about the leak', note)
+    expect(out.markdown).toBe('# Groceries\n\n- [ ] Buy milk and eggs for the weekend\n- [ ] Call the plumber about the leak')
+    expect(out.dropped).toEqual(['- [ ] Schedule quarterly budget review meeting with finance team'])
+    expect(() => dropInvented('# Project kickoff meeting\n\nAgenda: discuss quarterly roadmap priorities, hiring plans and marketing budget allocation. Action items: prepare slides, email stakeholders, book conference room.', note)).toThrow(/mostly not in your note/)
+  })
+
+  it("a sketch with no writing says so instead of making text up (and isn't asked twice)", async () => {
+    mode = 'no-text'
+    requests.length = 0
+    const r = await convert()
+    mode = 'answer'
+    expect(r.status).toBeGreaterThanOrEqual(400)
+    expect(r.body.error).toMatch(/No writing was found/)
+    expect(requests.filter((q) => q.url !== '/api/show')).toHaveLength(1)
+  })
+
+  it('takes out pictures and links the model made up', async () => {
+    const { keepCompileExtras } = await import('../src/ai')
+    expect(keepCompileExtras('Trip ![photo](attachment:abc) and [the sketch](sketch.png) and [site](https://x.org)\n\n⟦IMAGE:att1⟧', ['⟦IMAGE:att1⟧'], [])).toBe('Trip  and the sketch and [site](https://x.org)\n\n⟦IMAGE:att1⟧\n')
   })
 })
 

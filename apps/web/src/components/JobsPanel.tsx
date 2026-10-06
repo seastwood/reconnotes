@@ -375,6 +375,16 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
               </button>
             </div>
           )}
+          {Array.isArray(j.result?.removedLines) && (j.result.removedLines as string[]).length > 0 && (
+            <div className="job-result">
+              <div className="muted">
+                {(j.result.removedLines as string[]).length === 1
+                  ? 'Left out a line the AI wrote that isn’t in your note:'
+                  : `Left out ${(j.result.removedLines as string[]).length} lines the AI wrote that aren’t in your note:`}
+              </div>
+              <pre>{(j.result.removedLines as string[]).join('\n')}</pre>
+            </div>
+          )}
           {text && j.status === 'done' && (
             <div className="job-result">
               <pre>{text}</pre>

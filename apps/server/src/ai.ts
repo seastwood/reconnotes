@@ -2,7 +2,7 @@ import { Resvg } from '@resvg/resvg-js'
 import { extraInstructions, jobSignal, withExtra } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
@@ -41,7 +41,8 @@ const HANDWRITING_PROMPT = `Transcribe the handwriting in this image.
 - Preserve the writer's words exactly; fix only obvious letter-recognition ambiguity.
 - Use Markdown for structure the writer clearly intended: headings for underlined or boxed titles, "- " for bullets, "- [ ]" / "- [x]" for checkboxes, numbered lists, and tables.
 - If a word is illegible write [illegible].
-- Output ONLY the transcribed text. Do not describe the image, the handwriting style or the layout, do not explain, do not use LaTeX or $ signs, and do not repeat yourself.`
+- If there is no writing at all (only a sketch, shapes or scribbles), output exactly: NO TEXT
+- Output ONLY the transcribed text. Do not describe the image, the handwriting style or the layout, do not explain, do not use LaTeX or $ signs, do not make up text that isn't there, and do not repeat yourself.`
 
 /** The word HELLO in simple handwritten strokes, for testing an agent. */
 export function sampleHandwritingPng(): Buffer {
@@ -88,7 +89,8 @@ const PHOTO_PROMPT = `Transcribe all the text in this image – handwritten and 
 - Use Markdown for structure that is clearly intended: headings for titles, "- " for bullets, "- [ ]" / "- [x]" for checkboxes, numbered lists, and tables.
 - Ignore the background (paper texture, lines, shadows, the desk) and anything cut off at the edges.
 - If a word is illegible write [illegible].
-- Output ONLY the transcribed text. Do not describe the image, do not explain, and do not use LaTeX or $ signs.`
+- If the image has no text at all (a photo of a place, a person or an object), output exactly: NO TEXT
+- Output ONLY the transcribed text. Do not describe the image, do not explain, do not make up text that isn't there, and do not use LaTeX or $ signs.`
 
 const SHORT_PHOTO_PROMPT = 'Transcribe all the text in this image. Output only the text.'
 
@@ -143,15 +145,22 @@ const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce t
 
 Output only that text, with no preamble.`
 
-const COMPILE_PROMPT = `You will receive a personal note made of typed text, images of handwritten sections and attached pictures such as photos of paper notes or screenshots (in reading order). Compile it into one clean, well-structured Markdown document.
-
-- Keep all information: every fact, number, name, task and idea from both the typed and handwritten parts.
-- Transcribe handwriting faithfully and merge it into the right place in the flow, including text written or printed in attached pictures.
-- Organise with headings, bullet lists, checklists ("- [ ]" / "- [x]") and tables where it helps; fix spelling and obvious grammar slips.
-- Describe diagrams or sketches briefly in square brackets.
-- Lines like ⟦AUDIO:…⟧ or ⟦FILE:…⟧ are attached recordings and files: copy each one exactly, on its own line, where it belongs in the document.
+const COMPILE_RULES = `- Use ONLY what is in the note. Never add meetings, tasks, to-dos, dates, names, numbers or ideas that are not in it – if the note is short, the document is short.
+- Keep all of its information: every fact, number, name, task and idea.
+- Organise it with headings, bullet lists, checklists ("- [ ]" / "- [x]") and tables only where the note's own content fits them; only things written as tasks in the note become checklist items. Fix spelling and obvious grammar slips.
+- Lines like ⟦DRAWING:…⟧ and ⟦IMAGE:…⟧ are the original handwritten sections and pictures, and ⟦AUDIO:…⟧ / ⟦FILE:…⟧ are recordings and files. Copy each of these lines exactly, on its own line, where it belongs (a drawing or picture just before the text that came from it). Don't write links or image tags for them yourself.
 - Keep every #tag (such as #work), every link to another note (such as [[Shopping list]]) and every due date (such as !2026-10-14) exactly as written, next to the text they belong to.
-- Do not add facts, commentary or a preamble. Output only the Markdown document.`
+- Do not add commentary, a preamble or a closing remark. Output only the Markdown document.`
+
+/** Cloud models with vision see the drawings and pictures themselves. */
+const COMPILE_PROMPT = `You will receive a personal note made of typed text, images of handwritten sections and attached pictures such as photos of paper notes or screenshots (in reading order). Compile it into one clean, well-structured Markdown document. Transcribe handwriting and text in pictures faithfully and merge it into the right place in the flow; describe a sketch in a few words in square brackets.
+
+${COMPILE_RULES}`
+
+/** Other models get the note as text, with the handwriting and pictures already read. */
+const COMPILE_TEXT_PROMPT = `Below, between the lines "=== NOTE ===" and "=== END OF NOTE ===", is a personal note. Its handwritten sections and pictures were read by OCR: the text under a ⟦DRAWING:…⟧ line came from that handwriting, the text under an ⟦IMAGE:…⟧ line from that picture. Rewrite the note as one clean, well-structured Markdown document.
+
+${COMPILE_RULES}`
 
 /**
  * The AI features, each run through the configured agents for that task with
@@ -271,6 +280,12 @@ export class Ai {
         const raw = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], maxTokens)
         const text = opts.line ? cleanOcrLine(raw) : cleanOcrText(raw)
         if (text.length < raw.length) log.info(`"${agent.name}" repeated itself; collapsed ${raw.length} → ${text.length} chars`)
+        // the model says there's nothing written here: don't ask again (a second try tends to invent something)
+        if (/^\W*no text\W*$/i.test(text)) {
+          log.info(`"${agent.name}" found no text in the image`)
+          if (opts.requireText) throw new NoTextError(opts.photo ? 'No text was found in this picture.' : 'No writing was found in this drawing.')
+          return ''
+        }
         log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
         if (text.trim()) return text
         empties.push(`prompt ${i + 1}: empty reply`)
@@ -439,7 +454,7 @@ export class Ai {
    * Compile a note into a clean document. `parts` is the note in reading
    * order: typed Markdown and rendered handwriting images interleaved.
    */
-  async compile(parts: CompilePart[]): Promise<string> {
+  async compile(parts: CompilePart[]): Promise<{ markdown: string; dropped: string[] }> {
     // For agents that can't read images, transcribe drawings and pictures
     // first (once, even if we fail over between several such agents).
     let transcribed: Promise<string> | null = null
@@ -448,44 +463,91 @@ export class Ai {
         let text = ''
         for (const p of parts) {
           if ('text' in p) text += p.text
-          else if (p.kind === 'drawing')
-            text += '\n[handwritten section]\n' + (await this.transcribeDrawing(p.strokes)).text + '\n[end handwritten section]\n'
-          else {
-            const t = await this.transcribePhoto(p.image, p.mime, { format: false }).then((r) => r.text, () => '(could not be read)')
-            text += '\n[picture, transcribed]\n' + t + '\n[end picture]\n'
+          else if (p.kind === 'drawing') {
+            const t = (await this.transcribeDrawing(p.strokes)).text.trim()
+            text += `\n${compileMarker('drawing', p.id)}\n${t || '(a sketch with no writing)'}\n\n`
+          } else {
+            const t = await this.transcribePhoto(p.image, p.mime, { format: false }).then((r) => r.text.trim(), () => '')
+            text += `\n${compileMarker('image', p.id)}\n${t || '(a picture with no text)'}\n\n`
           }
         }
         return text
       })())
 
+    let checked = false
     const { result } = await this.agents.run('compile', async (backend, agent) => {
-      const input: Part[] = []
       // Cloud models read the drawings and pictures themselves. Local (Ollama)
       // models get the handwriting read first and compile plain text: small
       // models do much better with text, and a note's worth of images at once
       // overflows a home graphics card.
       if (agent.vision && agent.kind !== 'ollama') {
+        checked = false
+        const input: Part[] = [{ text: withExtra(COMPILE_PROMPT) }, { text: '=== NOTE ===' }]
         for (const p of parts) {
           if ('text' in p) {
             if (p.text.trim()) input.push({ text: p.text })
-          } else if (p.kind === 'drawing') input.push({ image: p.image, mime: p.mime })
+          } else if (p.kind === 'drawing') input.push({ text: compileMarker('drawing', p.id) }, { image: p.image, mime: p.mime })
           else {
             const fit = fitForAi(p.image, p.mime)
-            input.push({ text: '[picture attached to the note:]' }, { image: fit.data, mime: fit.mime })
+            input.push({ text: compileMarker('image', p.id) }, { image: fit.data, mime: fit.mime })
           }
         }
-      } else input.push({ text: await asText() })
-      input.push({ text: withExtra(COMPILE_PROMPT) })
-      return backend.generate(input, 32000)
+        input.push({ text: '=== END OF NOTE ===' })
+        return backend.generate(input, 32000)
+      }
+      // instructions first, then the note clearly marked, then a reminder: small
+      // models otherwise drift into writing a "typical" note of their own
+      checked = true
+      const note = await asText()
+      return backend.generate(
+        [{ text: `${withExtra(COMPILE_TEXT_PROMPT)}\n\n=== NOTE ===\n${note.trim()}\n=== END OF NOTE ===\n\nNow write the compiled document, using only what is in the note above.` }],
+        32000,
+      )
     })
-    return result
+    if (!checked) return { markdown: result, dropped: [] }
+    // drop lines made of words that appear nowhere in the note (made up by the model)
+    const source = await asText()
+    const { markdown, dropped } = dropInvented(result, source)
+    if (dropped.length) log.warn(`compile: removed ${dropped.length} line(s) that weren't in the note: ${dropped.map((d) => JSON.stringify(d.slice(0, 60))).join(', ')}`)
+    return { markdown, dropped }
   }
 }
 
-const MARKER = /[ \t]*⟦(?:AUDIO|FILE):[a-z0-9]+⟧[ \t]*/g
+const STOP = new Set(
+  'the and for are but not you all any can had her was one our out day get has him his how man new now old see two way who boy did its let put say she too use that with have this will your from they know want been good much some time very when come here just like long make many more only over such take than them well were what into also then there their about would could should which these those after before other being under while where each'.split(' '),
+)
+const words = (s: string) =>
+  (s.toLowerCase().normalize('NFKD').match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((w) => !STOP.has(w)).map((w) => w.replace(/(ing|ed|es|s)$/, ''))
+
+/**
+ * Remove lines of a compiled document that the note doesn't support: a
+ * line of five or more words, most of which appear nowhere in the note, was
+ * made up (headings and short lines may add a few words of their own).
+ * Throws when most of the document is made up.
+ */
+export function dropInvented(markdown: string, source: string): { markdown: string; dropped: string[] } {
+  const known = new Set(words(source))
+  const out: string[] = []
+  const dropped: string[] = []
+  let total = 0
+  let unknownTotal = 0
+  for (const line of markdown.split('\n')) {
+    const w = words(line.replace(/⟦[^⟧]*⟧/g, '').replace(/\]\([^)]*\)/g, ']'))
+    const unknown = w.filter((x) => !known.has(x)).length
+    total += w.length
+    unknownTotal += unknown
+    if (w.length >= 5 && unknown / w.length > 0.6) dropped.push(line.trim())
+    else out.push(line)
+  }
+  if (total >= 20 && unknownTotal / total > 0.6)
+    throw new Error('The model wrote a document that is mostly not in your note, so it wasn’t saved. Try again, or use a bigger model for “Compile notes” in Settings › AI.')
+  return { markdown: out.join('\n'), dropped }
+}
+
+const MARKER = /[ \t]*⟦(?:AUDIO|FILE|IMAGE|DRAWING):[a-z0-9]+⟧[ \t]*/g
 
 /** The line that stands for a recording or file in compile input and output. */
-export const compileMarker = (kind: 'audio' | 'file', id: string) => `⟦${kind.toUpperCase()}:${id}⟧`
+export const compileMarker = (kind: 'audio' | 'file' | 'image' | 'drawing', id: string) => `⟦${kind.toUpperCase()}:${id}⟧`
 
 /**
  * Make sure a compiled document still has the note's recordings, files and
@@ -495,6 +557,10 @@ export const compileMarker = (kind: 'audio' | 'file', id: string) => `⟦${kind.
 export function keepCompileExtras(markdown: string, markers: string[], tags: string[], links: string[] = []): string {
   const wanted = new Set(markers)
   const seen = new Set<string>()
+  // pictures and links the model made up point nowhere: the originals come back through their markers
+  markdown = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\((?!https?:|mailto:)[^)]*\)/g, '$1')
   let md = markdown.replace(MARKER, (found) => {
     const m = found.trim()
     if (!wanted.has(m) || seen.has(m)) return ' '
@@ -516,5 +582,5 @@ export function keepCompileExtras(markdown: string, markers: string[], tags: str
 /** The note in reading order: text, drawings (rendered) and pictures. */
 export type CompilePart =
   | { text: string }
-  | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[] }
-  | { image: Buffer; mime: string; kind: 'photo' }
+  | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[]; id: string }
+  | { image: Buffer; mime: string; kind: 'photo'; id: string }

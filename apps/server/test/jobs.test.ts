@@ -178,6 +178,9 @@ describe('jobs', () => {
     const compiled = job.result!.noteId as string
     expect(compiled).not.toBe(NOTE)
     expect(blocks(compiled)).toContain('audio:')
+    // the handwriting itself comes along, ink and all
+    expect(blocks(compiled)).toContain('drawing:')
+    expect(getStrokes(app.sync.getDoc(noteDocName(compiled))!, DRAWING).length).toBe(1)
     expect(blocks(compiled).join('\n')).toMatch(/#home/)
     expect(readNote(getNotes(app.sync.getDoc(WORKSPACE_DOC)!).get(compiled)!).trashedAt).toBeFalsy()
     const redo = await waitFor((await api('POST', `/api/jobs/${job.id}/redo`, { prompt: 'LOUDER please' })).body.job.id)
