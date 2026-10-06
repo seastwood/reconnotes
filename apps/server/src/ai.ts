@@ -1,6 +1,7 @@
 import { Resvg } from '@resvg/resvg-js'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
 import type { Store } from './store'
+import { Vocabulary } from './vocabulary'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import { EmptyReplyError, NoTextError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
@@ -177,6 +178,16 @@ export class Ai {
     private store?: Store,
   ) {
     store?.db.exec('CREATE TABLE IF NOT EXISTS ai_readings (key TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL)')
+    this.vocabulary = store ? new Vocabulary(store) : null
+  }
+
+  /** your names and terms, given to every reading and clean-up */
+  readonly vocabulary: Vocabulary | null
+
+  /** The prompt with your words added (when you have any). */
+  private withVocab(prompt: string): string {
+    const v = this.vocabulary?.hint()
+    return v ? `${prompt}\n\n${v}` : prompt
   }
 
   /** A saved reading of exactly this image by exactly this model and prompt. */
@@ -284,9 +295,12 @@ export class Ai {
     const extra = !opts.line && !this.agents.available('format') ? extraInstructions() : ''
     const prompts = [
       ...new Set([
-        (agent.prompt.trim() ||
-          knownOcrPrompt(agent.model) ||
-          (opts.photo ? PHOTO_PROMPT : opts.line ? LINE_PROMPT : HANDWRITING_PROMPT)) + (extra ? `\n\nAdditional instructions from the user: ${extra}` : ''),
+        // (OCR-only models get their fixed prompt as is; single lines stay short)
+        (knownOcrPrompt(agent.model) && !agent.prompt.trim()
+          ? knownOcrPrompt(agent.model)!
+          : opts.line
+            ? agent.prompt.trim() || LINE_PROMPT
+            : this.withVocab(agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : HANDWRITING_PROMPT))) + (extra ? `\n\nAdditional instructions from the user: ${extra}` : ''),
         opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
       ]),
     ]
@@ -334,7 +348,7 @@ export class Ai {
    * A photo or screenshot (e.g. of handwritten notes) → Markdown, using the
    * handwriting agents in priority order, then the clean-up agents.
    */
-  async transcribePhoto(data: Buffer, mime: string, opts: { format?: boolean } = {}): Promise<{ text: string; agent: string }> {
+  async transcribePhoto(data: Buffer, mime: string, opts: { format?: boolean } = {}): Promise<{ text: string; agent: string; raw: string }> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)
     // Find the written lines once (only needed for line-by-line agents).
@@ -354,7 +368,7 @@ export class Ai {
       return this.transcribeWith(backend, agent, fit.data, { requireText: true, mime: fit.mime, photo: true })
     })
     const text = opts.format === false ? result : await this.tidy(result, fit.data, fit.mime)
-    return { text, agent: agent.name }
+    return { text, agent: agent.name, raw: result }
   }
 
   /**
@@ -393,7 +407,7 @@ export class Ai {
   async transcribeDrawing(
     strokes: Stroke[],
     opts: { requireText?: boolean; format?: boolean } = {},
-  ): Promise<{ text: string; agent: string | null }> {
+  ): Promise<{ text: string; agent: string | null; raw?: string }> {
     const page = renderDrawingPng(strokes)
     if (!page) return { text: '', agent: null }
     const lines = segmentLines(strokes)
@@ -417,7 +431,7 @@ export class Ai {
       return md
     })
     const text = opts.format && result.trim() ? await this.tidy(result, page, 'image/png') : result
-    return { text, agent: agent.name }
+    return { text, agent: agent.name, raw: result }
   }
 
   /**
@@ -447,7 +461,7 @@ export class Ai {
           FORMAT_PROMPT.replace('{IMAGE}', agent.vision && image ? ' (the original image is attached)' : '').replace(
             '{SOURCE}',
             agent.vision && image ? 'the image' : 'common sense',
-          ) + (extraInstructions() ? `(Additional instructions from the user – follow these: ${extraInstructions()})\n\n` : '') + text
+          ) + (this.vocabulary?.hint() ? `(${this.vocabulary.hint()})\n\n` : '') + (extraInstructions() ? `(Additional instructions from the user – follow these: ${extraInstructions()})\n\n` : '') + text
         // The tidied text should be about as long as the input; leave some room for Markdown.
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
         return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
@@ -540,7 +554,7 @@ export class Ai {
       // overflows a home graphics card.
       if (agent.vision && agent.kind !== 'ollama') {
         checked = false
-        const input: Part[] = [{ text: withExtra(COMPILE_PROMPT) }, { text: '=== NOTE ===' }]
+        const input: Part[] = [{ text: this.withVocab(withExtra(COMPILE_PROMPT)) }, { text: '=== NOTE ===' }]
         for (const p of parts) {
           if ('text' in p) {
             if (p.text.trim()) input.push({ text: p.text })
@@ -558,7 +572,7 @@ export class Ai {
       checked = true
       const note = await asText()
       return backend.generate(
-        [{ text: `${withExtra(COMPILE_TEXT_PROMPT)}\n\n=== NOTE ===\n${note.trim()}\n=== END OF NOTE ===\n\nNow write the compiled document, using only what is in the note above.` }],
+        [{ text: `${this.withVocab(withExtra(COMPILE_TEXT_PROMPT))}\n\n=== NOTE ===\n${note.trim()}\n=== END OF NOTE ===\n\nNow write the compiled document, using only what is in the note above.` }],
         32000,
       )
     })

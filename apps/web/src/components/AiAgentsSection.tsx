@@ -6,6 +6,8 @@ import {
   KIND_LABELS,
   TASK_HELP,
   rereadAll,
+  vocabApi,
+  type Vocab,
   agentsApi,
   type Agent,
   type AgentInput,
@@ -237,6 +239,7 @@ export function AiAgentsSection() {
             Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
           </label>
           <RereadButton />
+          <VocabularySection />
         </>
       )}
     </div>
@@ -640,6 +643,54 @@ function RereadButton() {
         Re-read all handwriting and pictures for search
       </button>
       <p className="hint">{msg ?? 'After switching to a better model: searchable text is refreshed with the current agents. Your notes aren’t changed.'}</p>
+    </div>
+  )
+}
+
+/** Names and terms in your notes, so the AI spells them right – plus the corrections it learned from you. */
+function VocabularySection() {
+  const [v, setV] = useState<Vocab | null>(null)
+  const [text, setText] = useState('')
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    void vocabApi.get().then((r) => {
+      setV(r)
+      setText(r.words.join(', '))
+    }).catch(() => {})
+  }, [])
+  if (!v) return null
+  const save = () =>
+    void vocabApi.setWords(text.split(/[,\n]/)).then((r) => {
+      setV(r)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1500)
+    })
+  return (
+    <div className="vocab">
+      <h3>Your words</h3>
+      <p className="hint">Names and terms that come up in your notes. Every handwriting reading and clean-up is told to spell them like this.</p>
+      <textarea rows={3} value={text} placeholder="e.g. Klai, Doug, Sophie, Lieutenant, GitHub" onChange={(e) => setText(e.target.value)} onBlur={save} />
+      <div className="row">
+        <button onClick={save}>{saved ? 'Saved' : 'Save'}</button>
+      </div>
+      {v.learned.length > 0 && (
+        <>
+          <p className="hint">Learned from your corrections – the AI is told about these too:</p>
+          <ul className="learned">
+            {v.learned.map((l) => (
+              <li key={l.from + l.to}>
+                <span>
+                  <s>{l.from}</s> → <b>{l.to}</b>
+                  {l.count > 1 ? ` (${l.count}×)` : ''}
+                </span>
+                <button className="icon" aria-label="Forget this correction" title="Forget" onClick={() => void vocabApi.forget(l.from, l.to).then(setV)}>
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   )
 }

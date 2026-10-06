@@ -253,9 +253,12 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
     // [[Note title]] / [[Note|label]] links between notes
     // and !due dates, when the caller knows them
     let last = 0
-    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]|!(\d{4}-\d{2}-\d{2}[^\s.,;:)]*)/g)) {
-      let node: Y.XmlElement | null = null
-      if (match[3] !== undefined) {
+    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]|!(\d{4}-\d{2}-\d{2}[^\s.,;:)]*)|⸢([^⸣\n]{1,60})⸣/g)) {
+      let node: Y.XmlElement | Y.XmlText | null = null
+      if (match[4] !== undefined) {
+        // a word the AI guessed: shown with a dotted underline in the note
+        node = text(match[4], { ...m, uncertain: {} })
+      } else if (match[3] !== undefined) {
         const attrs = ctx.dueFor?.(match[3])
         if (attrs) node = el('dueDate', { ...attrs, id: newId() })
       } else {
@@ -264,7 +267,7 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
       }
       if (!node) continue
       if (match.index! > last) out.push(text(t.slice(last, match.index), m))
-      out.push(node)
+      out.push(node as Inline)
       last = match.index! + match[0].length
     }
     if (last < t.length) out.push(text(t.slice(last), m))

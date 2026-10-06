@@ -4,6 +4,7 @@ import * as Y from 'yjs'
 import {
   WORKSPACE_DOC,
   extractNote,
+  getContent,
   getStrokes,
   getTranscripts,
   inkHash,
@@ -21,6 +22,7 @@ import { maybeSnapshot } from './versions'
 import type { Devices } from './devices'
 import type { Jobs } from './jobs'
 import type { MeaningIndex } from './semantic'
+import { corrections } from './vocabulary'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -148,6 +150,36 @@ export class SyncEngine {
       for (const drawingId of ex.drawings) this.maybeScheduleHandwriting(noteId, drawingId, doc)
     }
     this.scheduleEmbedding(noteId)
+    this.learnFromCorrections(noteId, doc)
+  }
+
+  /**
+   * Text an AI job wrote into the note that you have since corrected: each
+   * misread word you fixed ("Leutenant" → "Lieutenant") is remembered, so the
+   * AI gets it right next time (see vocabulary.ts).
+   */
+  private learnFromCorrections(noteId: string, doc: Y.Doc) {
+    const vocab = this.ai.vocabulary
+    if (!vocab || !this.jobs) return
+    const byJob = new Map<string, string[]>()
+    for (const el of getContent(doc).toArray()) {
+      if (!(el instanceof Y.XmlElement)) continue
+      const job = el.getAttribute('job') as string | undefined
+      if (job) byJob.set(job, [...(byJob.get(job) ?? []), plainText(el)])
+    }
+    for (const [jobId, parts] of byJob) {
+      const job = this.jobs.get(jobId)
+      const before = typeof job?.result?.text === 'string' ? job.result.text : ''
+      if (!job || job.status !== 'done' || !/^convert-|^transcribe$/.test(job.kind) || !before || before.endsWith('…')) continue
+      const now = parts.join('\n')
+      const key = crypto.createHash('sha1').update(now).digest('hex')
+      if (job.result?.learned === key) continue
+      for (const c of corrections(before, now)) {
+        vocab.learn(c.from, c.to)
+        log.info(`learned a correction: "${c.from}" → "${c.to}"`)
+      }
+      this.jobs.setResult(jobId, { ...job.result, learned: key })
+    }
   }
 
   /** Update the note's search-by-meaning vectors once it has been quiet for a moment. */
@@ -210,7 +242,7 @@ export class SyncEngine {
   }
 
   /** Recognise handwriting in a drawing and store it as the drawing's transcript. */
-  async recogniseDrawing(noteId: string, drawingId: string, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string | null }> {
+  async recogniseDrawing(noteId: string, drawingId: string, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string | null; raw?: string }> {
     const doc = this.getDoc(noteDocName(noteId))
     if (!doc) throw new Error('note not found')
     const strokes = getStrokes(doc, drawingId).toArray()
@@ -218,7 +250,7 @@ export class SyncEngine {
     if (!renderDrawingPng(strokes) && opts.requireText) throw new EmptyDrawingError()
     // An explicit "Convert to text" also gets the clean-up pass; background
     // recognition (for search) doesn't need it.
-    const { text, agent } = await this.ai.transcribeDrawing(strokes, { requireText: opts.requireText, format: opts.requireText })
+    const { text, agent, raw } = await this.ai.transcribeDrawing(strokes, { requireText: opts.requireText, format: opts.requireText })
     this.store.setDrawingHash(noteId, drawingId, hash)
     await this.change(noteDocName(noteId), (d) => {
       const tr = getTranscripts(d)
@@ -226,7 +258,7 @@ export class SyncEngine {
       else tr.delete(drawingId)
     })
     log.info(`recognised handwriting in ${noteId}/${drawingId} (${text.length} chars)`)
-    return { text, agent }
+    return { text, agent, raw }
   }
 
   /** Live (non-trashed) note metadata, used to filter search results. */
@@ -243,6 +275,15 @@ export class SyncEngine {
     this.hocuspocus.flushPendingStores()
     this.hocuspocus.closeConnections()
   }
+}
+
+/** The text of a block, without formatting. */
+function plainText(el: Y.XmlElement | Y.XmlText): string {
+  if (el instanceof Y.XmlText) return (el.toDelta() as { insert: unknown }[]).map((d) => (typeof d.insert === 'string' ? d.insert : '')).join('')
+  return el
+    .toArray()
+    .map((c) => (c instanceof Y.XmlElement || c instanceof Y.XmlText ? plainText(c) : ''))
+    .join(el.nodeName === 'paragraph' || el.nodeName === 'heading' ? '' : '\n')
 }
 
 export class EmptyDrawingError extends Error {

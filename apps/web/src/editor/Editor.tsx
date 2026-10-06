@@ -7,6 +7,7 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { JobTag } from './jobTag'
+import { Uncertain } from './uncertain'
 import { ChecklistClipboard } from './checklistCopy'
 import { BlockClipboard } from './blockClipboard'
 import type * as Y from 'yjs'
@@ -98,6 +99,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         TaskList,
         TaskItem.configure({ nested: true }),
         JobTag,
+        Uncertain,
         ChecklistClipboard,
         BlockClipboard.configure({ doc }),
         TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),

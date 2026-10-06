@@ -1,0 +1,126 @@
+import type { Store } from './store'
+import { levenshtein } from './store'
+
+/**
+ * Your words
+ * ==========
+ *
+ * Names and terms that appear in your notes (Klai, Doug, Lieutenant…) are
+ * given to every handwriting reading and clean-up, so they come out right.
+ * The list grows by itself: when you correct a word in converted text
+ * ("Leutenant" → "Lieutenant"), the correction is remembered and passed on
+ * too ("often misread: Leutenant → Lieutenant").
+ */
+
+export interface Learned {
+  from: string
+  to: string
+  count: number
+  at: number
+}
+
+interface Saved {
+  words: string[]
+  learned: Learned[]
+}
+
+const KEY = 'vocabulary'
+const MAX_LEARNED = 200
+
+export class Vocabulary {
+  constructor(private store: Store) {}
+
+  private load(): Saved {
+    const s = this.store.getSetting<Partial<Saved>>(KEY) ?? {}
+    return { words: s.words ?? [], learned: s.learned ?? [] }
+  }
+
+  get(): Saved {
+    return this.load()
+  }
+
+  setWords(words: string[]) {
+    const clean = [...new Set(words.map((w) => w.trim()).filter((w) => w && w.length <= 60))].slice(0, 500)
+    this.store.setSetting(KEY, { ...this.load(), words: clean })
+  }
+
+  forget(from: string, to: string) {
+    const s = this.load()
+    this.store.setSetting(KEY, { ...s, learned: s.learned.filter((l) => !(l.from === from && l.to === to)) })
+  }
+
+  /** Remember that the AI read `from` where you meant `to`. */
+  learn(from: string, to: string) {
+    const s = this.load()
+    const hit = s.learned.find((l) => l.from.toLowerCase() === from.toLowerCase() && l.to === to)
+    if (hit) {
+      hit.count++
+      hit.at = Date.now()
+    } else s.learned.push({ from, to, count: 1, at: Date.now() })
+    s.learned.sort((a, b) => b.at - a.at)
+    this.store.setSetting(KEY, { ...s, learned: s.learned.slice(0, MAX_LEARNED) })
+  }
+
+  /** The words to tell the AI about ('' when there are none). */
+  hint(): string {
+    const s = this.load()
+    const words = [...new Set([...s.words, ...s.learned.map((l) => l.to)])].slice(0, 150)
+    const misreads = s.learned.slice(0, 40).map((l) => `${l.from} → ${l.to}`)
+    const parts: string[] = []
+    if (words.length) parts.push(`Names and words that appear in these notes (spell them like this): ${words.join(', ')}.`)
+    if (misreads.length) parts.push(`Words that have been misread before: ${misreads.join('; ')}.`)
+    return parts.join('\n')
+  }
+}
+
+const tokens = (s: string) => s.match(/[\p{L}\p{N}'’-]+/gu) ?? []
+const isWord = (s: string) => /\p{L}/u.test(s) && s.length >= 3
+
+/**
+ * Corrections between what the AI wrote and what the text says now: a word
+ * (or two) replaced by a similar-looking word (or two). Rewording – a word
+ * swapped for a different one – isn't a misreading and is ignored.
+ */
+export function corrections(before: string, after: string): { from: string; to: string }[] {
+  const a = tokens(before)
+  const b = tokens(after)
+  if (!a.length || !b.length || a.length > 2000 || b.length > 2000) return []
+  // longest common subsequence of words
+  const n = a.length
+  const m = b.length
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i].toLowerCase() === b[j].toLowerCase() ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+  const out: { from: string; to: string }[] = []
+  let i = 0
+  let j = 0
+  const flush = (oldWords: string[], newWords: string[]) => {
+    if (!oldWords.length || !newWords.length || oldWords.length > 2 || newWords.length > 2) return
+    const from = oldWords.join(' ')
+    const to = newWords.join(' ')
+    if (!newWords.every(isWord) || from.toLowerCase() === to.toLowerCase()) return
+    const d = levenshtein(from.toLowerCase().replace(/\s/g, ''), to.toLowerCase().replace(/\s/g, ''))
+    if (d <= Math.max(2, Math.floor(to.length / 3))) out.push({ from, to })
+  }
+  let oldRun: string[] = []
+  let newRun: string[] = []
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i].toLowerCase() === b[j].toLowerCase()) {
+      flush(oldRun, newRun)
+      oldRun = []
+      newRun = []
+      i++
+      j++
+    } else if (j < m && (i === n || dp[i][j + 1] >= dp[i + 1][j])) newRun.push(b[j++])
+    else oldRun.push(a[i++])
+  }
+  flush(oldRun, newRun)
+  return out
+}
+
+/** Words the clean-up pass changed from what the reader saw: worth a second look. */
+export function guessedWords(raw: string, tidied: string): Set<string> {
+  const seen = new Set(tokens(raw).map((t) => t.toLowerCase()))
+  const out = new Set<string>()
+  for (const t of tokens(tidied)) if (isWord(t) && !seen.has(t.toLowerCase())) out.add(t)
+  return out
+}

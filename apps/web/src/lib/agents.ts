@@ -107,6 +107,16 @@ export const TASK_HELP: Record<AiTask, string> = {
     'Finds notes by meaning, not just matching words (“safety equipment” finds “safety glasses”), and helps “Ask your notes” find the right notes. Needs an embedding model, e.g. nomic-embed-text in Ollama (ollama pull nomic-embed-text – about 300 MB, fits beside your other models). Leave empty for word search only.',
 }
 
+export interface Vocab {
+  words: string[]
+  learned: { from: string; to: string; count: number; at: number }[]
+}
+export const vocabApi = {
+  get: () => call<Vocab>('GET', '/api/ai/vocabulary'),
+  setWords: (words: string[]) => call<Vocab>('PUT', '/api/ai/vocabulary', { words }),
+  forget: (from: string, to: string) => call<Vocab>('POST', '/api/ai/vocabulary/forget', { from, to }),
+}
+
 /** Read all handwriting and pictures again for search (after changing models). */
 export const rereadAll = () => call<{ drawings: number; pictures: number }>('POST', '/api/ai/reread')
 

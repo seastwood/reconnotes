@@ -23,6 +23,7 @@ import { askNotes } from './ask'
 import { processAttachment } from './attachments'
 import type { Job, Jobs } from './jobs'
 import type { AiTask } from './agents'
+import { guessedWords } from './vocabulary'
 import { markdownToNodes, type Ctx } from './importNotes'
 
 /**
@@ -97,6 +98,22 @@ async function writeResult(sync: SyncEngine, noteId: string, jobId: string, mark
   })
 }
 
+/**
+ * Mark the words the clean-up pass changed from what the reader saw (⸢word⸣):
+ * the note shows them with a dotted underline, worth a second look.
+ */
+function markGuesses(text: string, raw: string | undefined): string {
+  if (!raw || raw === text) return text
+  const guessed = guessedWords(raw, text)
+  if (!guessed.size || guessed.size > 25) return text // a different reading altogether: don't flag everything
+  let out = text
+  for (const w of guessed) {
+    const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}⸢])${esc}(?![\\p{L}\\p{N}⸣])`, 'gu'), `⸢${w}⸣`)
+  }
+  return out
+}
+
 const preview = (text: string) => (text.length > 1500 ? text.slice(0, 1500) + '…' : text)
 
 /** Which AI task a kind of job starts with (for running jobs on an already-loaded model first). */
@@ -141,9 +158,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   jobs.register('convert-drawing', async (job) => {
     const { noteId, drawingId } = job.input as { noteId: string; drawingId: string }
     noteDoc(noteId)
-    const { text, agent } = await sync.recogniseDrawing(noteId, drawingId, { requireText: true })
+    const { text, agent, raw } = await sync.recogniseDrawing(noteId, drawingId, { requireText: true })
     if (!text.trim()) throw new Error('No handwriting was recognised in this drawing.')
-    await writeResult(sync, noteId, job.id, text, { after: (el) => el.nodeName === 'drawing' && el.getAttribute('drawingId') === drawingId }, replaced(job))
+    await writeResult(sync, noteId, job.id, markGuesses(text, raw), { after: (el) => el.nodeName === 'drawing' && el.getAttribute('drawingId') === drawingId }, replaced(job))
     return { result: { noteId, text: preview(text) }, agent }
   })
 
@@ -167,16 +184,19 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const earlier = !job.input.replace && !job.prompt && att?.text_status === 'done' ? Ai.searchTextAsTranscript(att.text ?? '') : ''
     let text: string
     let agent: string
+    let raw: string
     if (earlier) {
       text = await ai.tidy(earlier, isAiImage(type) ? data : null, isAiImage(type) ? type : 'image/png')
       agent = 'Read when the picture was added, then tidied'
+      raw = earlier
     } else {
       const r = await ai.transcribePhoto(data, type)
       text = r.text
       agent = r.agent
+      raw = r.raw
     }
     if (!text.trim()) throw new Error('No text was found in this picture.')
-    await writeResult(sync, noteId, job.id, text, { after: (el) => el.nodeName === 'image' && el.getAttribute('attachmentId') === attachmentId }, replaced(job))
+    await writeResult(sync, noteId, job.id, markGuesses(text, raw), { after: (el) => el.nodeName === 'image' && el.getAttribute('attachmentId') === attachmentId }, replaced(job))
     return { result: { noteId, text: preview(text) }, agent }
   })
 

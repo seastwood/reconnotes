@@ -3305,3 +3305,36 @@ a.button {
   background: var(--paper);
   color: var(--accent-text);
 }
+
+/* a word the AI guessed: tap to accept */
+.uncertain-word {
+  text-decoration: underline dotted var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.vocab textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text);
+}
+.learned {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+  font-size: 14px;
+}
+.learned li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.learned s {
+  color: var(--muted);
+}

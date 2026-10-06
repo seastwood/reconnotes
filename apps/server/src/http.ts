@@ -455,6 +455,19 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 202, { drawings, pictures })
   })
 
+  // --- your words: names and terms the AI should spell right -----------------
+  route('GET', '/api/ai/vocabulary', (_req, res) => json(res, 200, ai.vocabulary?.get() ?? { words: [], learned: [] }))
+  route('PUT', '/api/ai/vocabulary', async (req, res) => {
+    const { words } = await readJson<{ words: string[] }>(req)
+    ai.vocabulary?.setWords(Array.isArray(words) ? words.map(String) : [])
+    json(res, 200, ai.vocabulary?.get())
+  })
+  route('POST', '/api/ai/vocabulary/forget', async (req, res) => {
+    const { from, to } = await readJson<{ from: string; to: string }>(req)
+    ai.vocabulary?.forget(String(from), String(to))
+    json(res, 200, ai.vocabulary?.get())
+  })
+
   route('POST', '/api/ai/warm', async (_req, res) => {
     const agent = ai.agents.chain('handwriting')[0]
     const key = agent ? `${agent.baseUrl}|${agent.model}` : ''
