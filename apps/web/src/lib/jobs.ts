@@ -4,6 +4,7 @@ import { Store, useStore } from './store'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { showActionToast } from './toast'
 import { showNotification } from './notify'
+import { pushOn } from './push'
 
 /**
  * Jobs: every AI request and processing step runs on the server as a job
@@ -268,7 +269,7 @@ function announce(j: Job) {
   const label = jobsStore.get().kinds[j.kind] ?? 'Job'
   // not looking at the app: a system notification (if allowed)
   if (document.hidden) {
-    if (settings.get().jobNotifications && !(Capacitor.isNativePlatform() && serverPush) && (j.status === 'done' || j.status === 'failed')) {
+    if (settings.get().jobNotifications && !pushOn() && !(Capacitor.isNativePlatform() && serverPush) && (j.status === 'done' || j.status === 'failed')) {
       const note = j.status === 'done' ? productNote(j) : j.noteId
       void showNotification(
         `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,

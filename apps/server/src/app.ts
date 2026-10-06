@@ -13,6 +13,7 @@ import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
 import { Notifier } from './notify'
 import { MeaningIndex } from './semantic'
 import { Samples } from './bench'
+import { Apns } from './apns'
 
 export interface App {
   config: Config
@@ -38,7 +39,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   sync.meaning = new MeaningIndex(store, ai.agents)
   const samples = new Samples(store)
   registerJobHandlers(config, store, sync, ai, jobs, samples)
-  const notifier = new Notifier(store)
+  const notifier = new Notifier(store, new Apns(store))
   jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
   const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
   jobs.start()

@@ -3564,3 +3564,20 @@ a.button {
   background: none;
   color: inherit;
 }
+
+/* Settings › Notifications: push from the server through Apple */
+.push-section h4 {
+  margin: 14px 0 4px;
+  font-size: 14px;
+}
+.push-section ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+.push-section ol li {
+  margin: 3px 0;
+}
+.push-setup textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+}

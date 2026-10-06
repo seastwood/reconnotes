@@ -520,6 +520,53 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     notifier.save(await readJson(req))
     json(res, 200, notifier.view())
   })
+  // --- push notifications to the iPhone / iPad app (through Apple, no other service) --
+  const pushDevice = (req: http.IncomingMessage) => {
+    const c = callers.get(req)
+    return c?.kind === 'device' ? c.id : 'main'
+  }
+  const apns = () => {
+    if (!notifier.apns) throw new HttpError(404, 'not available')
+    return notifier.apns
+  }
+  route('GET', '/api/push', (req, res) => json(res, 200, apns().view(pushDevice(req))))
+  route('PUT', '/api/push', async (req, res) => {
+    try {
+      apns().save(await readJson(req))
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message)
+    }
+    json(res, 200, apns().view(pushDevice(req)))
+  })
+  /** The app on this device can receive pushes at this token. */
+  route('POST', '/api/push/register', async (req, res) => {
+    const { token, name } = await readJson<{ token: string; name?: string }>(req)
+    try {
+      apns().register(String(token ?? ''), pushDevice(req), deviceName(req) ?? (String(name ?? '').trim() || 'iPhone / iPad'))
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message)
+    }
+    json(res, 200, apns().view(pushDevice(req)))
+  })
+  route('POST', '/api/push/unregister', async (req, res) => {
+    const { token } = await readJson<{ token: string }>(req)
+    apns().unregister(String(token ?? ''))
+    json(res, 200, apns().view(pushDevice(req)))
+  })
+  /** A test notification to this device's app. */
+  route('POST', '/api/push/test', async (req, res) => {
+    const mine = apns().devices().filter((d) => d.deviceId === pushDevice(req))
+    if (!mine.length) throw new HttpError(400, 'This device hasn’t registered for notifications yet – turn them on in the app first.')
+    let sent = 0
+    try {
+      for (const d of mine) if (await apns().sendTo(d, { title: 'ReconNotes', body: 'Notifications work. You’ll get one when a job you started finishes.' })) sent++
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message)
+    }
+    if (!sent) throw new HttpError(400, 'Apple didn’t accept the notification – see the server log.')
+    json(res, 200, { sent })
+  })
+
   route('POST', '/api/notify/test', async (_req, res) => {
     try {
       await notifier.send({ title: 'ReconNotes', message: 'Notifications work. You’ll get one when a job you started finishes.', link: 'reconnotes://open', failed: false })

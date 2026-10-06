@@ -13,6 +13,7 @@ import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
+import { startPush } from './lib/push'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
@@ -168,6 +169,8 @@ export function App() {
     setPane('note')
   }
   useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
+  // iOS app: tapping a notification from the server opens what it's about
+  useEffect(() => startPush({ note: (id) => openFromReminder.current(id), search: (q) => appRef.current.showSearch(q) }), [])
   // iOS app: things shared to ReconNotes become notes
   useEffect(() => startShareInbox((id) => openFromReminder.current(id)), [])
   // widget, Siri / Shortcuts and home-screen shortcuts: new note, record, scan…

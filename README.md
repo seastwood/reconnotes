@@ -38,9 +38,10 @@ It's built for one person's daily notes, and anyone can run it.
   job with extra instructions ("it's a shopping list", "keep my bullet points") to replace its
   result. Jobs finish even if you close the app: the server writes the results into the note.
 - **Notifications.** *Settings › Notifications*: a notification when a job you started finishes
-  or fails. The app notifies you itself while it's running; with the app closed, your server
-  sends it through the free [ntfy](https://ntfy.sh) app, the Home Assistant companion app, or a
-  webhook (no Apple developer account needed). Tapping it opens the note.
+  or fails, even with the app closed. With a paid Apple developer account your server sends them
+  straight through Apple, like any other app's (see *Notifications from your server* below);
+  otherwise through the free [ntfy](https://ntfy.sh) app, the Home Assistant companion app, or a
+  webhook. Tapping one opens the note (or the answer, for *Ask your notes*).
 - **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
   *Settings › Backups* shows what changed since each backup and restores one note or everything;
   each note's current state goes into its version history first.
@@ -264,6 +265,24 @@ npm run ios:add-extensions -w @reconnotes/web
 This adds the *ShareExtension* and *ReconNotesWidget* targets, embeds them in the app, and gives
 the app and the share extension the App Group `group.com.reconnotes.app`. Everything is signed with
 the App target's team. Then run the app from Xcode as usual. It's safe to run again after updates.
+
+**Notifications from your server (push).** Real iPhone / iPad notifications, sent by your server
+straight to Apple's push service – no other service. Needs a paid Apple Developer Program
+membership (Apple doesn't allow push for apps signed with a free Apple ID).
+
+1. On developer.apple.com: *Certificates, IDs & Profiles › Keys › ＋*, tick *Apple Push
+   Notifications service (APNs)*, and download the `.p8` key. Note its Key ID and your Team ID.
+2. On the Mac, switch push on for the app once, then build and run from Xcode:
+   ```bash
+   npm run ios:enable-push -w @reconnotes/web
+   ```
+   (Or in Xcode: *App target › Signing & Capabilities › ＋ Capability › Push Notifications*.)
+3. In the app: *Settings › Notifications*, enter the Key ID, Team ID and the `.p8` contents (once,
+   from any device), then tick *Notify me when a job I started here finishes* on each iPhone / iPad
+   and tap *Send a test*.
+
+Each device gets notifications for the jobs it started, and none while it's open on screen (it
+shows the result itself). Builds from Xcode and TestFlight builds both work.
 
 **Siri and Shortcuts.** *"New note in ReconNotes"*, *"Record a ReconNotes voice note"* and
 *"Scan into ReconNotes"* work with Siri, Spotlight, the Action button and the Shortcuts app with no

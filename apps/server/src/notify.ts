@@ -1,6 +1,7 @@
 import type { Store } from './store'
 import type { Job } from './jobs'
 import { log } from './log'
+import type { Apns } from './apns'
 
 /**
  * Notifications when your jobs finish
@@ -47,7 +48,11 @@ export class Notifier {
   /** when each device last asked about its jobs (it's open: it notifies itself) */
   private watching = new Map<string, number>()
 
-  constructor(private store: Store) {}
+  constructor(
+    private store: Store,
+    /** push notifications straight to the iPhone / iPad app */
+    readonly apns?: Apns,
+  ) {}
 
   settings(): NotifySettings {
     return { ...DEFAULTS, ...(this.store.getSetting<Partial<NotifySettings>>(KEY) ?? {}) }
@@ -87,19 +92,35 @@ export class Notifier {
   /** A job finished: tell the person who asked for it, if they're not looking. */
   jobFinished(job: Job, label: string) {
     const s = this.settings()
-    if (s.kind === 'off' || !s.url || job.origin !== 'user') return
+    if (job.origin !== 'user') return
     if (job.status === 'done' ? !s.onDone : job.status === 'failed' ? !s.onFailed : true) return
     const took = ((job.finishedAt ?? Date.now()) - (job.startedAt ?? job.createdAt)) / 1000
     if (took < s.minSeconds) return
     // the device that asked is open: it shows its own notification
     if (Date.now() - (this.watching.get(job.device ?? '') ?? 0) < 40_000) return
     const note = job.kind === 'compile' && typeof job.result?.noteId === 'string' ? job.result.noteId : job.noteId
-    void this.send({
-      title: job.status === 'done' ? `${label} finished` : `${label} failed`,
+    const notice: Notice = {
+      title: job.kind === 'ask' && job.status === 'done' ? 'Your notes have an answer' : job.status === 'done' ? `${label} finished` : `${label} failed`,
       message: job.status === 'done' ? job.title : `${job.title}: ${job.error ?? 'failed'}`.slice(0, 400),
       link: note ? `reconnotes://open?note=${note}` : null,
       failed: job.status === 'failed',
-    }).catch((err) => log.warn(`notification failed: ${(err as Error).message}`))
+    }
+    // the app on the device that asked, straight through Apple
+    if (this.apns?.config()) {
+      const data: Record<string, string> = { jobId: job.id }
+      if (note) data.noteId = note
+      if (job.kind === 'ask') data.question = String(job.input.question ?? '')
+      void this.apns
+        .send({ title: notice.title, body: notice.message, data }, this.pushTargets(job.device))
+        .catch((err) => log.warn(`push notification failed: ${(err as Error).message}`))
+    }
+    if (s.kind !== 'off' && s.url) void this.send(notice).catch((err) => log.warn(`notification failed: ${(err as Error).message}`))
+  }
+
+  /** Push devices of the device (key) that asked: by its name, or the main key's devices. */
+  private pushTargets(device: string | null): string[] {
+    const all = this.apns?.devices() ?? []
+    return [...new Set(all.filter((d) => (device ? d.name === device : d.deviceId === 'main')).map((d) => d.deviceId))]
   }
 
   async send(n: Notice, s = this.settings()): Promise<void> {

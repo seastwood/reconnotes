@@ -11,12 +11,14 @@
     "ios:sync": "vite build && cap sync ios",
     "ios:open": "cap open ios",
     "ios:add-share-extension": "ruby ios/scripts/add-share-extension.rb",
-    "ios:add-extensions": "ruby ios/scripts/add-share-extension.rb && ruby ios/scripts/add-widget.rb"
+    "ios:add-extensions": "ruby ios/scripts/add-share-extension.rb && ruby ios/scripts/add-widget.rb",
+    "ios:enable-push": "ruby ios/scripts/enable-push.rb"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/push-notifications": "^8.1.3",
     "@hocuspocus/provider": "^4.7.0",
     "@reconnotes/core": "*",
     "@tiptap/core": "^3.6.0",
