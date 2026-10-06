@@ -3001,6 +3001,43 @@ a.button {
   flex-shrink: 0;
   min-width: 0;
   height: 100%;
+  position: relative;
+}
+/* drag a column's edge to resize it (iPad / computer) */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -8px;
+  width: 16px;
+  z-index: 20;
+  cursor: col-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.resize-handle span {
+  width: 4px;
+  height: 44px;
+  border-radius: 2px;
+  background: var(--line);
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.resize-handle:hover span,
+.resize-handle:active span {
+  opacity: 1;
+  background: var(--accent);
+}
+@media (pointer: coarse) {
+  /* always a hint of the grip on touch screens */
+  .resize-handle span {
+    opacity: 0.8;
+  }
+}
+.app.narrow .resize-handle {
+  display: none;
 }
 .panel-editor {
   flex: 1;
@@ -3636,4 +3673,55 @@ a.button {
   flex: none;
   margin-top: 2px;
   color: var(--muted);
+}
+
+/* a recording running while you're elsewhere in the app */
+.recording-pill {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 260;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 32px);
+  padding: 4px;
+  border-radius: 22px;
+  background: #1c1c1e;
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+.recording-pill button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  color: inherit;
+  background: none;
+  font-size: 14px;
+}
+.recording-pill-open {
+  min-width: 0;
+}
+.recording-pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-pill .rec-dot {
+  flex: none;
+  color: #ff453a;
+  animation: rec-blink 1.2s ease-in-out infinite;
+}
+.recording-pill-stop {
+  flex: none;
+  background: #ff453a !important;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.35;
+  }
 }

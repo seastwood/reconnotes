@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import QuickLook
 import VisionKit
 import AppIntents
+import AVFoundation
 import Capacitor
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -80,6 +81,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(DocumentScannerPlugin())
         // reconnotes:// links from the widget, Siri / Shortcuts and setup links (see AppLinksPlugin below).
         bridge?.registerPluginInstance(AppLinksPlugin())
+        // Recordings that keep going with the screen locked (see AudioRecorderPlugin below).
+        bridge?.registerPluginInstance(AudioRecorderPlugin())
         Self.current = self
         guard let webView = webView else { return }
         installScribbleBlocker(in: webView)
@@ -872,5 +875,116 @@ struct ReconNotesShortcuts: AppShortcutsProvider {
             shortTitle: "Scan",
             systemImageName: "doc.viewfinder"
         )
+    }
+}
+
+
+// MARK: - Audio recorder
+
+/// Records audio natively (like Voice Memos), so a recording keeps going when
+/// the screen locks or you switch apps – a web page's microphone is cut off
+/// then. The screen is also kept from dimming and locking while recording.
+///
+///     AudioRecorder.start() → { startedAt }
+///     AudioRecorder.stop()  → { path, startedAt, endedAt, mime }   (an .m4a file; read it with Capacitor.convertFileSrc)
+///     AudioRecorder.status() → { recording, startedAt }
+///     AudioRecorder.remove({ path })
+@objc(AudioRecorderPlugin)
+public class AudioRecorderPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDelegate {
+    public let identifier = "AudioRecorderPlugin"
+    public let jsName = "AudioRecorder"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise)
+    ]
+
+    private var recorder: AVAudioRecorder?
+    private var fileURL: URL?
+    private var startedAt: Date?
+
+    private static func millis(_ d: Date) -> Double { d.timeIntervalSince1970 * 1000 }
+
+    private func askPermission(_ done: @escaping (Bool) -> Void) {
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission { granted in DispatchQueue.main.async { done(granted) } }
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in DispatchQueue.main.async { done(granted) } }
+        }
+    }
+
+    @objc func start(_ call: CAPPluginCall) {
+        if let r = recorder, r.isRecording, let at = startedAt {
+            return call.resolve(["startedAt": Self.millis(at)])
+        }
+        askPermission { granted in
+            guard granted else {
+                return call.reject("Microphone access was denied. Allow it in Settings › ReconNotes › Microphone.", "denied")
+            }
+            do {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+                try session.setActive(true)
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("recording-\(UUID().uuidString).m4a")
+                let settings: [String: Any] = [
+                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: 44100,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+                ]
+                let r = try AVAudioRecorder(url: url, settings: settings)
+                r.delegate = self
+                guard r.record() else { return call.reject("The recording couldn’t start.") }
+                let now = Date()
+                self.recorder = r
+                self.fileURL = url
+                self.startedAt = now
+                // don't let the screen dim and lock while recording
+                UIApplication.shared.isIdleTimerDisabled = true
+                call.resolve(["startedAt": Self.millis(now)])
+            } catch {
+                call.reject("The recording couldn’t start: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @objc func stop(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            guard let r = self.recorder, let url = self.fileURL, let at = self.startedAt else {
+                return call.reject("Not recording.", "not-recording")
+            }
+            r.stop()
+            self.recorder = nil
+            self.fileURL = nil
+            self.startedAt = nil
+            UIApplication.shared.isIdleTimerDisabled = false
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            call.resolve(["path": url.path, "startedAt": Self.millis(at), "endedAt": Self.millis(Date()), "mime": "audio/mp4"])
+        }
+    }
+
+    @objc func status(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            if let r = self.recorder, r.isRecording, let at = self.startedAt {
+                call.resolve(["recording": true, "startedAt": Self.millis(at)])
+            } else {
+                call.resolve(["recording": false])
+            }
+        }
+    }
+
+    @objc func remove(_ call: CAPPluginCall) {
+        if let path = call.getString("path"), path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        call.resolve()
+    }
+
+    /// iOS stopped it (e.g. another app took the microphone): the app saves what was recorded.
+    public func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        if self.recorder === recorder {
+            notifyListeners("interrupted", data: ["successfully": flag])
+        }
     }
 }

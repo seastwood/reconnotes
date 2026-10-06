@@ -43,7 +43,7 @@ import {
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
-import { addAttachment } from '../lib/attachments'
+import { RecordingError, setRecordingTarget, startRecording, stopRecording, useRecorderSaving, useRecording } from '../lib/recorder'
 import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
@@ -444,55 +444,37 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
 
 function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: string; onError: (msg: string) => void }) {
   const pickRef = useRef<HTMLInputElement>(null)
-  const [rec, setRec] = useState<MediaRecorder | null>(null)
-  const [secs, setSecs] = useState(0)
+  const active = useRecording()
+  const saving = useRecorderSaving()
+  const mine = active?.noteId === noteId
+  const [, tick] = useState(0)
   useEffect(() => {
-    if (!rec) return
-    const t = setInterval(() => setSecs((s) => s + 1), 1000)
+    if (!active) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
     return () => clearInterval(t)
-  }, [rec])
+  }, [active])
+  // a recording started in this note goes in at the cursor while the note is open
+  useEffect(() => {
+    setRecordingTarget(noteId, (attrs) => editor.chain().focus().insertContent([{ type: 'audio', attrs }, { type: 'paragraph' }]).run())
+    return () => setRecordingTarget(noteId, null)
+  }, [editor, noteId])
 
   const start = async () => {
-    // Browsers only allow the microphone on secure (https) pages; on a plain
-    // http address navigator.mediaDevices doesn't exist at all.
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      onError(
-        window.isSecureContext
-          ? 'This browser can’t record audio. Pick an existing recording instead.'
-          : `Recording needs a secure (https) connection, and this page is ${location.protocol}//${location.host}. ` +
-              'Set up HTTPS for your server (see “Reaching the server from your phone” in the README) or use the iOS app. ' +
-              'For now you can attach a recording, e.g. from Voice Memos.',
-      )
-      pickRef.current?.click()
-      return
-    }
+    if (active) return onError('Another recording is running – stop it first.')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? ''
-      const r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
-      const chunks: Blob[] = []
-      let startedAt = Date.now()
-      r.onstart = () => (startedAt = Date.now())
-      r.ondataavailable = (e) => chunks.push(e.data)
-      r.onstop = async () => {
-        const endedAt = Date.now()
-        stream.getTracks().forEach((t) => t.stop())
-        const type = r.mimeType.split(';')[0] || 'audio/webm'
-        const blob = new Blob(chunks, { type })
-        const name = `Recording ${new Date().toLocaleString()}`
-        const attachmentId = await addAttachment(blob, `${name}.${type.includes('mp4') ? 'm4a' : 'webm'}`)
-        editor.chain().focus().insertContent([{ type: 'audio', attrs: { attachmentId, name, startedAt, endedAt } }, { type: 'paragraph' }]).run()
-      }
-      r.start()
-      setSecs(0)
-      setRec(r)
+      await startRecording(noteId)
     } catch (e) {
-      const err = e as Error
-      onError(
-        err.name === 'NotAllowedError'
-          ? 'Microphone access was denied. Allow it in your browser or iOS settings to record audio.'
-          : `Microphone unavailable: ${err.message}`,
-      )
+      const err = e as RecordingError
+      if (err.code === 'insecure')
+        onError(
+          `Recording needs a secure (https) connection, and this page is ${location.protocol}//${location.host}. ` +
+            'Set up HTTPS for your server (see “Reaching the server from your phone” in the README) or use the iOS app. ' +
+            'For now you can attach a recording, e.g. from Voice Memos.',
+        )
+      else if (err.code === 'unsupported') onError('This browser can’t record audio. Pick an existing recording instead.')
+      else if (err.code === 'denied') onError('Microphone access was denied. Allow it in your browser or iOS settings to record audio.')
+      else onError(err.message)
+      if (err.code === 'insecure' || err.code === 'unsupported') pickRef.current?.click()
     }
   }
 
@@ -522,17 +504,18 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
     />
   )
 
-  if (rec)
+  if (mine) {
+    const secs = Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000))
     return (
-      <button
-        className="tb recording"
-        onClick={() => {
-          rec.stop()
-          setRec(null)
-        }}
-        aria-label="Stop recording"
-      >
+      <button className="tb recording" onClick={() => void stopRecording()} aria-label="Stop recording">
         <Square size={16} /> {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
+      </button>
+    )
+  }
+  if (saving)
+    return (
+      <button className="tb" disabled aria-label="Saving the recording">
+        <Loader2 size={18} className="spin" />
       </button>
     )
   return (

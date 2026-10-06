@@ -79,6 +79,10 @@
 	<string>Take photos and scan documents into your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record audio notes.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>ReconAppGroup</key>
 	<string>group.com.reconnotes.app</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
@@ -14,6 +14,9 @@ import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet } from './lib/store'
 import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
+import { resumeRecording } from './lib/recorder'
+import { RecordingPill } from './components/RecordingPill'
+import { ResizeHandle, loadWidths, type Widths } from './components/ResizeHandle'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
@@ -169,6 +172,9 @@ export function App() {
     setPane('note')
   }
   useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
+  // iOS app: a recording still running (the page was reloaded) shows again
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => resumeRecording(nav.noteId), [])
   // iOS app: tapping a notification from the server opens what it's about
   useEffect(() => startPush({ note: (id) => openFromReminder.current(id), search: (q) => appRef.current.showSearch(q) }), [])
   // iOS app: things shared to ReconNotes become notes
@@ -270,6 +276,8 @@ export function App() {
     navDir.current = depth[pane] > depth[lastPane.current] ? 'fwd' : 'back'
     lastPane.current = pane
   }
+  /** column widths you dragged (iPad / computer) */
+  const [widths, setWidths] = useState<Widths>(loadWidths)
   const sidebarInline = !narrow && wide && layout === 3
   const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
   const listVisible = narrow ? pane === 'list' : layout >= 2
@@ -389,7 +397,17 @@ export function App() {
   }, [templatesKey, nav.view, openNoteMeta?.id, openNoteMeta?.pinned])
 
   return (
-    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}>
+    <div
+      className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}
+      style={
+        narrow
+          ? undefined
+          : ({
+              ...(widths.sidebar ? { '--sidebar-w': `${widths.sidebar}px` } : {}),
+              ...(widths.list ? { '--list-w': `${widths.list}px` } : {}),
+            } as CSSProperties)
+      }
+    >
       <Panel
         show={sidebarVisible}
         mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
@@ -418,6 +436,9 @@ export function App() {
             if (overlay && !sidebarInline) setOverlay(false)
           }}
         />
+        {sidebarInline && (
+          <ResizeHandle column="sidebar" widths={widths} onChange={setWidths} otherWidth={listVisible ? (widths.list ?? 300) : 0} />
+        )}
       </Panel>
       <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
         <div className="list-col">
@@ -439,6 +460,7 @@ export function App() {
           />
           )}
         </div>
+        {!narrow && <ResizeHandle column="list" widths={widths} onChange={setWidths} otherWidth={sidebarInline ? (widths.sidebar ?? 260) : 0} />}
       </Panel>
       <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">
         <main className="editor-col">
@@ -480,6 +502,7 @@ export function App() {
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />
       <HideKeyboardButton />
+      <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />
       <ImageViewerHost />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {paletteOpen && (
