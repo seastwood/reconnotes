@@ -3,6 +3,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core'
 import { createNote, getContent, noteDocName, updateNote } from '@reconnotes/core'
 import { addAttachment, attachmentBlob } from './attachments'
 import { sync } from './sync'
+import { isMarkdownFile, noteFromMarkdown } from './markdownNotes'
 
 /**
  * Files of any kind: kept as attachments (synced and backed up like
@@ -92,7 +93,6 @@ export async function addFilesToFolder(files: File[], folderId: string | null): 
   const ids: string[] = []
   for (const f of files) {
     // a Markdown file opens as a note of its own
-    const { isMarkdownFile, noteFromMarkdown } = await import('./markdownNotes')
     if (isMarkdownFile(f.name, f.type)) {
       ids.push(await noteFromMarkdown(await f.text(), f.name, folderId))
       continue

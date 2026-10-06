@@ -3,6 +3,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core'
 import { createNote, getContent, noteDocName } from '@reconnotes/core'
 import { addAttachment } from './attachments'
 import { sync } from './sync'
+import { isMarkdownFile, noteFromMarkdown } from './markdownNotes'
 
 /**
  * Things shared to ReconNotes (iOS share sheet, or "Open in / Copy to
@@ -59,7 +60,6 @@ function titleFor(share: Share): string {
 async function toNote(share: Share): Promise<string> {
   // Markdown files (shared, or opened from the Files app) become notes of their own
   const files = share.items.filter((i) => i.kind === 'file' && i.file)
-  const { isMarkdownFile, noteFromMarkdown } = await import('./markdownNotes')
   if (files.length && files.length === share.items.length && files.every((f) => isMarkdownFile(f.name ?? f.file!, f.mime))) {
     let last = ''
     for (const f of files) {
