@@ -6,6 +6,8 @@ import { AiAgentsSection } from './AiAgentsSection'
 import { BackupsSection } from './BackupsSection'
 import { ExportImportSection } from './ExportImportSection'
 import { DevicesSection } from './DevicesSection'
+import { NotificationsSection } from './NotificationsSection'
+import { notificationsSupported } from '../lib/notify'
 import { deviceOcrAvailable } from '../lib/deviceOcr'
 import { deviceSpeechAvailable } from '../lib/speech'
 
@@ -102,6 +104,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </section>
+
+        {(connected || notificationsSupported()) && (
+          <section>
+            <h3>Notifications</h3>
+            <NotificationsSection key={s.serverUrl + s.token} />
+          </section>
+        )}
 
         {connected && (
           <section>

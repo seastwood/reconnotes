@@ -1,7 +1,9 @@
+import { Capacitor } from '@capacitor/core'
 import { newId } from '@reconnotes/core'
 import { Store, useStore } from './store'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { showActionToast } from './toast'
+import { showNotification } from './notify'
 
 /**
  * Jobs: every AI request and processing step runs on the server as a job
@@ -88,9 +90,15 @@ let wake: (() => void) | null = null
 export function startJobs() {
   if (running) return
   running = true
+  const native = Capacitor.isNativePlatform()
+  /** a job started here is still running or waiting */
+  const pending = () => jobsStore.get().jobs.some((j) => mine.has(j.id) && !isFinished(j))
   const loop = async () => {
     for (;;) {
-      if (!isSyncConfigured() || document.hidden) {
+      // in the background: iOS freezes the app soon, so the server notifies instead; a
+      // browser tab keeps following its own jobs so it can show a notification
+      const idle = !isSyncConfigured() || (document.hidden && (native || !pending()))
+      if (idle) {
         await new Promise<void>((r) => {
           wake = r
           setTimeout(r, 5000)
@@ -99,14 +107,20 @@ export function startJobs() {
       }
       try {
         const v = jobsStore.get().loaded ? jobsStore.get().version : 0
-        apply(await call<Omit<JobsState, 'loaded' | 'error'>>('GET', v ? `/api/jobs/changes?since=${v}` : '/api/jobs'))
+        apply(await call<Omit<JobsState, 'loaded' | 'error'>>('GET', v ? `/api/jobs/changes?since=${v}${document.hidden ? '&away=1' : ''}` : '/api/jobs'))
       } catch (e) {
         jobsStore.set({ ...jobsStore.get(), error: (e as Error).message })
         await new Promise((r) => setTimeout(r, 5000))
       }
     }
   }
-  document.addEventListener('visibilitychange', () => !document.hidden && wake?.())
+  // does the server push notifications itself?
+  if (isSyncConfigured()) void call<{ kind: string }>('GET', '/api/notify').then((n) => (serverPush = n.kind !== 'off')).catch(() => {})
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return wake?.()
+    // going to the background: let the server send notifications from now on
+    if (native && isSyncConfigured()) void fetch(apiUrl('/api/jobs/away'), { method: 'POST', headers: authHeaders(), keepalive: true }).catch(() => {})
+  })
   void loop()
 }
 
@@ -220,6 +234,12 @@ export function setJobNavigator(n: Navigator) {
   nav = n
 }
 
+/** whether the server sends notifications itself (then the iOS app doesn't double up) */
+let serverPush = false
+export function setServerPush(on: boolean) {
+  serverPush = on
+}
+
 /** Open a note from outside React (toasts, file blocks). */
 export const navigateToNote = (id: string) => nav?.openNote(id)
 
@@ -231,8 +251,21 @@ export function productNote(j: Job): string | null {
 }
 
 function announce(j: Job) {
-  if (awaited.has(j.id) || !settings.get()) return
   const label = jobsStore.get().kinds[j.kind] ?? 'Job'
+  // not looking at the app: a system notification (if allowed)
+  if (document.hidden) {
+    if (settings.get().jobNotifications && !(Capacitor.isNativePlatform() && serverPush) && (j.status === 'done' || j.status === 'failed')) {
+      const note = j.status === 'done' ? productNote(j) : j.noteId
+      void showNotification(
+        `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,
+        j.status === 'done' ? j.title : `${j.title}: ${j.error ?? ''}`.slice(0, 200),
+        note,
+        (id) => nav?.openNote(id),
+      ).catch(() => {})
+    }
+    return
+  }
+  if (awaited.has(j.id)) return
   if (j.status === 'done') {
     const note = productNote(j)
     if (note) showActionToast(`${label} finished – ${j.title}`, 'Open', () => nav?.openNote(note))

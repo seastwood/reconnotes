@@ -29,6 +29,7 @@ import type { Caller, Devices } from './devices'
 import { SHARE_HEADERS, Shares, drawingSvg, noteHas, sharePage, sharedNote } from './shares'
 import { importNotes, unpack } from './importNotes'
 import type { Jobs } from './jobs'
+import type { Notifier } from './notify'
 import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
@@ -87,7 +88,7 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 
 const ID = '([a-z0-9]{8,64})'
 
-export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs) {
+export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs, notifier: Notifier) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
   const shares = new Shares(store)
   const routes: [string, RegExp, Handler][] = []
@@ -325,11 +326,18 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     return j
   }
 
-  route('GET', '/api/jobs', (_req, res) => json(res, 200, jobsPayload()))
+  route('GET', '/api/jobs', (req, res) => {
+    notifier.seen(deviceName(req))
+    json(res, 200, jobsPayload())
+  })
 
   /** Wait (up to 25 s) for any change to the jobs, then send the list. */
-  route('GET', '/api/jobs/changes', async (_req, res, _p, url) => {
+  route('GET', '/api/jobs/changes', async (req, res, _p, url) => {
+    // this device is open and following its jobs: it notifies itself
+    const away = url.searchParams.get('away') === '1'
+    if (!away) notifier.seen(deviceName(req))
     await jobs.nextChange(Number(url.searchParams.get('since') ?? 0), 25_000)
+    if (!away) notifier.seen(deviceName(req))
     json(res, 200, jobsPayload())
   })
 
@@ -396,6 +404,26 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     jobs.clearFinished()
     json(res, 200, jobsPayload())
   })
+  route('POST', '/api/jobs/away', (req, res) => {
+    notifier.away(deviceName(req))
+    json(res, 200, { ok: true })
+  })
+
+  // --- Notifications when jobs finish (ntfy / Home Assistant / webhook) -------
+  route('GET', '/api/notify', (_req, res) => json(res, 200, notifier.view()))
+  route('PUT', '/api/notify', async (req, res) => {
+    notifier.save(await readJson(req))
+    json(res, 200, notifier.view())
+  })
+  route('POST', '/api/notify/test', async (_req, res) => {
+    try {
+      await notifier.send({ title: 'ReconNotes', message: 'Notifications work. You’ll get one when a job you started finishes.', link: 'reconnotes://open', failed: false })
+    } catch (e) {
+      throw new HttpError(400, `Couldn’t send the test notification: ${(e as Error).message}`)
+    }
+    json(res, 200, { ok: true })
+  })
+
   route('POST', '/api/jobs/pause-all', async (req, res) => {
     const { paused } = await readJson<{ paused: boolean }>(req)
     jobs.setPaused(Boolean(paused))

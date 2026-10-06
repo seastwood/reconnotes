@@ -24,6 +24,8 @@ export interface Settings {
   shapeSnap?: boolean
   /** ticking a checklist item moves it below the unticked ones (unticking moves it back up) */
   sortChecked?: boolean
+  /** a notification when a job started on this device finishes while the app isn't on screen */
+  jobNotifications?: boolean
   /** iOS app: a notification at 9:00 on the day a checklist item is due */
   dueReminders?: boolean
   /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */

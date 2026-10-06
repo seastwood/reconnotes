@@ -37,6 +37,10 @@ It's built for one person's daily notes, and anyone can run it.
   results and full error messages. Cancel, pause, run next, retry, remove a result, or redo a
   job with extra instructions ("it's a shopping list", "keep my bullet points") to replace its
   result. Jobs finish even if you close the app: the server writes the results into the note.
+- **Notifications.** *Settings › Notifications*: a notification when a job you started finishes
+  or fails. The app notifies you itself while it's running; with the app closed, your server
+  sends it through the free [ntfy](https://ntfy.sh) app, the Home Assistant companion app, or a
+  webhook (no Apple developer account needed). Tapping it opens the note.
 - **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
   *Settings › Backups* shows what changed since each backup and restores one note or everything;
   each note's current state goes into its version history first.

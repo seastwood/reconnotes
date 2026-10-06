@@ -151,6 +151,8 @@ export class Jobs {
   private liveAgent = new Map<string, string>()
   private waiters: (() => void)[] = []
   private pumping = false
+  /** called when a job finishes (done, failed or cancelled) – e.g. to send a notification */
+  onFinish: ((job: Job) => void) | null = null
   /** bumps on every change, so the app can wait for the next one */
   version = 1
   readonly fileDir: string
@@ -529,6 +531,11 @@ export class Jobs {
     this.cleanupRun(id)
     this.changed()
     const job = this.get(id)!
+    try {
+      this.onFinish?.(job)
+    } catch (err) {
+      log.warn(`after job ${id}: ${(err as Error).message}`)
+    }
     for (const w of this.settle.get(id) ?? []) w.resolve(job)
     this.settle.delete(id)
     this.prune()

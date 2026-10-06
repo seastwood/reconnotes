@@ -9,7 +9,8 @@ import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
 import { Devices } from './devices'
 import { Jobs } from './jobs'
-import { registerJobHandlers } from './jobHandlers'
+import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
+import { Notifier } from './notify'
 
 export interface App {
   config: Config
@@ -33,7 +34,9 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   const jobs = new Jobs(store)
   sync.jobs = jobs
   registerJobHandlers(config, store, sync, ai, jobs)
-  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs)
+  const notifier = new Notifier(store)
+  jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
+  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier)
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
