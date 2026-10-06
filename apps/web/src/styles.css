@@ -90,6 +90,15 @@ select {
   font: inherit;
   color: inherit;
 }
+/* iPhone / iPad zoom into any field with text smaller than 16px when it's
+   tapped – and then the screen slides sideways as the cursor moves */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: max(16px, 1em) !important;
+  }
+}
 
 .spin {
   animation: spin 1s linear infinite;
@@ -1310,6 +1319,9 @@ button.link {
   width: min(560px, 100%);
   max-height: 90vh;
   overflow-y: auto;
+  /* only ever scrolls up and down (moving the cursor in a field mustn't slide it sideways) */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 8px 20px 20px;
 }
 .dialog header {

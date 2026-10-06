@@ -19,6 +19,30 @@ handleConnectHash()
 startOfflineFolders()
 startJobs()
 pinToViewport()
+stopSidewaysScroll()
+
+/**
+ * Moving the cursor in a field (e.g. dragging on the space bar) makes iOS
+ * scroll whatever is around the field to keep the cursor in view – even
+ * panels that are never meant to scroll sideways, which then stay shifted.
+ * Put those straight back.
+ */
+function stopSidewaysScroll() {
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      const el = e.target
+      if (el === document || el === document.documentElement || el === document.body) {
+        if (window.scrollX) window.scrollTo(0, window.scrollY)
+        return
+      }
+      if (!(el instanceof HTMLElement) || !el.scrollLeft) return
+      const x = getComputedStyle(el).overflowX
+      if (x !== 'auto' && x !== 'scroll') el.scrollLeft = 0
+    },
+    { capture: true, passive: true },
+  )
+}
 
 /**
  * Keep the app exactly the size of the visible area: when the on-screen
