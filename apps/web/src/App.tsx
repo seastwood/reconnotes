@@ -14,6 +14,7 @@ import { startReminders } from './lib/reminders'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
+import { Panel } from './components/Panel'
 import { ImageViewerHost } from './components/ImageViewer'
 import { CommandPalette } from './components/CommandPalette'
 import { Tour, shouldShowTour } from './components/Tour'
@@ -233,6 +234,14 @@ export function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // phones: which way screens slide (deeper: folders → notes → note)
+  const depth = { folders: 0, list: 1, note: 2 } as const
+  const lastPane = useRef(pane)
+  const navDir = useRef<'fwd' | 'back'>('fwd')
+  if (lastPane.current !== pane) {
+    navDir.current = depth[pane] > depth[lastPane.current] ? 'fwd' : 'back'
+    lastPane.current = pane
+  }
   const sidebarInline = !narrow && wide && layout === 3
   const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
   const listVisible = narrow ? pane === 'list' : layout >= 2
@@ -350,26 +359,29 @@ export function App() {
 
   return (
     <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}>
-      {sidebarVisible && (
-        <>
-          {overlay && !sidebarInline && <div className="sidebar-backdrop" onClick={() => setOverlay(false)} />}
-          <Sidebar
-            overlay={overlay && !sidebarInline}
-            view={nav.view}
-            onView={(view) => {
-              setNav({ ...nav, view })
-              if (narrow) setPane('list')
-              else if (overlay && view.kind !== 'search') setOverlay(false)
-              if (!narrow && layout === 1) setLayout(2)
-            }}
-            onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
-            onSettings={() => setSettingsOpen(true)}
-            onCommands={() => setPaletteOpen(true)}
-            onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
-          />
-        </>
-      )}
-      {listVisible && (
+      <Panel
+        show={sidebarVisible}
+        mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
+        dir={navDir.current}
+        className="panel-sidebar"
+      >
+        {overlay && !sidebarInline && <div className="sidebar-backdrop" onClick={() => setOverlay(false)} />}
+        <Sidebar
+          overlay={overlay && !sidebarInline}
+          view={nav.view}
+          onView={(view) => {
+            setNav({ ...nav, view })
+            if (narrow) setPane('list')
+            else if (overlay && view.kind !== 'search') setOverlay(false)
+            if (!narrow && layout === 1) setLayout(2)
+          }}
+          onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
+          onSettings={() => setSettingsOpen(true)}
+          onCommands={() => setPaletteOpen(true)}
+          onMoveFolder={(id) => setMoving({ kind: 'folder', id })}
+        />
+      </Panel>
+      <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
         <div className="list-col">
           <NoteList
             view={nav.view}
@@ -381,8 +393,8 @@ export function App() {
             onMoveNotes={(ids) => setMoving({ kind: 'notes', ids })}
           />
         </div>
-      )}
-      {editorVisible && (
+      </Panel>
+      <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">
         <main className="editor-col">
           {noteDoc?.ready && nav.noteId ? (
             <NoteEditor
@@ -417,7 +429,7 @@ export function App() {
             </div>
           )}
         </main>
-      )}
+      </Panel>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       <Toaster />

@@ -104,7 +104,7 @@ select {
 }
 
 .sidebar {
-  width: 270px;
+  width: var(--sidebar-w);
   flex-shrink: 0;
   background: var(--panel);
   border-right: 1px solid var(--line);
@@ -113,7 +113,7 @@ select {
   padding-left: env(safe-area-inset-left);
 }
 .list-col {
-  width: 320px;
+  width: var(--list-w);
   flex-shrink: 0;
   border-right: 1px solid var(--line);
   background: var(--bg);
@@ -138,26 +138,22 @@ select {
 }
 /* smaller screens: slimmer columns leave the note room */
 @media (min-width: 1000px) and (max-width: 1199px) {
-  .sidebar {
-    width: 240px;
-  }
-  .list-col {
-    width: 290px;
+  :root {
+    --sidebar-w: 240px;
+    --list-w: 290px;
   }
 }
 /* iPad portrait (e.g. 11": 834px): all three still fit side by side */
 @media (min-width: 700px) and (max-width: 999px) {
-  .sidebar {
-    width: 210px;
+  :root {
+    --sidebar-w: 210px;
+    --list-w: 250px;
   }
   .sidebar-head {
     padding-left: 12px;
   }
   .sidebar-head h1 {
     font-size: 17px;
-  }
-  .list-col {
-    width: 250px;
   }
 }
 .sidebar-backdrop {
@@ -2899,4 +2895,105 @@ a.button {
 }
 .image-frame img {
   cursor: zoom-in;
+}
+
+/* --- sliding panels ------------------------------------------------------- */
+:root {
+  --sidebar-w: 270px;
+  --list-w: 320px;
+}
+.panel {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  height: 100%;
+}
+.panel-editor {
+  flex: 1;
+}
+.panel-sidebar {
+  --pw: var(--sidebar-w);
+}
+.panel-list {
+  --pw: var(--list-w);
+}
+/* iPad / computer: a column slides in from the left, the note makes room */
+.panel-side.panel-enter {
+  animation: side-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.panel-side.panel-exit {
+  animation: side-out 260ms cubic-bezier(0.4, 0, 0.6, 1) forwards;
+  pointer-events: none;
+}
+@keyframes side-in {
+  from {
+    margin-left: calc(-1 * var(--pw));
+  }
+}
+@keyframes side-out {
+  to {
+    margin-left: calc(-1 * var(--pw));
+  }
+}
+/* iPhone: screens push like iOS navigation */
+.app.narrow .panel {
+  position: absolute;
+  top: env(safe-area-inset-top);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+}
+.app.narrow .panel > * {
+  flex: 1;
+}
+.panel-push.panel-enter.panel-fwd,
+.panel-push.panel-exit.panel-back {
+  z-index: 3;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+}
+.panel-push.panel-enter.panel-fwd {
+  animation: push-in-fwd 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.panel-push.panel-exit.panel-fwd {
+  animation: push-out-fwd 260ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.panel-push.panel-enter.panel-back {
+  animation: push-in-back 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.panel-push.panel-exit.panel-back {
+  animation: push-out-back 260ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.panel-push.panel-exit {
+  pointer-events: none;
+}
+@keyframes push-in-fwd {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes push-out-fwd {
+  to {
+    transform: translateX(-28%);
+    opacity: 0.7;
+  }
+}
+@keyframes push-in-back {
+  from {
+    transform: translateX(-28%);
+    opacity: 0.7;
+  }
+}
+@keyframes push-out-back {
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-side.panel-enter,
+  .panel-side.panel-exit,
+  .panel-push.panel-enter,
+  .panel-push.panel-exit {
+    animation-duration: 1ms;
+  }
 }
