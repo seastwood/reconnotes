@@ -1,5 +1,5 @@
 import { Resvg } from '@resvg/resvg-js'
-import { DRAWING_WIDTH, drawingToSvg, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
+import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import { EmptyReplyError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
@@ -148,6 +148,8 @@ const COMPILE_PROMPT = `You will receive a personal note made of typed text, ima
 - Transcribe handwriting faithfully and merge it into the right place in the flow, including text written or printed in attached pictures.
 - Organise with headings, bullet lists, checklists ("- [ ]" / "- [x]") and tables where it helps; fix spelling and obvious grammar slips.
 - Describe diagrams or sketches briefly in square brackets.
+- Lines like ⟦AUDIO:…⟧ or ⟦FILE:…⟧ are attached recordings and files: copy each one exactly, on its own line, where it belongs in the document.
+- Keep every #tag (such as #work) exactly as written.
 - Do not add facts, commentary or a preamble. Output only the Markdown document.`
 
 /**
@@ -474,6 +476,34 @@ export class Ai {
     })
     return result
   }
+}
+
+const MARKER = /[ \t]*⟦(?:AUDIO|FILE):[a-z0-9]+⟧[ \t]*/g
+
+/** The line that stands for a recording or file in compile input and output. */
+export const compileMarker = (kind: 'audio' | 'file', id: string) => `⟦${kind.toUpperCase()}:${id}⟧`
+
+/**
+ * Make sure a compiled document still has the note's recordings, files and
+ * #tags (models sometimes drop or mangle them): each marker on its own line,
+ * unknown or repeated ones removed, missing ones and tags added at the end.
+ */
+export function keepCompileExtras(markdown: string, markers: string[], tags: string[]): string {
+  const wanted = new Set(markers)
+  const seen = new Set<string>()
+  let md = markdown.replace(MARKER, (found) => {
+    const m = found.trim()
+    if (!wanted.has(m) || seen.has(m)) return ' '
+    seen.add(m)
+    return `\n\n${m}\n\n`
+  })
+  md = md.replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n').trim()
+  const missing = markers.filter((m) => !seen.has(m))
+  if (missing.length) md += '\n\n' + missing.join('\n\n')
+  const have = new Set(extractTags(md))
+  const lost = tags.filter((t) => !have.has(t))
+  if (lost.length) md += '\n\n' + lost.map((t) => `#${t}`).join(' ')
+  return md + '\n'
 }
 
 /** The note in reading order: text, drawings (rendered) and pictures. */

@@ -12,6 +12,8 @@ export function noteToMarkdown(
     drawingPlaceholder?: (id: string) => string
     /** replaces the whole image line (used to splice real images into AI input) */
     imagePlaceholder?: (id: string) => string
+    /** replaces the whole recording / file line (keeps them through AI compile) */
+    attachmentPlaceholder?: (kind: 'audio' | 'file', id: string, name: string) => string
     /** add the text recognised in pictures and recordings (for AI input) */
     attachmentText?: boolean
   } = {},
@@ -128,6 +130,10 @@ export function noteToMarkdown(
       case 'file': {
         const id = el.getAttribute('attachmentId') as string
         const label = (el.getAttribute('name') as string) ?? name
+        if (opts.attachmentPlaceholder) {
+          out.push(opts.attachmentPlaceholder(name, id, label))
+          break
+        }
         out.push(`[${label}](${opts.attachmentUrl ? opts.attachmentUrl(id) : `attachment:${id}`})`)
         attText(id, name === 'audio' ? '🎙️ Transcript of this recording:' : '📄 Text of this file:')
         break

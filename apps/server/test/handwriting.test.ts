@@ -208,12 +208,15 @@ describe('compiling a note with pictures', () => {
     const { getContent } = await import('@reconnotes/core')
     await app.sync.change(noteDocName(noteId), (doc) => {
       const p = new Y.XmlElement('paragraph')
-      p.insert(0, [new Y.XmlText('Meeting notes')])
+      p.insert(0, [new Y.XmlText('Meeting notes #work')])
+      const rec = new Y.XmlElement('audio')
+      rec.setAttribute('attachmentId', 'attcompileaudio0001')
+      rec.setAttribute('name', 'Recording.m4a')
       const d = new Y.XmlElement('drawing')
       d.setAttribute('drawingId', 'drawinghw000000001')
       const img = new Y.XmlElement('image')
       img.setAttribute('attachmentId', 'attcompile000000001')
-      getContent(doc).insert(0, [p, d, img])
+      getContent(doc).insert(0, [p, rec, d, img])
       getStrokes(doc, 'drawinghw000000001').push([{ id: 's1', tool: 'pen', color: '#000000', size: 3, pts: [10, 10, 0.5, 90, 40, 0.5] }])
     })
     app.ai.agents.updateSettings({ routing: { ...app.ai.agents.settings().routing, compile: app.ai.agents.agents().map((a) => a.id) } })
@@ -224,12 +227,24 @@ describe('compiling a note with pictures', () => {
       body: JSON.stringify({ noteId }),
     })
     expect(res.status).toBe(200)
+    // the recording and the tag survive even though the model's answer dropped them
+    const { markdown } = (await res.json()) as { markdown: string }
+    expect(markdown).toContain('⟦AUDIO:attcompileaudio0001⟧')
+    expect(markdown).toMatch(/#work/)
     const sent = requests as unknown as { messages?: { content: string; images?: string[] }[] }[]
     const last = sent[sent.length - 1].messages![0]
     expect(last.images ?? []).toHaveLength(0) // the compile request itself is text only
     expect(last.content).toMatch(/Meeting notes[\s\S]*\[handwritten section\][\s\S]*Buy milk[\s\S]*\[picture, transcribed\]/)
     // the drawing and the picture were each read before that
     expect(sent.slice(0, -1).filter((r) => r.messages?.[0].images?.length).length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('keeping recordings, files and tags through compile', () => {
+  it('puts markers on their own line, drops unknown ones and adds missing ones and tags', async () => {
+    const { keepCompileExtras } = await import('../src/ai')
+    const md = keepCompileExtras('# Plan\n\nSee ⟦AUDIO:aaa⟧ and ⟦FILE:zzz⟧ here. ⟦AUDIO:aaa⟧\n\n#Work stuff', ['⟦AUDIO:aaa⟧', '⟦FILE:bbb⟧'], ['work', 'home'])
+    expect(md).toBe('# Plan\n\nSee\n\n⟦AUDIO:aaa⟧\n\nand here. \n\n#Work stuff\n\n⟦FILE:bbb⟧\n\n#home\n')
   })
 })
 

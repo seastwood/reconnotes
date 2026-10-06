@@ -274,13 +274,44 @@ export async function transcribeAudio(
 export async function compileNote(editor: Editor, noteId: string, folderId: string | null): Promise<string> {
   await flushNote(noteId)
   const { markdown, title } = await post<{ markdown: string; title: string }>('/api/ai/compile', { noteId })
-  const json = generateJSON(markdownToHtml(markdown), editor.extensionManager.extensions)
+  const json = keepAttachments(generateJSON(markdownToHtml(markdown), editor.extensionManager.extensions) as NodeJSON, editor)
   const id = createNote(sync.workspace.doc, { folderId, title: `${title || 'Untitled'} (compiled)` })
   const { handle, close } = sync.open(noteDocName(id))
   await handle.loaded
   prosemirrorJSONToYXmlFragment(editor.schema, json, getContent(handle.doc))
   close()
   return id
+}
+
+type NodeJSON = { type: string; attrs?: Record<string, unknown>; content?: NodeJSON[]; text?: string }
+
+/**
+ * Turn the compiled document's ⟦AUDIO:id⟧ / ⟦FILE:id⟧ lines back into the
+ * original note's recordings and files (same attachment, same settings).
+ */
+function keepAttachments(doc: NodeJSON, editor: Editor): NodeJSON {
+  const originals = new Map<string, NodeJSON>()
+  editor.state.doc.descendants((node) => {
+    if ((node.type.name === 'audio' || node.type.name === 'file') && node.attrs.attachmentId) {
+      originals.set(`${node.type.name}:${node.attrs.attachmentId}`, node.toJSON() as NodeJSON)
+    }
+  })
+  const marker = (n: NodeJSON) => {
+    if (n.type !== 'paragraph' || !n.content?.length || !n.content.every((c) => c.type === 'text')) return null
+    const m = /^\s*⟦(AUDIO|FILE):([a-z0-9]+)⟧\s*$/.exec(n.content.map((c) => c.text ?? '').join(''))
+    return m ? `${m[1].toLowerCase()}:${m[2]}` : null
+  }
+  const walk = (n: NodeJSON): NodeJSON[] => {
+    const key = marker(n)
+    if (key) {
+      const original = originals.get(key)
+      if (original) return [original]
+      const [type, attachmentId] = key.split(':')
+      return [{ type, attrs: { attachmentId } }]
+    }
+    return [n.content ? { ...n, content: n.content.flatMap(walk) } : n]
+  }
+  return walk(doc)[0]
 }
 
 /** URL of the exact image the server sends to the AI for a drawing (for troubleshooting). */

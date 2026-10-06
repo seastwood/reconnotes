@@ -8,7 +8,7 @@ import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
 import { askNotes } from './ask'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
-import { Ai, isAiImage, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
+import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
 import {
   AI_TASKS,
   AgentValidationError,
@@ -280,10 +280,16 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { noteId } = await readJson<{ noteId: string }>(req)
     const doc = sync.getDoc(noteDocName(noteId))
     if (!doc) throw new HttpError(404, 'note not found')
+    // recordings and files go through as marker lines the client turns back into them
+    const markers: string[] = []
     // Splice the real drawings and pictures into the note's text, in order.
     const md = noteToMarkdown(doc, {
       drawingPlaceholder: (id) => `\u0000DRAWING:${id}\u0000`,
       imagePlaceholder: (id) => `\u0000IMAGE:${id}\u0000`,
+      attachmentPlaceholder: (kind, id) => {
+        markers.push(compileMarker(kind, id))
+        return compileMarker(kind, id)
+      },
     })
     const parts: CompilePart[] = []
     for (const piece of md.split(/\u0000/)) {
@@ -301,8 +307,9 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
         } else parts.push({ text: '\n[picture not available on the server yet]\n' })
       }
     }
-    const markdown = await sync.enqueue(() => ai.compile(parts))
-    json(res, 200, { markdown, title: extractNote(doc).title })
+    const note = extractNote(doc)
+    const markdown = keepCompileExtras(await sync.enqueue(() => ai.compile(parts)), markers, note.tags)
+    json(res, 200, { markdown, title: note.title })
   })
 
   // --- AI agent management ------------------------------------------------
