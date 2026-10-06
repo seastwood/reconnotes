@@ -142,7 +142,7 @@ describe('ask about a day', () => {
     })
     prompts.length = 0
     const api = (m: string, p: string, b?: unknown) =>
-      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b && JSON.stringify(b) }).then((r) => r.json())
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
     const job = (await api('POST', '/api/jobs', { kind: 'ask', input: { question: 'where are my notes from yesterday?', tzOffset: new Date().getTimezoneOffset() } })).job
     const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
     expect(done.status).toBe('done')
