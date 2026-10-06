@@ -511,6 +511,7 @@ button.text {
   padding: 0 8px 40px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 .note-row {
   padding: 10px 12px;
@@ -2943,6 +2944,7 @@ a.button {
   right: 0;
   bottom: 0;
   width: 100%;
+  height: auto; /* fill between top and bottom (100% would hang below the screen by the status bar) */
 }
 .app.narrow .panel > * {
   flex: 1;
