@@ -3581,3 +3581,21 @@ a.button {
   font-family: var(--mono);
   font-size: 12px;
 }
+/* Jobs: the AI models in memory now */
+.ai-loaded-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 4px 2px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.1);
+}
+.ai-loaded-line > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}

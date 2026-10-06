@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, CircleAlert, Circle, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { CheckCircle2, CircleAlert, Circle, Cpu, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { aiHealth, samplesApi, type AiHealth, type BenchResult, type Sample } from '../lib/agents'
 import { isFinished, submitJob, useJobs } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
@@ -22,14 +22,60 @@ function useHealth(everyMs: number) {
   return { h, err, check }
 }
 
-/** One line at the top of Jobs: is the AI reachable? (Only shown when something's wrong.) */
-export function AiHealthLine() {
-  const { h } = useHealth(30_000)
-  if (!h || h.status === 'ok' || h.status === 'none') return null
+const gb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
+/** "unloads in 23 min" from Ollama's expiry time */
+function unloadsIn(until: string | null): string {
+  if (!until) return ''
+  const ms = Date.parse(until) - Date.now()
+  if (!Number.isFinite(ms) || ms <= 0 || ms > 7 * 864e5) return ''
+  const min = Math.round(ms / 60_000)
+  return min < 1 ? 'unloads now' : min < 60 ? `unloads in ${min} min` : `unloads in ${Math.round(min / 60)} h`
+}
+
+/**
+ * Top of Jobs: which AI models are in memory now (so you can see what's ready
+ * and what a job will have to load first) – or a warning when the AI can't be reached.
+ * `trigger` changes when a job starts or finishes: check again then.
+ */
+export function AiHealthLine({ trigger }: { trigger?: string }) {
+  const { h, check } = useHealth(15_000)
+  useEffect(() => {
+    if (trigger === undefined) return
+    // loading a model takes a moment
+    const t = setTimeout(() => void check(true), 2000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger])
+  if (!h || h.status === 'none') return null
+  const loaded = h.ollama.flatMap((o) => o.loaded)
   return (
-    <div className={`ai-health-line ${h.status}`}>
-      <CircleAlert size={14} /> {h.summary}
-    </div>
+    <>
+      {h.status !== 'ok' && (
+        <div className={`ai-health-line ${h.status}`}>
+          <CircleAlert size={14} /> {h.summary}
+        </div>
+      )}
+      {h.ollama.some((o) => o.ok) && (
+        <div className="ai-loaded-line" title="Models in your Ollama server’s memory. A job using another model loads it first, which takes longer.">
+          <Cpu size={14} />
+          {loaded.length ? (
+            <span>
+              In memory:{' '}
+              {loaded.map((m, i) => (
+                <span key={m.name} className="ai-model">
+                  {i > 0 && ', '}
+                  <b>{m.name.replace(/:latest$/, '')}</b> {gb(m.vramMb || m.sizeMb)}
+                  {m.vramMb < m.sizeMb * 0.95 ? (m.vramMb ? ' (partly on CPU)' : ' (on CPU)') : ''}
+                  {unloadsIn(m.until) && <span className="muted"> · {unloadsIn(m.until)}</span>}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="muted">No model in memory – the next job loads one first</span>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 

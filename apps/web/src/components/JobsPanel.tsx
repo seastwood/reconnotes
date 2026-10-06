@@ -190,7 +190,7 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders }: Props) {
       <div className="notes jobs-scroll">
         {!isSyncConfigured() && <p className="empty-hint">Jobs run on your ReconNotes server. Connect one in Settings to use AI features.</p>}
         {error && isSyncConfigured() && <p className="jobs-error">Can’t reach the server: {error}</p>}
-        {!error && isSyncConfigured() && <AiHealthLine />}
+        {!error && isSyncConfigured() && <AiHealthLine trigger={`${runningJobs.map((j) => j.id).join(',')}|${finished.length}`} />}
         {paused && (
           <div className="jobs-paused">
             <Pause size={14} /> The queue is paused – nothing new starts.
