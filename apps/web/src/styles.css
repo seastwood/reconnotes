@@ -799,6 +799,8 @@ button.text {
   flex-shrink: 0;
   margin-top: 0.22em;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .note-content ul[data-type='taskList'] li > div {
   flex: 1;
@@ -809,7 +811,7 @@ button.text {
   width: 1.15em;
   height: 1.15em;
   border: 1.5px solid var(--muted);
-  border-radius: 50%;
+  border-radius: 0.22em;
   margin: 0;
   cursor: pointer;
   display: grid;
@@ -827,7 +829,7 @@ button.text {
   border-width: 0 2px 2px 0;
   transform: rotate(45deg) translate(-1px, -1px);
 }
-.note-content li[data-checked='true'] > div {
+.note-content li[data-checked='true'] > div > :is(p, h1, h2, h3) {
   color: var(--muted);
   text-decoration: line-through;
 }
@@ -876,36 +878,22 @@ button.text {
   -webkit-touch-callout: none;
 }
 .image-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.image-frame:hover .image-actions,
-.image-actions.show {
-  opacity: 1;
-}
-@media (hover: none) {
-  .image-actions {
-    opacity: 1;
-  }
-}
-.image-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  margin-bottom: 6px;
+  line-height: 1;
 }
 .image-actions button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 10px;
+  padding: 5px 9px;
   font-size: 13px;
   background: var(--paper);
   border: 1px solid var(--line);
   color: var(--accent-text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  touch-action: manipulation;
 }
 .image-block .drawing-error {
   line-height: 1.4;
@@ -1034,6 +1022,12 @@ button.link {
 }
 .ink-input.tool-eraser {
   cursor: cell;
+}
+.drawing-header {
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .drawing-footer {
   border-top: 1px solid var(--line);

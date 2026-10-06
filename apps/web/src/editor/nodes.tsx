@@ -210,6 +210,18 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   }
   return (
     <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}${markingUp ? ' marking-up' : ''}`} data-drag-handle="">
+      {/* the picture's buttons sit above it, so they never cover what's in it */}
+      {url && editor.isEditable && (
+        // kept in place while marking up, so the picture doesn't jump under the Pencil
+        <div className="image-actions" style={markingUp ? { visibility: 'hidden' } : undefined}>
+          <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
+            <PenLine size={15} /> Mark up
+          </button>
+          <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
+            {busy ? <Loader2 size={15} className="spin" /> : <ScanText size={15} />} {busy ? 'Reading…' : 'Convert to text'}
+          </button>
+        </div>
+      )}
       {url ? (
         <div className="image-frame" style={width ? { width: `${width}%` } : undefined} onPointerDownCapture={onPenDown}>
           <img
@@ -236,16 +248,6 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
           )}
           {selected && editor.isEditable && !markingUp && (
             <div className="image-resize" onPointerDown={startResize} title="Drag to resize" aria-label="Resize image" />
-          )}
-          {editor.isEditable && !markingUp && (
-            <div className={`image-actions${selected || busy ? ' show' : ''}`}>
-              <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
-                <PenLine size={16} /> Mark up
-              </button>
-              <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
-                {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} {busy ? 'Reading…' : 'Convert to text'}
-              </button>
-            </div>
           )}
         </div>
       ) : (

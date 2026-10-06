@@ -602,6 +602,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
 
   return (
     <>
+    {/* the drawing's buttons sit above it, so they never cover the ink */}
+    {editable && footer && !overlay && <div className="drawing-header">{footer}</div>}
     <div
       ref={wrapRef}
       className={`drawing-canvas${overlay ? ' overlay' : ''}${overlay && open ? ' open' : ''}${replaying ? ' replay' : ''}`}
@@ -632,7 +634,6 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         >
           <span className="resize-grip" aria-hidden="true" />
         </div>
-        {footer}
       </div>
     )}
     </>
