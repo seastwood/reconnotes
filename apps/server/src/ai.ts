@@ -99,10 +99,12 @@ const LINE_PROMPT = 'Transcribe the handwritten text in this image. It is a sing
 
 /** One-tap note actions (⋯ menu). */
 const NOTE_ACTION_PROMPTS = {
-  summary: `Summarise the note below in 2 to 6 short bullet points: the key points, decisions and outcomes. Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings – use them too.
+  summary: `Summarise the note below in 2 to 8 short bullet points: the key points, decisions and outcomes. Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings – use them too.
 
+- Keep the note's titles: if it (or a part of it) has a title such as "Leadership Meeting", put that title on its own line in bold (**Leadership Meeting**) above the bullets that belong to it.
+- Stay close to the note's own words: don't reinterpret, generalise or add anything that isn't written there.
 - Write in the same language as the note.
-- Output only the bullet points as Markdown ("- …"), with no heading, preamble or closing remark.
+- Output only the Markdown (titles and "- …" bullets), with no preamble or closing remark.
 
 Note:
 `,
