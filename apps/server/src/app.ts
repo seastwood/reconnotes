@@ -28,7 +28,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     throw new Error('RECON_TOKEN must be set to a secret of at least 16 characters (try: reconnotes-server gen-token)')
   }
   const store = new Store(config.dataDir)
-  const ai = new Ai(new AgentRegistry(store, config), config)
+  const ai = new Ai(new AgentRegistry(store, config), config, store)
   const devices = new Devices(store, config.token)
   const sync = new SyncEngine(config, store, ai, devices)
   const jobs = new Jobs(store)

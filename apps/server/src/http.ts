@@ -21,6 +21,7 @@ import {
   validateAgent,
   type AgentConfig,
   type AiSettings,
+  warmOllama,
 } from './agents'
 import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
 import { listBackups, runBackup } from './backup'
@@ -407,6 +408,21 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('POST', '/api/jobs/away', (req, res) => {
     notifier.away(deviceName(req))
     json(res, 200, { ok: true })
+  })
+
+  /**
+   * Load the handwriting model now (you opened a note with handwriting or
+   * pictures), so "Convert to text" doesn't wait for it to load. Skipped while
+   * a job is running (it would push that job's model out of the GPU).
+   */
+  const warmed = new Map<string, number>()
+  route('POST', '/api/ai/warm', async (_req, res) => {
+    const agent = ai.agents.chain('handwriting')[0]
+    const key = agent ? `${agent.baseUrl}|${agent.model}` : ''
+    if (!agent || agent.kind !== 'ollama' || jobs.counts().running || Date.now() - (warmed.get(key) ?? 0) < 120_000) return json(res, 200, { warmed: false })
+    warmed.set(key, Date.now())
+    void warmOllama(agent)
+    json(res, 202, { warmed: true })
   })
 
   // --- Notifications when jobs finish (ntfy / Home Assistant / webhook) -------

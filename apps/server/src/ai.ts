@@ -1,5 +1,6 @@
 import { Resvg } from '@resvg/resvg-js'
-import { extraInstructions, jobSignal, withExtra } from './jobs'
+import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
+import type { Store } from './store'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import { EmptyReplyError, NoTextError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
@@ -172,7 +173,23 @@ export class Ai {
   constructor(
     readonly agents: AgentRegistry,
     private config: Config,
-  ) {}
+    /** for the saved readings (so unchanged handwriting and pictures aren't read twice) */
+    private store?: Store,
+  ) {
+    store?.db.exec('CREATE TABLE IF NOT EXISTS ai_readings (key TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL)')
+  }
+
+  /** A saved reading of exactly this image by exactly this model and prompt. */
+  private savedReading(key: string): string | null {
+    const r = this.store?.db.prepare('SELECT text FROM ai_readings WHERE key = ?').get(key) as { text: string } | undefined
+    return r ? r.text : null
+  }
+  private saveReading(key: string, text: string) {
+    if (!this.store) return
+    this.store.db.prepare('INSERT OR REPLACE INTO ai_readings (key, text, created_at) VALUES (?, ?, ?)').run(key, text, Date.now())
+    // keep the newest 20,000
+    if (Math.random() < 0.02) this.store.db.exec('DELETE FROM ai_readings WHERE key NOT IN (SELECT key FROM ai_readings ORDER BY created_at DESC LIMIT 20000)')
+  }
 
   get canHandwriting() {
     return this.agents.available('handwriting')
@@ -277,6 +294,13 @@ export class Ai {
     const maxTokens = opts.line ? 200 : 4096
     const empties: string[] = []
     let explanation: string | undefined
+    // the same image read the same way before: use that (a redo or extra instructions read it afresh)
+    const cacheKey = opts.line || extraInstructions() || isRedo() ? null : createHash('sha1').update(`${agent.kind}|${agent.baseUrl}|${agent.model}|${prompts[0]}|`).update(png).digest('hex')
+    const saved = cacheKey ? this.savedReading(cacheKey) : null
+    if (saved) {
+      log.info(`handwriting via "${agent.name}": unchanged image, using the earlier reading`)
+      return saved
+    }
     for (const [i, prompt] of prompts.entries()) {
       try {
         const raw = await backend.generate([{ image: png, mime: opts.mime ?? 'image/png' }, { text: prompt }], maxTokens)
@@ -289,7 +313,10 @@ export class Ai {
           return ''
         }
         log.info(`handwriting via "${agent.name}" (prompt ${i + 1}): ${text.length} chars – ${JSON.stringify(text.slice(0, 120))}`)
-        if (text.trim()) return text
+        if (text.trim()) {
+          if (cacheKey) this.saveReading(cacheKey, text)
+          return text
+        }
         empties.push(`prompt ${i + 1}: empty reply`)
       } catch (err) {
         if (!(err instanceof EmptyReplyError)) throw err
@@ -398,6 +425,14 @@ export class Ai {
    * fails the conversion: if no agent is set up or all fail, the recognised
    * text is returned as is.
    */
+  /** The model the clean-up pass would use (kind|url|model), if any. */
+  cleanupModel(): string | null {
+    const key = (a: AgentConfig) => `${a.kind}|${a.baseUrl}|${a.model}`
+    const readers = new Set(this.agents.chain('handwriting').map(key))
+    const a = this.agents.chain('format')[0] ?? this.agents.chain('compile').find((x) => !readers.has(key(x)))
+    return a ? key(a) : null
+  }
+
   async tidy(text: string, image: Buffer | null, mime: string): Promise<string> {
     // no "Clean up converted text" agent: the "Compile notes" (text) models do it –
     // they're much better at joining wrapped lines and fixing structure than OCR models

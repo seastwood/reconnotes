@@ -34,6 +34,9 @@ export interface Job {
   parentId: string | null
   replacedBy: string | null
   redoable: boolean
+  /** waiting to try again (the AI server couldn't be reached) at this time */
+  retryAt: number | null
+  attempts: number
 }
 
 interface JobsState {
@@ -169,6 +172,7 @@ export async function waitJob(id: string): Promise<Job> {
       if (job.status === 'done') return job
       if (job.status === 'failed') throw new Error(job.error ?? 'The job failed.')
       if (job.status === 'cancelled') throw new JobCancelled()
+      if (job.retryAt) throw new Error('Your AI server can’t be reached right now – this will be tried again automatically (see Jobs).')
     }
   } finally {
     setTimeout(() => awaited.delete(id), 3000)
@@ -188,6 +192,11 @@ export const errorText = (e: unknown): string | null => (e instanceof JobCancell
 export async function runJob(req: JobRequest): Promise<Job> {
   const job = await submitJob(req)
   return waitJob(job.id)
+}
+
+/** Load the handwriting model on the server ahead of time (a note with handwriting or pictures was opened). */
+export function warmUpAi() {
+  if (isSyncConfigured()) void call('POST', '/api/ai/warm', {}).catch(() => {})
 }
 
 /** A job id made here, for work done on this device (its results carry it). */

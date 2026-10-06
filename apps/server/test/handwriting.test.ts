@@ -3,7 +3,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { getStrokes, noteDocName } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -85,6 +85,11 @@ afterAll(async () => {
   await app.close()
   ollama.close()
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// each test reads afresh (the server keeps readings of unchanged images)
+beforeEach(() => {
+  app.store.db.exec('DELETE FROM ai_readings')
 })
 
 const convert = async (drawingId = 'drawinghw000000001') => {

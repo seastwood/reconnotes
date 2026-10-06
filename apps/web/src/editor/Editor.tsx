@@ -1,4 +1,4 @@
-import { errorText } from '../lib/jobs'
+import { errorText, warmUpAi } from '../lib/jobs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -210,6 +210,16 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
 
   // Leave drawing mode when switching notes.
   useEffect(() => () => inkUi.set({ activeDrawing: null, palette: null }), [noteId])
+  // a note with handwriting or pictures: have the server load its handwriting model now
+  useEffect(() => {
+    if (!editor || !isSyncConfigured()) return
+    let found = false
+    editor.state.doc.descendants((n) => {
+      if (n.type.name === 'drawing' || n.type.name === 'image') found = true
+      return !found
+    })
+    if (found) warmUpAi()
+  }, [editor, noteId])
 
   // New, empty note: put the cursor in it.
   useEffect(() => {

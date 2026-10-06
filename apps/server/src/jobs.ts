@@ -51,6 +51,10 @@ export interface Job {
   replacedBy: string | null
   /** whether the server knows how to run it again (redo / retry / resume after a restart) */
   redoable: boolean
+  /** waiting to try again (the AI server couldn't be reached) at this time */
+  retryAt: number | null
+  /** how many times it has been tried automatically */
+  attempts: number
 }
 
 export interface JobSpec {
@@ -106,6 +110,11 @@ export function withExtra(prompt: string, where: 'start' | 'end' = 'end'): strin
   return where === 'start' ? `${line}\n\n${prompt}` : `${prompt}\n\n${line}`
 }
 
+/** The job running now redoes an earlier one (so it should read afresh, not reuse a saved reading). */
+export function isRedo(): boolean {
+  return Boolean(context.getStore()?.job.input.replace)
+}
+
 /** Tell the job list which AI agent is being tried. */
 export function reportAgent(name: string) {
   context.getStore()?.setAgent(name)
@@ -139,7 +148,14 @@ interface Row {
   replaced_by: string | null
   rank: number
   dedupe_key: string | null
+  attempts: number | null
+  retry_at: number | null
 }
+
+/** Failures worth trying again by themselves: the AI server was off, asleep or restarting. */
+const UNREACHABLE = /connection refused|can't reach|could not connect|connection to .* timed out|can't find the host|returned 50[234]|ECONNRESET|socket hang up/i
+/** wait this long before each automatic retry */
+const RETRY_AFTER = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000]
 
 export class Jobs {
   private handlers = new Map<string, JobHandler>()
@@ -151,6 +167,16 @@ export class Jobs {
   private liveAgent = new Map<string, string>()
   private waiters: (() => void)[] = []
   private pumping = false
+  /**
+   * The AI models a job starts and ends with (e.g. the vision model, then the
+   * text model that tidies), so the queue can run jobs for the model that's
+   * already loaded first – a home GPU can't hold both, and swapping takes seconds.
+   */
+  modelsOf: ((job: Job) => { first: string | null; last: string | null }) | null = null
+  private lastModel: string | null = null
+  private passedOver = new Map<string, number>()
+  private moved = new Set<string>()
+  private retryTimer: NodeJS.Timeout | null = null
   /** called when a job finishes (done, failed or cancelled) – e.g. to send a notification */
   onFinish: ((job: Job) => void) | null = null
   /** bumps on every change, so the app can wait for the next one */
@@ -183,6 +209,9 @@ export class Jobs {
       CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, rank);
       CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created_at);
     `)
+    const cols = new Set((store.db.prepare('PRAGMA table_info(jobs)').all() as { name: string }[]).map((c) => c.name))
+    if (!cols.has('attempts')) store.db.exec('ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
+    if (!cols.has('retry_at')) store.db.exec('ALTER TABLE jobs ADD COLUMN retry_at INTEGER')
     this.fileDir = path.join(store.dataDir, 'job-files')
     fs.mkdirSync(this.fileDir, { recursive: true })
     // a job that was running when the server stopped starts again
@@ -314,7 +343,8 @@ export class Jobs {
   wait(id: string): Promise<Job> {
     const j = this.get(id)
     if (!j) return Promise.reject(new Error('job not found'))
-    if (j.status === 'done' || j.status === 'failed' || j.status === 'cancelled') return Promise.resolve(j)
+    // finished – or waiting to try again later, which the caller should hear about now
+    if (j.status === 'done' || j.status === 'failed' || j.status === 'cancelled' || j.retryAt) return Promise.resolve(j)
     return new Promise((resolve) => {
       const list = this.settle.get(id) ?? []
       list.push({ resolve })
@@ -359,7 +389,7 @@ export class Jobs {
   }
 
   resume(id: string): Job | null {
-    this.store.db.prepare("UPDATE jobs SET status = 'queued' WHERE id = ? AND status = 'paused'").run(id)
+    this.store.db.prepare("UPDATE jobs SET status = 'queued', retry_at = NULL WHERE id = ? AND status IN ('paused', 'queued')").run(id)
     this.changed()
     this.kick()
     return this.get(id)
@@ -367,6 +397,7 @@ export class Jobs {
 
   /** Run this queued job next. */
   runNext(id: string): Job | null {
+    this.moved.add(id)
     const min = this.store.db.prepare("SELECT MIN(rank) AS r FROM jobs WHERE status IN ('queued', 'paused')").get() as { r: number | null }
     this.store.db.prepare("UPDATE jobs SET rank = ?, status = CASE WHEN status = 'paused' THEN 'queued' ELSE status END WHERE id = ? AND status IN ('queued', 'paused')").run((min.r ?? Date.now()) - 1, id)
     this.changed()
@@ -458,13 +489,43 @@ export class Jobs {
     this.pumping = true
     try {
       while (!this.queuePaused) {
-        const next = this.store.db.prepare("SELECT * FROM jobs WHERE status = 'queued' ORDER BY rank LIMIT 1").get() as Row | undefined
-        if (!next) break
-        await this.execute(this.toJob(next))
+        const ready = this.store.db
+          .prepare("SELECT * FROM jobs WHERE status = 'queued' AND (retry_at IS NULL OR retry_at <= ?) ORDER BY rank LIMIT 40")
+          .all(Date.now()) as Row[]
+        if (!ready.length) break
+        await this.execute(this.toJob(this.choose(ready)))
       }
     } finally {
       this.pumping = false
+      this.wakeForRetries()
     }
+  }
+
+  /**
+   * The next job: the first in line – unless it needs a different model than
+   * the one just used and another job of the same kind (yours vs background)
+   * can use the loaded one. A job is passed over at most 3 times, and never
+   * when you moved it to the front.
+   */
+  private choose(ready: Row[]): Row {
+    const head = ready[0]
+    if (!this.modelsOf || !this.lastModel || this.moved.has(head.id) || (this.passedOver.get(head.id) ?? 0) >= 3) return head
+    const first = (r: Row) => this.modelsOf!(this.toJob(r)).first
+    if (first(head) === this.lastModel) return head
+    const auto = head.origin === 'auto'
+    const alt = ready.find((r) => (r.origin === 'auto') === auto && first(r) === this.lastModel)
+    if (!alt) return head
+    this.passedOver.set(head.id, (this.passedOver.get(head.id) ?? 0) + 1)
+    return alt
+  }
+
+  /** Start again when the next automatic retry is due. */
+  private wakeForRetries() {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    const r = this.store.db.prepare("SELECT MIN(retry_at) AS t FROM jobs WHERE status = 'queued' AND retry_at IS NOT NULL").get() as { t: number | null }
+    if (r.t === null) return
+    this.retryTimer = setTimeout(() => this.kick(), Math.max(1000, r.t - Date.now() + 50))
+    this.retryTimer.unref?.()
   }
 
   private async execute(job: Job) {
@@ -510,11 +571,30 @@ export class Jobs {
         const e = err instanceof Error ? err : new Error(String(err))
         this.errors.set(job.id, e)
         setTimeout(() => this.errors.delete(job.id), 60_000)
+        const attempts = job.attempts ?? 0
+        if (UNREACHABLE.test(e.message) && this.handlers.has(job.kind) && !this.closures.has(job.id) && attempts < RETRY_AFTER.length) {
+          // the AI server is off or asleep: wait and try again by itself
+          const at = Date.now() + RETRY_AFTER[attempts]
+          log.warn(`job ${job.kind} "${job.title}": ${e.message} – trying again at ${new Date(at).toLocaleTimeString()}`)
+          this.store.db
+            .prepare("UPDATE jobs SET status = 'queued', started_at = NULL, error = ?, attempts = ?, retry_at = ? WHERE id = ?")
+            .run(e.message, attempts + 1, at, job.id)
+          this.cleanupRun(job.id)
+          this.changed()
+          // whoever waits for it hears it's waiting (the app says so instead of spinning)
+          const waiting = this.get(job.id)!
+          for (const w of this.settle.get(job.id) ?? []) w.resolve(waiting)
+          this.settle.delete(job.id)
+          return
+        }
         log.warn(`job ${job.kind} "${job.title}" failed: ${e.message}`)
         this.finish(job.id, { status: 'failed', error: e.message, agent: this.liveAgent.get(job.id) ?? null })
       }
     } finally {
       this.running = null
+      this.moved.delete(job.id)
+      this.passedOver.delete(job.id)
+      if (this.modelsOf) this.lastModel = this.modelsOf(job).last ?? this.lastModel
     }
   }
 
@@ -525,7 +605,7 @@ export class Jobs {
 
   private finish(id: string, f: { status: JobStatus; result?: Record<string, unknown> | null; error?: string; agent?: string | null }) {
     this.store.db
-      .prepare('UPDATE jobs SET status = ?, finished_at = ?, result = ?, error = ?, agent = COALESCE(?, agent), dedupe_key = NULL WHERE id = ?')
+      .prepare('UPDATE jobs SET status = ?, finished_at = ?, result = ?, error = ?, agent = COALESCE(?, agent), dedupe_key = NULL, retry_at = NULL WHERE id = ?')
       .run(f.status, Date.now(), f.result ? JSON.stringify(f.result) : null, f.error ?? null, f.agent ?? null, id)
     this.closures.delete(id)
     this.cleanupRun(id)
@@ -595,6 +675,8 @@ export class Jobs {
       parentId: r.parent_id,
       replacedBy: r.replaced_by,
       redoable: this.handlers.has(r.kind),
+      retryAt: r.status === 'queued' ? (r.retry_at ?? null) : null,
+      attempts: r.attempts ?? 0,
     }
   }
 }

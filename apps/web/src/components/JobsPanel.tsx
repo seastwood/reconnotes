@@ -214,6 +214,7 @@ function statusLine(j: Job, pos: number | undefined): string {
     case 'running':
       return `Running ${duration(now - (j.startedAt ?? now))}${j.progress ? ` · ${j.progress}` : ''}`
     case 'queued':
+      if (j.retryAt) return `AI server unreachable – trying again in ${duration(Math.max(0, j.retryAt - now)).replace(/\.\d s$/, ' s')} (attempt ${j.attempts + 1})`
       return `Waiting${pos ? ` · #${pos} in line` : ''} · ${duration(now - j.createdAt)}`
     case 'paused':
       return 'Paused'
@@ -434,6 +435,11 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                   <XCircle size={14} /> Cancel
                 </button>
               </>
+            )}
+            {j.status === 'queued' && j.retryAt && (
+              <button onClick={run(() => resumeJob(j.id))} title="Try now instead of waiting">
+                <RotateCcw size={14} /> Try now
+              </button>
             )}
             {(j.status === 'queued' || j.status === 'paused') && (
               <>

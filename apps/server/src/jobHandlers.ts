@@ -22,6 +22,7 @@ import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type
 import { askNotes } from './ask'
 import { processAttachment } from './attachments'
 import type { Job, Jobs } from './jobs'
+import type { AiTask } from './agents'
 import { markdownToNodes, type Ctx } from './importNotes'
 
 /**
@@ -97,7 +98,33 @@ async function writeResult(sync: SyncEngine, noteId: string, jobId: string, mark
 
 const preview = (text: string) => (text.length > 1500 ? text.slice(0, 1500) + '…' : text)
 
+/** Which AI task a kind of job starts with (for running jobs on an already-loaded model first). */
+const FIRST_TASK: Record<string, AiTask | null> = {
+  'convert-drawing': 'handwriting',
+  'convert-picture': 'handwriting',
+  recognise: 'handwriting',
+  'extract-text': 'images',
+  transcribe: 'audio',
+  summary: 'compile',
+  todos: 'compile',
+  clean: 'compile',
+  compile: 'compile',
+  ask: 'compile',
+  tidy: 'format',
+}
+
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs) {
+  const modelOf = (task: AiTask | null) => {
+    const a = task ? ai.agents.chain(task)[0] : undefined
+    return a ? `${a.kind}|${a.baseUrl}|${a.model}` : null
+  }
+  jobs.modelsOf = (job) => {
+    const first = modelOf(FIRST_TASK[job.kind] ?? null)
+    // converting ends with the clean-up model (when there is one)
+    const cleanup = job.kind === 'convert-drawing' || job.kind === 'convert-picture' ? ai.cleanupModel() : null
+    return { first, last: cleanup ?? first }
+  }
+
   const replaced = (job: Job) => {
     const r = job.input.replace as string | null | undefined
     if (r) jobs.markReplaced(r, job.id)

@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createNote, getContent, noteDocName } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -51,6 +51,11 @@ afterAll(async () => {
   await app.close()
   fake.close()
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// each test reads afresh (the server keeps readings of unchanged images)
+beforeEach(() => {
+  app.store.db.exec('DELETE FROM ai_readings')
 })
 
 const api = async (method: string, p: string, body?: unknown) => {

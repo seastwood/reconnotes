@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createNote, getContent, getNotes, getStrokes, noteDocName, readNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -68,6 +68,11 @@ afterAll(async () => {
   await app.close()
   ollama.close()
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// each test reads afresh (the server keeps readings of unchanged images)
+beforeEach(() => {
+  app.store.db.exec('DELETE FROM ai_readings')
 })
 
 const api = async (method: string, p: string, body?: unknown) => {
@@ -213,6 +218,59 @@ describe('jobs', () => {
     // removing a compile's result moves the note to Recently Deleted
     await api('POST', `/api/jobs/${redo.id}/remove-result`)
     expect(readNote(getNotes(app.sync.getDoc(WORKSPACE_DOC)!).get(compiled)!).trashedAt).toBeTruthy()
+  })
+
+  it('reads unchanged handwriting only once (a redo reads it again)', async () => {
+    const first = await waitFor((await api('POST', '/api/jobs', { kind: 'convert-drawing', noteId: NOTE, input: { drawingId: DRAWING } })).body.job.id)
+    await api('POST', `/api/jobs/${first.id}/remove-result`)
+    prompts.length = 0
+    const second = await waitFor((await api('POST', '/api/jobs', { kind: 'convert-drawing', noteId: NOTE, input: { drawingId: DRAWING } })).body.job.id)
+    expect(second.status).toBe('done')
+    expect(prompts.filter((p) => /Transcribe the handwriting/.test(p))).toHaveLength(0) // not read again
+    prompts.length = 0
+    const redo = await waitFor((await api('POST', `/api/jobs/${second.id}/redo`, {})).body.job.id)
+    expect(redo.status).toBe('done')
+    expect(prompts.filter((p) => /Transcribe the handwriting/.test(p)).length).toBeGreaterThan(0) // read afresh
+    await api('POST', `/api/jobs/${redo.id}/remove-result`)
+  })
+
+  it('runs jobs for the model that is already loaded first', async () => {
+    const order: string[] = []
+    app.jobs.register('test-x', async (j) => (order.push(j.title), {}))
+    app.jobs.register('test-y', async (j) => (order.push(j.title), {}))
+    const saved = app.jobs.modelsOf
+    app.jobs.modelsOf = (j) => ({ first: j.kind === 'test-x' ? 'X' : 'Y', last: j.kind === 'test-x' ? 'X' : 'Y' })
+    await api('POST', '/api/jobs/pause-all', { paused: true })
+    const ids = [
+      app.jobs.submit({ kind: 'test-x', title: 'x1' }).id,
+      app.jobs.submit({ kind: 'test-y', title: 'y1' }).id,
+      app.jobs.submit({ kind: 'test-x', title: 'x2' }).id,
+      app.jobs.submit({ kind: 'test-y', title: 'y2' }).id,
+    ]
+    await api('POST', '/api/jobs/pause-all', { paused: false })
+    for (const id of ids) await app.jobs.wait(id)
+    app.jobs.modelsOf = saved
+    // x1 loads model X, so x2 runs before y1; then y1, y2
+    expect(order).toEqual(['x1', 'x2', 'y1', 'y2'])
+  })
+
+  it('waits and tries again by itself when the AI server is unreachable', async () => {
+    const agent = app.ai.agents.agents().find((a) => a.name === 'Local')!
+    const good = agent.baseUrl
+    app.ai.agents.save({ ...agent, baseUrl: 'http://127.0.0.1:9' }) // nothing listens there
+    const job = (await api('POST', '/api/jobs', { kind: 'summary', noteId: NOTE })).body.job
+    const waiting = (await api('GET', `/api/jobs/${job.id}/wait`)).body.job
+    expect(waiting.status).toBe('queued')
+    expect(waiting.retryAt).toBeGreaterThan(Date.now())
+    expect(waiting.attempts).toBe(1)
+    expect(waiting.error).toMatch(/connection refused|could not connect/)
+    // the server is back; "try now" (or the timer) runs it
+    app.ai.agents.save({ ...agent, baseUrl: good })
+    await api('POST', `/api/jobs/${job.id}/resume`)
+    const done = await waitFor(job.id)
+    expect(done.status).toBe('done')
+    expect(done.error).toBeNull()
+    await api('POST', `/api/jobs/${job.id}/remove-result`)
   })
 
   it('lists work done on a device, and the old AI routes show up as jobs too', async () => {

@@ -171,6 +171,27 @@ interface OllamaReply {
  * plain greedy decoding easily get stuck repeating the same words.
  */
 const SAMPLING = { temperature: 0, repeat_penalty: 1.15, repeat_last_n: 64 }
+/** keep a model loaded for a while after use (Ollama's default is 5 minutes): loading one takes seconds */
+const KEEP_ALIVE = '30m'
+
+/**
+ * Load an Ollama model now (empty prompt), so the first real request doesn't
+ * wait for it. Returns false if it isn't an Ollama agent or can't be reached.
+ */
+export async function warmOllama(agent: AgentConfig): Promise<boolean> {
+  if (agent.kind !== 'ollama') return false
+  try {
+    const res = await fetch(trimSlash(agent.baseUrl) + '/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: agent.model, prompt: '', keep_alive: KEEP_ALIVE }),
+      signal: AbortSignal.timeout(120_000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
 
 /** What Ollama says about a model (cached per server + model). */
 interface OllamaModelInfo {
@@ -303,6 +324,7 @@ class OllamaBackend implements Backend {
     const body = await this.post('/api/chat', {
       ...(think === undefined ? {} : { think }),
       options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
+      keep_alive: KEEP_ALIVE,
       messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
     })
     const m = (body.message ?? {}) as { content?: string; thinking?: string }
@@ -314,6 +336,7 @@ class OllamaBackend implements Backend {
       prompt: text,
       ...(images.length ? { images } : {}),
       options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
+      keep_alive: KEEP_ALIVE,
     })
     return {
       content: String(body.response ?? ''),
