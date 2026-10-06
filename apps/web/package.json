@@ -14,7 +14,7 @@
     "ios:add-extensions": "ruby ios/scripts/add-share-extension.rb && ruby ios/scripts/add-widget.rb",
     "ios:enable-push": "ruby ios/scripts/enable-push.rb",
     "ios:disable-push": "ruby ios/scripts/disable-push.rb",
-    "ios:setup": "ruby ios/scripts/add-share-extension.rb && ruby ios/scripts/add-widget.rb"
+    "ios:setup": "ruby ios/scripts/add-share-extension.rb && ruby ios/scripts/add-widget.rb && ruby ios/scripts/enable-push.rb --auto"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

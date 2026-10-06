@@ -19,6 +19,36 @@ end
 IOS = File.expand_path('../App', __dir__)
 project = Xcodeproj::Project.open(File.join(IOS, 'App.xcodeproj'))
 app = project.targets.find { |t| t.name == 'App' } or abort 'No "App" target in the Xcode project'
+
+# --auto (used by `npm run ios:setup`): only if the signing team can have push.
+# Free Apple IDs (Personal Teams) can't; their provisioning profiles expire after
+# 7 days, a paid account's after a year – so look at this Mac's profiles for the team.
+if ARGV.include?('--auto')
+  require 'date'
+  require 'shellwords'
+  team = ENV['TEAM'] || app.build_configurations.map { |c| c.build_settings['DEVELOPMENT_TEAM'] }.compact.first
+  dirs = [File.expand_path('~/Library/Developer/Xcode/UserData/Provisioning Profiles'), File.expand_path('~/Library/MobileDevice/Provisioning Profiles')]
+  days = Dir.glob(dirs.map { |d| File.join(d, '*.mobileprovision') }).filter_map do |f|
+    xml = `security cms -D -i #{f.shellescape} 2>/dev/null`
+    next if xml.empty?
+    teams = xml.scan(%r{<key>TeamIdentifier</key>\s*<array>\s*<string>([^<]+)</string>}).flatten
+    next unless team && teams.include?(team)
+    created = xml[%r{<key>CreationDate</key>\s*<date>([^<]+)</date>}, 1]
+    expires = xml[%r{<key>ExpirationDate</key>\s*<date>([^<]+)</date>}, 1]
+    next unless created && expires
+    (DateTime.parse(expires) - DateTime.parse(created)).to_i
+  end
+  if team.nil? || days.empty?
+    puts "Push notifications: skipped – couldn't tell whether your signing team#{team ? " (#{team})" : ''} can use them yet."
+    puts '  Build once from Xcode, then run this again; or if you have a paid Apple developer account: npm run ios:enable-push'
+    exit 0
+  end
+  if days.max <= 10
+    puts "Push notifications: skipped – team #{team} is a free (Personal Team) account, which Apple doesn't allow push for."
+    system('ruby', File.join(__dir__, 'disable-push.rb'), out: File::NULL)
+    exit 0
+  end
+end
 rel = app.build_configurations.map { |c| c.build_settings['CODE_SIGN_ENTITLEMENTS'] }.compact.first || 'App/App.entitlements'
 path = File.join(IOS, rel)
 plist = File.exist?(path) ? (Xcodeproj::Plist.read_from_path(path) || {}) : {}
