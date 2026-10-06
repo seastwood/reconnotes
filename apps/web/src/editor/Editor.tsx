@@ -8,6 +8,7 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { JobTag } from './jobTag'
 import { ChecklistClipboard } from './checklistCopy'
+import { BlockClipboard } from './blockClipboard'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
 import { DrawingNode, NoteContext } from '../drawing/DrawingNode'
@@ -98,6 +99,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         TaskItem.configure({ nested: true }),
         JobTag,
         ChecklistClipboard,
+        BlockClipboard.configure({ doc }),
         TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),
         DrawingNode,
         ImageNode,

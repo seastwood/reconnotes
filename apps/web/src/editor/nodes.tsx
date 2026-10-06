@@ -2,7 +2,8 @@ import { errorText } from '../lib/jobs'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Scissors, Share, TextQuote } from 'lucide-react'
+import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { getNotes, getTranscripts, newId, readNote, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
@@ -224,6 +225,7 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
           <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
             {busy ? <Loader2 size={15} className="spin" /> : <ScanText size={15} />} {busy ? 'Reading…' : 'Convert to text'}
           </button>
+          {ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="picture" />}
         </div>
       )}
       {url ? (
@@ -294,6 +296,20 @@ export const ImageNode = Node.create({
     })
   },
 })
+
+/** Copy / Cut for a picture, recording or file: to paste it in another note. */
+function BlockCopyButtons({ editor, getPos, doc, what }: { editor: Editor; getPos: () => number | undefined; doc: Y.Doc; what: string }) {
+  return (
+    <>
+      <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), doc))} title={`Copy this ${what} (paste it in any note)`} aria-label={`Copy ${what}`}>
+        <Copy size={15} />
+      </button>
+      <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), doc, true))} title={`Cut this ${what} – to move it to another note`} aria-label={`Cut ${what}`}>
+        <Scissors size={15} />
+      </button>
+    </>
+  )
+}
 
 // --- Audio ------------------------------------------------------------------
 
@@ -422,6 +438,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
             {busy ? <Loader2 size={15} className="spin" /> : <AudioLines size={15} />} {busy ? 'Transcribing…' : 'Transcribe'}
           </button>
         )}
+        {editor.isEditable && ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="recording" />}
       </div>
       {error && (
         <div className="drawing-error" role="alert">
@@ -516,7 +533,7 @@ export const AudioNode = Node.create({
 
 // --- Generic file (PDF, documents, …) -----------------------------------------
 
-function FileView({ node }: ReactNodeViewProps) {
+function FileView({ node, editor, getPos }: ReactNodeViewProps) {
   const ctx = useContext(NoteContext)
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const text = useAttachmentText(node.attrs.attachmentId)
@@ -563,6 +580,7 @@ function FileView({ node }: ReactNodeViewProps) {
           <button {...tap(run(() => shareFile(node.attrs.attachmentId, name)))} title="Share or save a copy" aria-label="Share or save">
             <Share size={16} />
           </button>
+          {editor.isEditable && ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="file" />}
         </div>
       </div>
       {error && (

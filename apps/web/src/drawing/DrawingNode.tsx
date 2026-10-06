@@ -3,7 +3,8 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { ArrowDown, ArrowUp, GripVertical, Loader2, ScanText, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Copy, GripVertical, Loader2, ScanText, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import { copyBlock } from '../editor/blockClipboard'
 import { getStrokes, getTranscripts, inkHash, newId, tidyHandwriting, transcriptSourceKey } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
 import { DRAW_ORIGIN, useUndoManager } from '../editor/undo'
@@ -271,6 +272,12 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
       </button>
       <button onClick={convert} disabled={busy} title="Convert handwriting to text below this drawing">
         {busy ? <Loader2 size={16} className="spin" /> : <ScanText size={16} />} Convert to text
+      </button>
+      <button onClick={() => void copyBlock(editor, getPos(), ctx.doc)} title="Copy this handwriting (paste it in any note)" aria-label="Copy drawing">
+        <Copy size={16} />
+      </button>
+      <button onClick={() => void copyBlock(editor, getPos(), ctx.doc, true)} title="Cut – to move it to another note" aria-label="Cut drawing">
+        <Scissors size={16} />
       </button>
       <button onClick={() => deleteNode()} title="Delete drawing" aria-label="Delete drawing" className="danger">
         <Trash2 size={16} />
