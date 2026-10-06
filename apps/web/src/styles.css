@@ -3001,42 +3001,18 @@ a.button {
   flex-shrink: 0;
   min-width: 0;
   height: 100%;
-  position: relative;
 }
-/* drag a column's edge to resize it (iPad / computer) */
-.resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -8px;
-  width: 16px;
-  z-index: 20;
-  cursor: col-resize;
-  touch-action: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* iPad / computer: the notes / Jobs column widened over the note area (the
+   note stays open underneath, just hidden, and comes back as it was) */
+.app.list-expanded .panel-list {
+  flex: 1;
 }
-.resize-handle span {
-  width: 4px;
-  height: 44px;
-  border-radius: 2px;
-  background: var(--line);
-  opacity: 0;
-  transition: opacity 150ms;
+.app.list-expanded .panel-list .list-col {
+  width: auto;
+  flex: 1;
+  border-right: 0;
 }
-.resize-handle:hover span,
-.resize-handle:active span {
-  opacity: 1;
-  background: var(--accent);
-}
-@media (pointer: coarse) {
-  /* always a hint of the grip on touch screens */
-  .resize-handle span {
-    opacity: 0.8;
-  }
-}
-.app.narrow .resize-handle {
+.app.list-expanded .panel-editor {
   display: none;
 }
 .panel-editor {

@@ -48,6 +48,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { showToast } from '../lib/toast'
 import { useWorkspace } from '../lib/workspace'
 import { Popover } from './Popover'
+import { ExpandButton } from './ExpandButton'
 import { AiHealthLine, BenchTable } from './AiHealth'
 import { AskAnswer, type AskResult } from './AskPanel'
 import { samplesApi, type BenchResult } from '../lib/agents'
@@ -99,6 +100,9 @@ interface Props {
   onOpenNote: (id: string) => void
   onBack?: () => void
   onToggleFolders?: () => void
+  /** iPad / computer: the column is widened over the note area */
+  expanded?: boolean
+  onToggleExpand?: () => void
 }
 
 /**
@@ -107,7 +111,7 @@ interface Props {
  * links to the results, the errors, and ways to cancel, pause, retry or
  * redo with extra instructions.
  */
-export function JobsPanel({ onOpenNote, onBack, onToggleFolders }: Props) {
+export function JobsPanel({ onOpenNote, onBack, onToggleFolders, expanded = false, onToggleExpand }: Props) {
   const { jobs, paused, loaded, error, kinds } = useJobs((s) => s)
   const [showAuto, setShowAuto] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -157,6 +161,7 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders }: Props) {
           </button>
         )}
         <h2>Jobs</h2>
+        {onToggleExpand && <ExpandButton expanded={Boolean(expanded)} onToggle={onToggleExpand} />}
         <button
           className={`icon${paused ? ' on' : ''}`}
           onClick={() => void pauseAllJobs(!paused).catch((e) => showToast((e as Error).message))}

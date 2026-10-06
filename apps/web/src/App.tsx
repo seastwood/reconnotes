@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
@@ -16,7 +16,6 @@ import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
-import { ResizeHandle, loadWidths, type Widths } from './components/ResizeHandle'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
@@ -217,6 +216,7 @@ export function App() {
     const q = query?.trim()
     setFindOnOpen((f) => (q ? { noteId: id, query: q, n: (f?.n ?? 0) + 1 } : null))
     setFromSearch(Boolean(q))
+    setListExpanded(false)
     setNav({ ...nav, noteId: id })
     setPane('note')
     setTrail({ back: [], forward: [] })
@@ -276,8 +276,8 @@ export function App() {
     navDir.current = depth[pane] > depth[lastPane.current] ? 'fwd' : 'back'
     lastPane.current = pane
   }
-  /** column widths you dragged (iPad / computer) */
-  const [widths, setWidths] = useState<Widths>(loadWidths)
+  /** iPad / computer: the notes / Jobs column widened over the note area */
+  const [listExpanded, setListExpanded] = useState(false)
   const sidebarInline = !narrow && wide && layout === 3
   const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
   const listVisible = narrow ? pane === 'list' : layout >= 2
@@ -397,17 +397,7 @@ export function App() {
   }, [templatesKey, nav.view, openNoteMeta?.id, openNoteMeta?.pinned])
 
   return (
-    <div
-      className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}`}
-      style={
-        narrow
-          ? undefined
-          : ({
-              ...(widths.sidebar ? { '--sidebar-w': `${widths.sidebar}px` } : {}),
-              ...(widths.list ? { '--list-w': `${widths.list}px` } : {}),
-            } as CSSProperties)
-      }
-    >
+    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}${!narrow && listExpanded && listVisible ? ' list-expanded' : ''}`}>
       <Panel
         show={sidebarVisible}
         mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
@@ -436,9 +426,6 @@ export function App() {
             if (overlay && !sidebarInline) setOverlay(false)
           }}
         />
-        {sidebarInline && (
-          <ResizeHandle column="sidebar" widths={widths} onChange={setWidths} otherWidth={listVisible ? (widths.list ?? 300) : 0} />
-        )}
       </Panel>
       <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
         <div className="list-col">
@@ -447,6 +434,8 @@ export function App() {
               onOpenNote={openNote}
               onBack={narrow ? () => setPane('folders') : undefined}
               onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
+              expanded={listExpanded}
+              onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             />
           ) : (
           <NoteList
@@ -455,12 +444,13 @@ export function App() {
             onOpen={openNote}
             onBack={narrow ? () => setPane('folders') : undefined}
             onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
+            expanded={listExpanded}
+            onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
             onMoveNotes={(ids) => setMoving({ kind: 'notes', ids })}
           />
           )}
         </div>
-        {!narrow && <ResizeHandle column="list" widths={widths} onChange={setWidths} otherWidth={sidebarInline ? (widths.sidebar ?? 260) : 0} />}
       </Panel>
       <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">
         <main className="editor-col">

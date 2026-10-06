@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
+import { ExpandButton } from './ExpandButton'
 import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash } from 'lucide-react'
 import {
   createNote,
@@ -30,6 +31,9 @@ interface Props {
   onBack?: () => void
   /** show/hide the folders panel (iPad and desktop) */
   onToggleFolders?: () => void
+  /** iPad / computer: the column is widened over the note area */
+  expanded?: boolean
+  onToggleExpand?: () => void
   onMoveNote: (id: string) => void
   /** move several notes (pick a folder) */
   onMoveNotes: (ids: string[]) => void
@@ -44,7 +48,7 @@ function formatDate(ts: number) {
   return d.toLocaleDateString()
 }
 
-export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMoveNote, onMoveNotes }: Props) {
+export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expanded, onToggleExpand, onMoveNote, onMoveNotes }: Props) {
   const ws = useWorkspace()
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
@@ -200,6 +204,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
           </button>
         )}
         <h2>{selecting ? (selected.size ? `${selected.size} selected` : 'Select notes') : title}</h2>
+        {onToggleExpand && <ExpandButton expanded={Boolean(expanded)} onToggle={onToggleExpand} />}
         {canSelect && (
           <button
             className={`icon${selecting ? ' on' : ''}`}
