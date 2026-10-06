@@ -16,6 +16,8 @@ import {
   CalendarDays,
   CloudDownload,
   Command as CommandIcon,
+  Activity,
+  Loader2,
 } from 'lucide-react'
 import {
   buildTree,
@@ -33,6 +35,8 @@ import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { isKeptOffline, setKeepOffline, useOffline } from '../lib/offline'
 import { moveNotes, trashNotes } from '../lib/noteActions'
 import { SyncBadge } from './SyncBadge'
+import { useJobs } from '../lib/jobs'
+import { isSyncConfigured } from '../lib/settings'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 
 export type View =
@@ -43,6 +47,7 @@ export type View =
   | { kind: 'tag'; tag: string }
   | { kind: 'templates' }
   | { kind: 'due' }
+  | { kind: 'jobs' }
 
 interface Props {
   /** shown floating over the notes list (medium screens) */
@@ -306,6 +311,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             </span>
           </div>
         )}
+        {isSyncConfigured() && <JobsRow active={view.kind === 'jobs'} onClick={() => onView({ kind: 'jobs' })} />}
         <div className="section-label">
           Folders
           <div className="menu-anchor">
@@ -377,5 +383,33 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         </div>
       </nav>
     </aside>
+  )
+}
+
+/** "Jobs" in the sidebar: how many are running or waiting, or that one failed since you last looked. */
+function JobsRow({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const counts = useJobs((s) => s.counts)
+  const lastFailed = useJobs((s) => Math.max(0, ...s.jobs.filter((j) => j.status === 'failed' && j.origin !== 'auto').map((j) => j.finishedAt ?? 0)))
+  const [seen, setSeen] = useState(() => safeLocalGet<number>('reconnotes.jobsSeen', 0))
+  if (active && lastFailed > seen) {
+    setSeen(lastFailed)
+    safeLocalSet('reconnotes.jobsSeen', lastFailed)
+  }
+  const waiting = counts.queued + counts.paused + counts.running
+  return (
+    <div className={`folder-row special${active ? ' active' : ''}`} onClick={onClick}>
+      {counts.running ? <Loader2 size={16} className="spin" /> : <Activity size={16} />} <span className="folder-name">Jobs</span>
+      {waiting > 0 ? (
+        <span className="count" title={`${counts.running} running, ${counts.queued} waiting${counts.paused ? `, ${counts.paused} paused` : ''}`}>
+          {waiting}
+        </span>
+      ) : (
+        lastFailed > seen && (
+          <span className="count due-now" title="A job failed">
+            !
+          </span>
+        )
+      )}
+    </div>
   )
 }

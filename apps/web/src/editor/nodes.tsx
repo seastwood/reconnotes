@@ -1,3 +1,4 @@
+import { errorText } from '../lib/jobs'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useContext, useEffect, useRef, useState } from 'react'
@@ -127,12 +128,12 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     setBusy(true)
     setError(null)
     try {
-      await convertImage(editor, node.attrs.attachmentId, () => {
+      await convertImage(editor, ctx?.noteId ?? '', node.attrs.attachmentId, () => {
         const pos = getPos()
         return typeof pos === 'number' ? pos + node.nodeSize : undefined
       })
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorText(e))
     } finally {
       setBusy(false)
     }
@@ -353,6 +354,7 @@ function followPlayhead(el: HTMLAudioElement) {
 }
 
 function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
+  const ctx = useContext(NoteContext)
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const startedAt = node.attrs.startedAt as number | null
   const endedAt = node.attrs.endedAt as number | null
@@ -391,6 +393,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     try {
       await transcribeAudio(
         editor,
+        ctx?.noteId ?? '',
         node.attrs.attachmentId,
         () => {
           const pos = getPos()
@@ -399,7 +402,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
         transcript,
       )
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorText(e))
     } finally {
       setBusy(false)
     }

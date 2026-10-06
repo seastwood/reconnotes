@@ -1,3 +1,4 @@
+import { errorText } from '../lib/jobs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor, useEditorState, type Editor as TiptapEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -5,6 +6,7 @@ import Collaboration from '@tiptap/extension-collaboration'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
+import { JobTag } from './jobTag'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
 import { DrawingNode, NoteContext } from '../drawing/DrawingNode'
@@ -93,6 +95,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         LinkOpener,
         TaskList,
         TaskItem.configure({ nested: true }),
+        JobTag,
         TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),
         DrawingNode,
         ImageNode,
@@ -184,9 +187,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       { id: 'share', label: 'Share a read-only link', section: S, keywords: 'public url send', run: () => setShareOpen(true) },
       { id: 'print', label: 'Print or save as PDF', section: S, keywords: 'share pdf export', run: () => void printNote(editor, doc, noteId) },
       { id: 'convert', label: 'Convert all handwriting to text', section: S, keywords: 'ocr recognise', run: () => void convertAllHandwriting(editor, noteId) },
-      { id: 'summary', label: 'Summarise with AI', section: S, keywords: 'summary ai', run: () => void noteAction(editor, noteId, 'summary').catch((e) => alert((e as Error).message)) },
-      { id: 'todos', label: 'Extract to-dos with AI', section: S, keywords: 'tasks ai', run: () => void noteAction(editor, noteId, 'todos').catch((e) => alert((e as Error).message)) },
-      { id: 'compile', label: 'Compile into a clean document with AI', section: S, keywords: 'ai tidy', run: () => void compileNote(editor, noteId, folderRef.current).then((id) => onOpenNoteRef.current(id)).catch((e) => alert((e as Error).message)) },
+      { id: 'summary', label: 'Summarise with AI', section: S, keywords: 'summary ai', run: () => void noteAction(editor, noteId, 'summary').catch((e) => errorText(e) && alert(errorText(e))) },
+      { id: 'todos', label: 'Extract to-dos with AI', section: S, keywords: 'tasks ai', run: () => void noteAction(editor, noteId, 'todos').catch((e) => errorText(e) && alert(errorText(e))) },
+      { id: 'compile', label: 'Compile into a clean document with AI', section: S, keywords: 'ai tidy', run: () => void compileNote(editor, noteId).then((id) => onOpenNoteRef.current(id)).catch((e) => errorText(e) && alert(errorText(e))) },
       { id: 'template', label: 'Save as template', section: S, run: () => void saveAsTemplate(noteId) },
     ])
     // eslint-disable-next-line react-hooks/exhaustive-deps

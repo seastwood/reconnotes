@@ -3,6 +3,8 @@ import { PanelLeft } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
 import { NoteList } from './components/NoteList'
+import { JobsPanel } from './components/JobsPanel'
+import { setJobNavigator } from './lib/jobs'
 import { SettingsDialog } from './components/SettingsDialog'
 import { MoveDialog, type MoveTarget } from './components/MoveDialog'
 import { NoteEditor } from './editor/Editor'
@@ -306,6 +308,8 @@ export function App() {
   }
   const appRef = useRef({ nav, showView, openNote, setTheme: (t: 'light' | 'dark' | 'system') => settings.set({ theme: t }) })
   appRef.current = { nav, showView, openNote, setTheme: (t) => settings.set({ theme: t }) }
+  // the buttons on "job finished" messages
+  useEffect(() => setJobNavigator({ openNote: (id) => appRef.current.openNote(id), showJobs: () => appRef.current.showView({ kind: 'jobs' }) }), [])
   const templatesKey = ws.notes.filter((n) => n.template && !n.trashedAt).map((n) => `${n.id}:${n.title}`).join('|')
   const openNoteMeta = note && !note.trashedAt ? note : null
   useEffect(() => {
@@ -328,6 +332,7 @@ export function App() {
         .filter((n) => n.template && !n.trashedAt)
         .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
       { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
+      { id: 'jobs', label: 'Jobs (AI and processing)', section: G, keywords: 'queue ai running tasks progress', run: () => a().showView({ kind: 'jobs' }) },
       { id: 'due', label: 'Due items', section: G, keywords: 'reminders deadlines calendar', run: () => a().showView({ kind: 'due' }) },
       { id: 'templates', label: 'Templates', section: G, run: () => a().showView({ kind: 'templates' }) },
       { id: 'trash', label: 'Recently Deleted', section: G, keywords: 'trash bin', run: () => a().showView({ kind: 'trash' }) },
@@ -383,6 +388,13 @@ export function App() {
       </Panel>
       <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
         <div className="list-col">
+          {nav.view.kind === 'jobs' ? (
+            <JobsPanel
+              onOpenNote={openNote}
+              onBack={narrow ? () => setPane('folders') : undefined}
+              onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
+            />
+          ) : (
           <NoteList
             view={nav.view}
             noteId={nav.noteId}
@@ -392,6 +404,7 @@ export function App() {
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
             onMoveNotes={(ids) => setMoving({ kind: 'notes', ids })}
           />
+          )}
         </div>
       </Panel>
       <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">

@@ -4,6 +4,7 @@ import { App } from './App'
 import { syncScribbleSetting } from './lib/deviceOcr'
 import { handleConnectHash } from './lib/connectLink'
 import { startOfflineFolders } from './lib/offline'
+import { startJobs } from './lib/jobs'
 import { keyboard } from './lib/keyboard'
 import './styles.css'
 
@@ -16,6 +17,7 @@ createRoot(document.getElementById('root')!).render(
 syncScribbleSetting()
 handleConnectHash()
 startOfflineFolders()
+startJobs()
 pinToViewport()
 
 /**

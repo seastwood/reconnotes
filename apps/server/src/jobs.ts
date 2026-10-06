@@ -385,8 +385,10 @@ export class Jobs {
     const j = this.get(id)
     if (!j) throw new Error('job not found')
     if (!this.handlers.has(j.kind)) throw new Error('This kind of job can’t be redone.')
-    // the result to replace: this job's, or the latest one in its chain
-    const replace = j.status === 'done' ? id : (j.input.replace as string | undefined) ?? null
+    // the result to replace: the latest one in this job's chain of redos
+    let latest = j
+    for (let n = 0; latest.replacedBy && n < 100; n++) latest = this.get(latest.replacedBy) ?? latest
+    const replace = latest.status === 'done' && !latest.result?.removed ? latest.id : ((latest.input.replace as string | undefined) ?? null)
     const job = this.add({
       kind: j.kind,
       title: j.title,
@@ -490,7 +492,10 @@ export class Jobs {
     })
     try {
       const out = await Promise.race([context.run(ctx, handler), aborted])
-      this.finish(job.id, { status: 'done', result: out.result ?? null, agent: out.agent ?? this.liveAgent.get(job.id) ?? null })
+      // "Local (qwen2.5:7b)" says more than the handler's "Local"
+      const live = this.liveAgent.get(job.id)
+      const agent = live && (!out.agent || live.startsWith(out.agent)) ? live : (out.agent ?? null)
+      this.finish(job.id, { status: 'done', result: out.result ?? null, agent })
     } catch (err) {
       const reason = controller.signal.aborted ? controller.signal.reason : null
       if (reason instanceof JobCancelledError && reason.reason === 'pause') {

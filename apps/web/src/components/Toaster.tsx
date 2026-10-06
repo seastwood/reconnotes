@@ -18,6 +18,17 @@ export function Toaster() {
           Undo
         </button>
       )}
+      {t.action && (
+        <button
+          className="toast-undo"
+          onClick={() => {
+            t.action!.run()
+            dismissToast()
+          }}
+        >
+          {t.action.label}
+        </button>
+      )}
       <button className="icon" onClick={dismissToast} aria-label="Dismiss">
         <X size={16} />
       </button>

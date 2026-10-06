@@ -1,3 +1,4 @@
+import { errorText } from '../lib/jobs'
 import { useEffect, useRef, useState } from 'react'
 import { Popover } from '../components/Popover'
 import { useEditorState, type Editor } from '@tiptap/react'
@@ -171,7 +172,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
     try {
       await fn()
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorText(e))
     } finally {
       setBusy(null)
     }
@@ -326,7 +327,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
         title="Compile into a clean document with AI (handwriting + typing)"
         aria-label="Compile with AI"
         disabled={Boolean(busy)}
-        onClick={() => run('Compiling…', async () => onOpenNote(await compileNote(editor, noteId, folderId)))}
+        onClick={() => run('Compiling…', async () => onOpenNote(await compileNote(editor, noteId)))}
       >
         <Sparkles size={20} />
       </button>
@@ -342,7 +343,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             <button onClick={() => (setMenu(null), void run('Finding to-dos…', () => noteAction(editor, noteId, 'todos')))}>
               <ListTodo size={16} /> Extract to-dos
             </button>
-            <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor)))} title="Fix spelling, grammar and clarity of the selected text">
+            <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor, noteId)))} title="Fix spelling, grammar and clarity of the selected text">
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
             </button>
             <div className="menu-sep" />

@@ -31,6 +31,12 @@ It's built for one person's daily notes, and anyone can run it.
   text in images, screenshots and charts, PDFs, and audio transcripts. Search works offline too.
 - **AI.** *Convert to text* turns a drawing into clean typed text. *Compile* turns a whole note,
   handwriting and typing, into a tidy new document.
+- **Jobs.** Every AI request and processing step is a job in one queue on the server (one at a
+  time, so a local GPU isn't overloaded). *Jobs* in the sidebar shows what's running and for how
+  long, which model is working on it, what's waiting and what finished – with links to the
+  results and full error messages. Cancel, pause, run next, retry, remove a result, or redo a
+  job with extra instructions ("it's a shopping list", "keep my bullet points") to replace its
+  result. Jobs finish even if you close the app: the server writes the results into the note.
 - **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
   *Settings › Backups* shows what changed since each backup and restores one note or everything;
   each note's current state goes into its version history first.

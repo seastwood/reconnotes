@@ -1,12 +1,13 @@
 import type { Editor } from '@tiptap/core'
 import { generateJSON } from '@tiptap/core'
-import { prosemirrorJSONToYXmlFragment } from '@tiptap/y-tiptap'
 import { marked } from 'marked'
-import { createNote, getContent, getNotes, newId, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
+import * as Y from 'yjs'
+import { getNotes, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
 import { recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
 import { attachmentBlob, flushUploads } from './attachments'
+import { localJobId, recordJob, runJob, submitJob, waitJob } from './jobs'
 import { deviceCanDecode, speechToParagraphs, transcribeOnDevice, useDeviceSpeech } from './speech'
 
 /**
@@ -14,18 +15,6 @@ import { deviceCanDecode, speechToParagraphs, transcribeOnDevice, useDeviceSpeec
  * local Ollama model), so they need a connection; everything else works
  * offline.
  */
-
-async function post<T>(path: string, body: unknown): Promise<T> {
-  if (!isSyncConfigured()) throw new Error('Connect a ReconNotes server in Settings to use AI features.')
-  const res = await fetch(apiUrl(path), {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Server error ${res.status}`)
-  return json as T
-}
 
 /** Make sure the server has our latest edits to this note before asking about it. */
 async function flushNote(noteId: string) {
@@ -63,45 +52,60 @@ export function markdownToHtml(md: string): string {
  * (odd Markdown from a model), fall back to plain paragraphs rather than
  * losing the result.
  */
-function insertConverted(editor: Editor, at: number, markdown: string) {
+function insertConverted(editor: Editor, at: number, markdown: string, jobId?: string) {
+  const tag = (nodes: NodeJSON[]) => (jobId ? nodes.map((n) => ({ ...n, attrs: { ...(n.attrs ?? {}), job: jobId } })) : nodes)
   try {
-    editor.chain().focus().insertContentAt(at, markdownToHtml(markdown), { errorOnInvalidContent: true }).run()
+    const json = generateJSON(markdownToHtml(markdown), editor.extensionManager.extensions) as NodeJSON
+    editor.chain().focus().insertContentAt(at, tag(json.content ?? []), { errorOnInvalidContent: true }).run()
   } catch {
     const paragraphs = markdown
       .split(/\n+/)
       .map((l) => l.trim())
       .filter(Boolean)
       .map((l) => ({ type: 'paragraph', content: [{ type: 'text', text: l }] }))
-    editor.chain().focus().insertContentAt(at, paragraphs).run()
+    editor.chain().focus().insertContentAt(at, tag(paragraphs)).run()
   }
 }
 
-/** Recognise the handwriting in a drawing and insert it as text right below. */
+type NodeJSON = { type: string; attrs?: Record<string, unknown>; content?: NodeJSON[]; text?: string; marks?: unknown[] }
+
+const noteTitle = (noteId: string) => readNote(getNotes(sync.workspace.doc).get(noteId) ?? new Y.Map()).title || 'Untitled'
+const APPLE_TEXT = 'Apple text recognition (on this device)'
+
+/**
+ * Recognise the handwriting in a drawing and put the text right below it.
+ * Apple's recognizer runs here on the device (iOS); otherwise it's a job on
+ * the server, which writes the text into the note itself – so it finishes
+ * even if you leave the note. Either way it shows in the Jobs list.
+ */
 export async function convertHandwriting(editor: Editor, noteId: string, drawingId: string) {
-  let text = useDeviceOcr() ? await recognizeDrawingLocally(noteId, drawingId) : ''
-  if (!text) {
-    // web app, Apple recognition switched off, or it found nothing: use the server's agents
-    if (useDeviceOcr() && !isSyncConfigured()) throw new Error('No handwriting was recognised in this drawing.')
-    await flushNote(noteId)
-    text = (await post<{ text: string; agent: string }>('/api/ai/handwriting', { noteId, drawingId })).text
+  const startedAt = Date.now()
+  const text = useDeviceOcr() ? await recognizeDrawingLocally(noteId, drawingId) : ''
+  if (text) {
+    let at: number | null = null
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'drawing' && node.attrs.drawingId === drawingId) {
+        at = pos + node.nodeSize
+        return false
+      }
+      return at === null
+    })
+    if (at === null) throw new Error('Drawing no longer exists')
+    const id = localJobId()
+    insertConverted(editor, at, text, id)
+    recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input: { drawingId }, result: { noteId, text: text.slice(0, 1500) }, agent: APPLE_TEXT, startedAt })
+    return
   }
-  if (!text.trim()) throw new Error('The AI returned no text for this drawing.')
-  let at: number | null = null
-  editor.state.doc.descendants((node, pos) => {
-    if (node.type.name === 'drawing' && node.attrs.drawingId === drawingId) {
-      at = pos + node.nodeSize
-      return false
-    }
-    return at === null
-  })
-  if (at === null) throw new Error('Drawing no longer exists')
-  insertConverted(editor, at, text)
+  // web app, Apple recognition switched off, or it found nothing: the server's agents
+  if (useDeviceOcr() && !isSyncConfigured()) throw new Error('No handwriting was recognised in this drawing.')
+  await flushNote(noteId)
+  await runJob({ kind: 'convert-drawing', noteId, input: { drawingId } })
 }
 
 /**
- * Convert every drawing in the note, top to bottom; each drawing's text is
- * inserted right below it. Returns how many drawings were converted and any
- * errors.
+ * Convert every drawing in the note, top to bottom; each drawing's text goes
+ * right below it. Server jobs are all queued at once. Returns how many
+ * drawings were converted and any errors.
  */
 export async function convertAllHandwriting(editor: Editor, noteId: string): Promise<{ converted: number; errors: string[] }> {
   const ids: string[] = []
@@ -110,6 +114,15 @@ export async function convertAllHandwriting(editor: Editor, noteId: string): Pro
   })
   let converted = 0
   const errors: string[] = []
+  if (!useDeviceOcr() && isSyncConfigured()) {
+    await flushNote(noteId)
+    const jobs = await Promise.all(ids.map((drawingId) => submitJob({ kind: 'convert-drawing', noteId, input: { drawingId } })))
+    for (const r of await Promise.allSettled(jobs.map((j) => waitJob(j.id)))) {
+      if (r.status === 'fulfilled') converted++
+      else errors.push((r.reason as Error).message)
+    }
+    return { converted, errors }
+  }
   for (const id of ids) {
     try {
       await convertHandwriting(editor, noteId, id)
@@ -150,12 +163,19 @@ export async function recognizeDrawingLocally(noteId: string, drawingId: string,
 /** Optional polish by the server's "Clean up converted text" agents; never fails. */
 async function tidyOnServer(text: string, imageBase64: string | null, mime: string): Promise<string> {
   try {
-    const r = await post<{ text: string }>('/api/ai/tidy', { text, image: imageBase64 ?? undefined, mime })
-    return r.text?.trim() || text
+    const job = await runJob({ kind: 'tidy', title: text.slice(0, 60), input: { text, mime }, file: imageBase64 ?? undefined })
+    return String(job.result?.text ?? '').trim() || text
   } catch {
     return text
   }
 }
+
+const toBase64 = (blob: Blob) =>
+  new Promise<string>((resolve) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
+    r.readAsDataURL(blob)
+  })
 
 /**
  * Shrink a photo so its longest side is at most `max` pixels and re-encode
@@ -186,10 +206,11 @@ async function prepareImage(blob: Blob, max = 2048): Promise<Blob> {
 }
 
 /**
- * Read the text (handwritten or printed) in a picture and insert it right
- * after the picture.
+ * Read the text (handwritten or printed) in a picture and put it right after
+ * the picture (Apple's recognizer here, or a job on the server).
  */
-export async function convertImage(editor: Editor, attachmentId: string, insertAt: () => number | undefined) {
+export async function convertImage(editor: Editor, noteId: string, attachmentId: string, insertAt: () => number | undefined) {
+  const startedAt = Date.now()
   const blob = await attachmentBlob(attachmentId)
   if (!blob) throw new Error('This picture hasn’t been downloaded to this device yet.')
   const image = await prepareImage(blob)
@@ -197,33 +218,20 @@ export async function convertImage(editor: Editor, attachmentId: string, insertA
     // Apple's recognizer on the device (iOS app)
     let text = (await recognizeImageOnDevice(image)).trim()
     if (text) {
-      if (settings.get().deviceOcrCleanup && isSyncConfigured()) {
-        const b64 = await new Promise<string>((resolve) => {
-          const r = new FileReader()
-          r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
-          r.readAsDataURL(image)
-        })
-        text = await tidyOnServer(text, b64, image.type || 'image/jpeg')
-      }
+      if (settings.get().deviceOcrCleanup && isSyncConfigured()) text = await tidyOnServer(text, await toBase64(image), image.type || 'image/jpeg')
       const at = insertAt()
       if (at === undefined) throw new Error('The picture no longer exists')
-      insertConverted(editor, at, text)
+      const id = localJobId()
+      insertConverted(editor, at, text, id)
+      recordJob({ id, kind: 'convert-picture', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: APPLE_TEXT, startedAt })
       return
     }
     if (!isSyncConfigured()) throw new Error('No text was recognised in this picture.')
   }
   if (!isSyncConfigured()) throw new Error('Connect a ReconNotes server in Settings to use AI features.')
-  const res = await fetch(apiUrl('/api/ai/image-to-text'), {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': image.type || 'image/jpeg' },
-    body: image,
-  })
-  const json = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
-  if (!res.ok) throw new Error(json.error ?? `Server error ${res.status}`)
-  if (!json.text?.trim()) throw new Error('The AI returned no text for this picture.')
-  const at = insertAt()
-  if (at === undefined) throw new Error('The picture no longer exists')
-  insertConverted(editor, at, json.text)
+  // the downscaled picture goes with the job, so it works before the upload finishes
+  await flushNote(noteId)
+  await runJob({ kind: 'convert-picture', noteId, input: { attachmentId, mime: image.type || 'image/jpeg' }, file: await toBase64(image) })
 }
 
 /**
@@ -235,14 +243,17 @@ export async function convertImage(editor: Editor, attachmentId: string, insertA
  */
 export async function transcribeAudio(
   editor: Editor,
+  noteId: string,
   attachmentId: string,
   insertAt: () => number | undefined,
   /** a transcript the server already made (Whisper): usually the best one */
   existing?: string | null,
 ): Promise<string> {
-  let text = existing?.trim() ?? ''
+  const startedAt = Date.now()
+  let text = ''
   let deviceError: Error | null = null
-  if (!text && useDeviceSpeech()) {
+  // the server's transcript is used by its job; otherwise Apple's recognizer here first
+  if (!(existing?.trim() && isSyncConfigured()) && useDeviceSpeech()) {
     const blob = await attachmentBlob(attachmentId)
     if (blob && deviceCanDecode(blob.type)) {
       try {
@@ -252,109 +263,33 @@ export async function transcribeAudio(
       }
     }
   }
-  if (!text) {
-    if (!isSyncConfigured()) {
-      if (deviceError) throw deviceError
-      throw new Error(useDeviceSpeech() ? 'No speech was recognised in this recording.' : 'Connect a ReconNotes server in Settings to transcribe audio.')
-    }
-    await flushUploads()
-    text = (await post<{ text: string }>('/api/ai/audio-to-text', { attachmentId })).text ?? ''
+  if (text.trim()) {
+    const at = insertAt()
+    if (at === undefined) throw new Error('The recording no longer exists')
+    const id = localJobId()
+    insertConverted(editor, at, speechToParagraphs(text), id)
+    recordJob({ id, kind: 'transcribe', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: 'Apple speech recognition (on this device)', startedAt })
+    return text
   }
-  if (!text.trim()) throw new Error('No speech was recognised in this recording.')
-  const at = insertAt()
-  if (at === undefined) throw new Error('The recording no longer exists')
-  insertConverted(editor, at, speechToParagraphs(text))
-  return text
+  if (!isSyncConfigured()) {
+    if (deviceError) throw deviceError
+    throw new Error(useDeviceSpeech() ? 'No speech was recognised in this recording.' : 'Connect a ReconNotes server in Settings to transcribe audio.')
+  }
+  await flushUploads()
+  await flushNote(noteId)
+  const job = await runJob({ kind: 'transcribe', noteId, input: { attachmentId } })
+  return String(job.result?.text ?? '')
 }
 
 /**
  * Turn a whole note (typed text + handwriting) into a clean document, saved
- * as a new note next to the original. Returns the new note's id.
+ * as a new note next to the original (a job on the server). Returns the new
+ * note's id.
  */
-export async function compileNote(editor: Editor, noteId: string, folderId: string | null): Promise<string> {
+export async function compileNote(_editor: Editor, noteId: string): Promise<string> {
   await flushNote(noteId)
-  const { markdown, title } = await post<{ markdown: string; title: string }>('/api/ai/compile', { noteId })
-  const json = keepAttachments(generateJSON(markdownToHtml(markdown), editor.extensionManager.extensions) as NodeJSON, editor)
-  const id = createNote(sync.workspace.doc, { folderId, title: `${title || 'Untitled'} (compiled)` })
-  const { handle, close } = sync.open(noteDocName(id))
-  await handle.loaded
-  prosemirrorJSONToYXmlFragment(editor.schema, json, getContent(handle.doc))
-  close()
-  return id
-}
-
-type NodeJSON = { type: string; attrs?: Record<string, unknown>; content?: NodeJSON[]; text?: string; marks?: unknown[] }
-
-/**
- * Turn the compiled document's ⟦AUDIO:id⟧ / ⟦FILE:id⟧ lines back into the
- * original note's recordings and files (same attachment, same settings), and
- * its [[links]] and !due dates back into real links and due items.
- */
-function keepAttachments(doc: NodeJSON, editor: Editor): NodeJSON {
-  const originals = new Map<string, NodeJSON>()
-  const links = new Map<string, { noteId: string; title: string }>() // by title, lower case
-  const dues = new Map<string, Record<string, unknown>>() // date -> attrs
-  editor.state.doc.descendants((node) => {
-    if ((node.type.name === 'audio' || node.type.name === 'file') && node.attrs.attachmentId) {
-      originals.set(`${node.type.name}:${node.attrs.attachmentId}`, node.toJSON() as NodeJSON)
-    } else if (node.type.name === 'noteLink' && node.attrs.noteId) {
-      links.set(String(node.attrs.title || 'note').trim().toLowerCase(), { noteId: node.attrs.noteId, title: node.attrs.title })
-    } else if (node.type.name === 'dueDate' && node.attrs.date && !dues.has(node.attrs.date)) {
-      dues.set(node.attrs.date, node.attrs)
-    }
-  })
-  // links the model added or retitled: any other note with that exact title
-  const linkTo = (title: string): { noteId: string; title: string } | undefined => {
-    const key = title.trim().toLowerCase()
-    if (links.has(key)) return links.get(key)
-    for (const [id, m] of getNotes(sync.workspace.doc)) {
-      const n = readNote(m)
-      if (!n.trashedAt && n.title.trim().toLowerCase() === key) return { noteId: id, title: n.title }
-    }
-  }
-  const inlineParts = (n: NodeJSON): NodeJSON[] => {
-    const text = n.text ?? ''
-    const out: NodeJSON[] = []
-    let last = 0
-    for (const m of text.matchAll(/\[\[([^\]\n]+)\]\]|!(\S+)/g)) {
-      let node: NodeJSON | null = null
-      let len = m[0].length
-      if (m[1]) {
-        const target = linkTo(m[1])
-        if (target) node = { type: 'noteLink', attrs: target }
-      } else {
-        const date = m[2].replace(/[.,;:)]+$/, '')
-        const attrs = dues.get(date)
-        if (attrs) node = { type: 'dueDate', attrs: { ...attrs, id: newId() } }
-        len = date.length + 1
-      }
-      if (!node) continue
-      if (m.index! > last) out.push({ ...n, text: text.slice(last, m.index) })
-      out.push(node)
-      last = m.index! + len
-    }
-    if (!out.length) return [n]
-    if (last < text.length) out.push({ ...n, text: text.slice(last) })
-    return out
-  }
-  const marker = (n: NodeJSON) => {
-    if (n.type !== 'paragraph' || !n.content?.length || !n.content.every((c) => c.type === 'text')) return null
-    const m = /^\s*⟦(AUDIO|FILE):([a-z0-9]+)⟧\s*$/.exec(n.content.map((c) => c.text ?? '').join(''))
-    return m ? `${m[1].toLowerCase()}:${m[2]}` : null
-  }
-  const walk = (n: NodeJSON): NodeJSON[] => {
-    const key = marker(n)
-    if (key) {
-      const original = originals.get(key)
-      if (original) return [original]
-      const [type, attachmentId] = key.split(':')
-      return [{ type, attrs: { attachmentId } }]
-    }
-    if (n.type === 'text') return inlineParts(n)
-    if (n.type === 'codeBlock') return [n]
-    return [n.content ? { ...n, content: n.content.flatMap(walk) } : n]
-  }
-  return walk(doc)[0]
+  const job = await runJob({ kind: 'compile', noteId })
+  return job.result!.noteId as string
 }
 
 /** URL of the exact image the server sends to the AI for a drawing (for troubleshooting). */
@@ -381,29 +316,23 @@ export async function serverInfo(url: string, token: string): Promise<ServerInfo
 // --- One-tap note actions --------------------------------------------------
 
 /**
- * Summarise a note (inserted under its title) or pull out its to-dos (added
- * at the end as a checklist). Both are ordinary edits, so Undo removes them.
+ * Summarise a note (put under its title) or pull out its to-dos (added at
+ * the end as a checklist) – a job on the server, which writes the result
+ * into the note.
  */
-export async function noteAction(editor: Editor, noteId: string, action: 'summary' | 'todos') {
+export async function noteAction(_editor: Editor, noteId: string, action: 'summary' | 'todos') {
   await flushNote(noteId)
-  const { text } = await post<{ text: string }>('/api/ai/note-action', { action, noteId })
-  if (!text.trim()) throw new Error(action === 'todos' ? 'No to-dos found in this note.' : 'The AI returned nothing.')
-  const doc = editor.state.doc
-  if (action === 'summary') {
-    const at = doc.childCount > 1 ? doc.child(0).nodeSize : doc.content.size
-    insertConverted(editor, at, `**Summary**\n\n${text}\n`)
-  } else {
-    insertConverted(editor, doc.content.size, `**To-dos**\n\n${text.replace(/^\s*[-*]\s+(?!\[)/gm, '- [ ] ')}\n`)
-  }
+  await runJob({ kind: action, noteId })
 }
 
 /** Improve the wording of the selected text (replaces it; Undo restores it). */
-export async function cleanUpSelection(editor: Editor) {
+export async function cleanUpSelection(editor: Editor, noteId?: string) {
   const { from, to, empty } = editor.state.selection
   if (empty) throw new Error('Select the text you want cleaned up, then choose “Clean up wording” again.')
   const markdown = sliceToMarkdown(editor, from, to)
   if (!markdown.trim()) throw new Error('The selection has no text to clean up.')
-  const { text } = await post<{ text: string }>('/api/ai/note-action', { action: 'clean', text: markdown })
+  const job = await runJob({ kind: 'clean', title: markdown.slice(0, 60), noteId: noteId ?? null, input: { text: markdown } })
+  const text = String(job.result?.text ?? '')
   if (!text.trim()) throw new Error('The AI returned nothing.')
   editor.chain().focus().insertContentAt({ from, to }, markdownToHtml(text)).run()
 }

@@ -117,8 +117,12 @@ describe('jobs', () => {
     expect(prompts.some((p) => p.includes('Write it LOUDER'))).toBe(true)
     expect(blocks()).toEqual(['paragraph:Shopping #home', 'drawing:', 'paragraph:BUY MILK*', 'audio:', 'paragraph:The end'])
     expect((await api('GET', `/api/jobs/${convertJob.id}`)).body.job.replacedBy).toBe(redo.id)
+    // redoing the old run again replaces the newest result, not adds another
+    const again = await waitFor((await api('POST', `/api/jobs/${convertJob.id}/redo`, { prompt: '' })).body.job.id)
+    expect(blocks()).toEqual(['paragraph:Shopping #home', 'drawing:', 'paragraph:Buy milk*', 'audio:', 'paragraph:The end'])
+    expect((await api('GET', `/api/jobs/${redo.id}`)).body.job.replacedBy).toBe(again.id)
     // and its result can be removed
-    const removed = await api('POST', `/api/jobs/${redo.id}/remove-result`)
+    const removed = await api('POST', `/api/jobs/${again.id}/remove-result`)
     expect(removed.body.job.result.removed).toBe(true)
     expect(blocks()).toEqual(['paragraph:Shopping #home', 'drawing:', 'audio:', 'paragraph:The end'])
   })

@@ -1,3 +1,4 @@
+import { errorText } from '../lib/jobs'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { createContext, useContext, useEffect, useState } from 'react'
@@ -131,7 +132,7 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     try {
       await convertHandwriting(editor, ctx.noteId, drawingId)
     } catch (e) {
-      setError((e as Error).message)
+      setError(errorText(e))
     } finally {
       setBusy(false)
     }
