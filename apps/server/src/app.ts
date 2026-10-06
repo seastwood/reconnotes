@@ -11,6 +11,7 @@ import { Devices } from './devices'
 import { Jobs } from './jobs'
 import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
 import { Notifier } from './notify'
+import { MeaningIndex } from './semantic'
 
 export interface App {
   config: Config
@@ -33,12 +34,14 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   const sync = new SyncEngine(config, store, ai, devices)
   const jobs = new Jobs(store)
   sync.jobs = jobs
+  sync.meaning = new MeaningIndex(store, ai.agents)
   registerJobHandlers(config, store, sync, ai, jobs)
   const notifier = new Notifier(store)
   jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
   const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier)
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
+  sync.embedMissing()
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   return {
     config,

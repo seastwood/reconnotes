@@ -22,8 +22,8 @@ import { spawn } from 'node:child_process'
  */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai' | 'wyoming'
-export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
-export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'audio']
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio' | 'embed'
+export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'audio', 'embed']
 
 /** How an agent reads handwritten drawings. */
 export type ReadingMode = 'auto' | 'page' | 'lines'
@@ -84,7 +84,12 @@ export interface Backend {
   generate(parts: Part[], maxTokens: number): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
   transcribe?(audio: Buffer, mime: string, filename: string): Promise<string>
+  /** Text → vectors that capture meaning (embedding models, e.g. nomic-embed-text), for search by meaning. */
+  embed?(texts: string[]): Promise<number[][]>
 }
+
+/** Model names that are embedding models (search by meaning) rather than chat models. */
+export const EMBED_MODEL = /embed|bge-|e5-|minilm|gte-|arctic-embed|mxbai/i
 
 /** Model names that are speech-to-text models rather than chat models. */
 export const SPEECH_MODEL = /whisper|speech|stt|parakeet|canary|voxtral|transcri/i
@@ -210,6 +215,13 @@ const ranOutThinking = (r: OllamaReply) =>
 
 class OllamaBackend implements Backend {
   constructor(private agent: AgentConfig) {}
+
+  async embed(texts: string[]): Promise<number[][]> {
+    const body = await this.post('/api/embed', { input: texts, keep_alive: KEEP_ALIVE, truncate: true })
+    const out = body.embeddings as number[][] | undefined
+    if (!Array.isArray(out) || out.length !== texts.length) throw new Error(`${this.agent.model} didn't return embeddings – is it an embedding model (e.g. nomic-embed-text)?`)
+    return out
+  }
 
   /** Can it think, and how long is its context? Asked once an hour; unknown if Ollama doesn't say. */
   private info(): Promise<OllamaModelInfo> {
@@ -364,6 +376,20 @@ function suggestInstruct(model: string): string {
 
 class OpenAiBackend implements Backend {
   constructor(private agent: AgentConfig) {}
+
+  async embed(texts: string[]): Promise<number[][]> {
+    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/embeddings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {}) },
+      signal: timeoutSignal(this.agent.timeoutSec * 1000),
+      body: JSON.stringify({ model: this.agent.model, input: texts }),
+    })
+    if (!res.ok) throw new Error(`embeddings: ${res.status} ${(await res.text()).slice(0, 200)}`)
+    const json = (await res.json()) as { data?: { embedding: number[]; index: number }[] }
+    const data = (json.data ?? []).sort((a, b) => a.index - b.index).map((d) => d.embedding)
+    if (data.length !== texts.length) throw new Error(`${this.agent.model} didn't return embeddings`)
+    return data
+  }
 
   async generate(parts: Part[], maxTokens: number): Promise<string> {
     if (parts.some((p) => 'pdf' in p)) throw new Error('PDF input is not supported for OpenAI-compatible agents')
@@ -705,12 +731,15 @@ export const TASK_LABELS: Record<AiTask, string> = {
   pdf: 'Text from PDFs',
   compile: 'Compile notes',
   audio: 'Audio to text',
+  embed: 'Search by meaning',
 }
 
 /** Tasks a new agent of this kind can do (where it is added by default). */
 function defaultTasks(a: AgentConfig): AiTask[] {
   // a speech-to-text server (e.g. Whisper) does only that
   if (a.kind === 'wyoming' || (a.kind === 'openai' && SPEECH_MODEL.test(a.model))) return ['audio']
+  // an embedding model only does search by meaning
+  if (EMBED_MODEL.test(a.model)) return a.kind === 'anthropic' ? [] : ['embed']
   const t: AiTask[] = []
   if (a.vision) t.push('handwriting', 'images')
   if (a.kind === 'anthropic') t.push('format', 'pdf')
@@ -760,7 +789,7 @@ export class AgentRegistry {
 
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
-    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], audio: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
+    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
     return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true }
   }
 
@@ -906,6 +935,7 @@ export class AgentRegistry {
       format: claude ? [claude.id] : [],
       compile: order(c.compileProvider, [claude, ollamaText ?? ollama]),
       audio: [],
+      embed: [],
     }
     this.store.setSetting(AGENTS_KEY, agents)
     this.store.setSetting(SETTINGS_KEY, { routing, autoHandwriting: c.autoHandwriting || agents.length === 0, autoImageText: c.autoImageText || agents.length === 0 })

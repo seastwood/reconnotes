@@ -20,6 +20,7 @@ import { log } from './log'
 import { maybeSnapshot } from './versions'
 import type { Devices } from './devices'
 import type { Jobs } from './jobs'
+import type { MeaningIndex } from './semantic'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -40,6 +41,9 @@ export class SyncEngine {
   private hwTimers = new Map<string, NodeJS.Timeout>()
   /** set by createApp: background work goes through the job queue */
   jobs!: Jobs
+  /** set by createApp: search by meaning */
+  meaning: MeaningIndex | null = null
+  private embedTimers = new Map<string, NodeJS.Timeout>()
 
   constructor(
     private config: Config,
@@ -143,6 +147,29 @@ export class SyncEngine {
     if (this.ai.autoHandwriting) {
       for (const drawingId of ex.drawings) this.maybeScheduleHandwriting(noteId, drawingId, doc)
     }
+    this.scheduleEmbedding(noteId)
+  }
+
+  /** Update the note's search-by-meaning vectors once it has been quiet for a moment. */
+  scheduleEmbedding(noteId: string, delayMs = 20_000) {
+    if (!this.meaning?.available || !this.jobs) return
+    clearTimeout(this.embedTimers.get(noteId))
+    const t = setTimeout(() => {
+      this.embedTimers.delete(noteId)
+      const title = this.noteMeta().get(noteId)?.title || 'Untitled'
+      this.jobs.submit({ kind: 'embed', title, noteId, input: { noteId }, origin: 'auto', dedupeKey: `embed:${noteId}` })
+    }, delayMs)
+    t.unref?.()
+    this.embedTimers.set(noteId, t)
+  }
+
+  /** Queue vectors for every note that doesn't have them yet (first setup, or a new embedding model). */
+  embedMissing(): number {
+    if (!this.meaning?.available) return 0
+    const ids = this.store.listDocuments('note:').map((n) => noteIdFromDocName(n)!).filter(Boolean)
+    const missing = this.meaning.notesNeedingVectors(ids)
+    for (const id of missing) this.scheduleEmbedding(id, 0)
+    return missing.length
   }
 
   reindexNotesFor(attachmentId: string) {
@@ -212,6 +239,7 @@ export class SyncEngine {
 
   async destroy() {
     for (const t of this.hwTimers.values()) clearTimeout(t)
+    for (const t of this.embedTimers.values()) clearTimeout(t)
     this.hocuspocus.flushPendingStores()
     this.hocuspocus.closeConnections()
   }

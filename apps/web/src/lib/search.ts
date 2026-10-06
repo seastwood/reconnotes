@@ -11,7 +11,7 @@ import { apiUrl, authHeaders, isSyncConfigured } from './settings'
 const index = new MiniSearch<{ id: string; title: string; text: string }>({
   fields: ['title', 'text'],
   storeFields: ['title', 'text'],
-  searchOptions: { boost: { title: 3 }, prefix: true, fuzzy: 0.15, combineWith: 'AND' },
+  searchOptions: { boost: { title: 3 }, prefix: true, fuzzy: 0.2, combineWith: 'AND' },
 })
 
 const ready = (async () => {
@@ -39,6 +39,8 @@ export interface SearchResult {
   noteId: string
   title: string
   snippet: string
+  /** found by meaning (related), not by its words */
+  meaning?: boolean
 }
 
 function snippetFor(text: string, terms: string[]): string {
@@ -57,7 +59,10 @@ export async function searchNotes(query: string): Promise<SearchResult[]> {
   await ready
   const q = query.trim()
   if (!q) return []
-  const local: SearchResult[] = index.search(q).map((r) => ({
+  // all the words; if nothing has them all, any of them
+  let found = index.search(q)
+  if (!found.length && q.includes(' ')) found = index.search(q, { combineWith: 'OR' })
+  const local: SearchResult[] = found.map((r) => ({
     noteId: r.id as string,
     title: r.title as string,
     snippet: snippetFor(r.text as string, r.terms),
@@ -66,17 +71,19 @@ export async function searchNotes(query: string): Promise<SearchResult[]> {
 
   try {
     const ctl = new AbortController()
-    const t = setTimeout(() => ctl.abort(), 2500)
+    const t = setTimeout(() => ctl.abort(), 5000)
     const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`), { headers: authHeaders(), signal: ctl.signal })
     clearTimeout(t)
     if (!res.ok) return local
-    const { hits } = (await res.json()) as { hits: { noteId: string; title: string; snippet: string; trashed: boolean }[] }
+    const { hits } = (await res.json()) as { hits: { noteId: string; title: string; snippet: string; trashed: boolean; meaning?: boolean }[] }
     const seen = new Set(local.map((r) => r.noteId))
     for (const h of hits) {
       if (!seen.has(h.noteId) && !h.trashed) {
-        local.push({ noteId: h.noteId, title: h.title, snippet: h.snippet.replace(/\[\[|\]\]/g, '') })
+        local.push({ noteId: h.noteId, title: h.title, snippet: h.snippet.replace(/\[\[|\]\]/g, ''), meaning: h.meaning })
       }
     }
+    // word matches first, then notes related by meaning
+    local.sort((a, b) => Number(Boolean(a.meaning)) - Number(Boolean(b.meaning)))
   } catch {
     /* offline or slow – local results are enough */
   }

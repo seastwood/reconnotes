@@ -2,6 +2,7 @@ import { noteDocName, noteToMarkdown } from '@reconnotes/core'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
+import type { MeaningIndex } from './semantic'
 
 /**
  * Ask your notes
@@ -27,7 +28,13 @@ export interface AskSource {
 const PER_NOTE = 6000
 const TOTAL = 30000
 
-export async function askNotes(store: Store, sync: SyncEngine, ai: Ai, question: string): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
+export async function askNotes(
+  store: Store,
+  sync: SyncEngine,
+  ai: Ai,
+  question: string,
+  meaning?: MeaningIndex | null,
+): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
   const meta = sync.noteMeta()
   const usable = (id: string) => {
     const m = meta.get(id)
@@ -37,9 +44,15 @@ export async function askNotes(store: Store, sync: SyncEngine, ai: Ai, question:
     .toLowerCase()
     .split(/[^\p{L}\p{N}_]+/u)
     .filter((w) => w.length >= 3 && !STOP.has(w))
-  let ids = store
-    .searchAny(words, 20)
-    .map((h) => h.noteId)
+  // notes that share words with the question, and notes about the same thing in
+  // other words (search by meaning), merged by rank
+  const byWords = store.searchAny(words, 20).map((h) => h.noteId)
+  const byMeaning = meaning?.available ? (await meaning.search(question, 20)).map((h) => h.noteId) : []
+  const score = new Map<string, number>()
+  for (const list of [byWords, byMeaning]) list.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (10 + i)))
+  let ids = [...score.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id)
     .filter(usable)
     .slice(0, 8)
   // nothing matched (e.g. "what did I work on this week?"): the latest notes

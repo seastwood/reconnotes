@@ -174,13 +174,19 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- Search ---------------------------------------------------------------
-  route('GET', '/api/search', (_req, res, _p, url) => {
+  route('GET', '/api/search', async (_req, res, _p, url) => {
     const q = url.searchParams.get('q') ?? ''
     const meta = sync.noteMeta()
-    const hits = store
-      .search(q)
-      .filter((h) => meta.has(h.noteId))
-      .map((h) => ({ ...h, trashed: Boolean(meta.get(h.noteId)!.trashedAt) }))
+    const words = store.search(q).filter((h) => meta.has(h.noteId))
+    // notes about the same thing in other words (when an embedding model is set up)
+    const seen = new Set(words.map((h) => h.noteId))
+    const related = sync.meaning?.available && q.trim().length >= 3 ? await sync.meaning.search(q) : []
+    const hits = [
+      ...words,
+      ...related
+        .filter((h) => meta.has(h.noteId) && !seen.has(h.noteId))
+        .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, snippet: h.passage.replace(/\s+/g, ' ').slice(0, 180), rank: -h.score, meaning: true })),
+    ].map((h) => ({ ...h, trashed: Boolean(meta.get(h.noteId)!.trashedAt) }))
     json(res, 200, { hits })
   })
 
@@ -222,7 +228,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const q = String(question).trim().slice(0, 1000)
     const result = await jobs.run(
       { kind: 'ask', title: q, input: { question: q }, device: deviceName(req) },
-      () => askNotes(store, sync, ai, q),
+      () => askNotes(store, sync, ai, q, sync.meaning),
       (r) => ({ result: r as unknown as Record<string, unknown>, agent: r.agent }),
     )
     json(res, 200, result)
@@ -416,6 +422,39 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
    * a job is running (it would push that job's model out of the GPU).
    */
   const warmed = new Map<string, number>()
+  /**
+   * Read all handwriting and pictures again for search, with the current
+   * agents (e.g. after switching models or improving how they read).
+   */
+  route('POST', '/api/ai/reread', (_req, res) => {
+    let drawings = 0
+    let pictures = 0
+    if (ai.canHandwriting) {
+      store.clearDrawingHashes()
+      const meta = sync.noteMeta()
+      for (const name of store.listDocuments('note:')) {
+        const doc = sync.getDoc(name)
+        const noteId = name.slice('note:'.length)
+        if (!doc || meta.get(noteId)?.trashedAt) continue
+        for (const drawingId of extractNote(doc).drawings) {
+          jobs.submit({ kind: 'recognise', title: meta.get(noteId)?.title || 'Untitled', noteId, input: { noteId, drawingId }, origin: 'auto', dedupeKey: `recognise:${noteId}/${drawingId}` })
+          drawings++
+        }
+      }
+    }
+    if (ai.canImages) {
+      for (const att of store.attachmentsWithStatus(['done', 'error', 'skipped'])) {
+        if (!isAiImage(att.mime)) continue
+        // keep the old text searchable until the new reading arrives
+        store.setAttachmentText(att.id, att.text, 'pending')
+        queueAttachment(config, store, ai, sync, att.id)
+        pictures++
+      }
+    }
+    sync.embedMissing()
+    json(res, 202, { drawings, pictures })
+  })
+
   route('POST', '/api/ai/warm', async (_req, res) => {
     const agent = ai.agents.chain('handwriting')[0]
     const key = agent ? `${agent.baseUrl}|${agent.model}` : ''
@@ -460,6 +499,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { id: _ignored, ...input } = body
     const agent = ai.agents.save(input)
     retryAttachments(config, store, ai, sync)
+    sync.embedMissing()
     json(res, 201, { agent: ai.agents.viewOf(agent.id), ...agentsPayload() })
   })
 
@@ -468,6 +508,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const body = await readJson<Partial<AgentConfig>>(req)
     ai.agents.save({ ...body, id })
     retryAttachments(config, store, ai, sync)
+    sync.embedMissing()
     json(res, 200, { agent: ai.agents.viewOf(id), ...agentsPayload() })
   })
 
@@ -479,6 +520,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('PUT', '/api/ai/settings', async (req, res) => {
     ai.agents.updateSettings(await readJson<Partial<AiSettings>>(req))
     retryAttachments(config, store, ai, sync)
+    sync.embedMissing()
     json(res, 200, agentsPayload())
   })
 

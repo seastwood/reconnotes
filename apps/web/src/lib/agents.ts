@@ -3,7 +3,7 @@ import { apiUrl, authHeaders } from './settings'
 /** Client for the server's AI agent management API (see apps/server/src/agents.ts). */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai' | 'wyoming'
-export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio'
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio' | 'embed'
 export type ReadingMode = 'auto' | 'page' | 'lines'
 
 export interface Agent {
@@ -103,7 +103,12 @@ export const TASK_HELP: Record<AiTask, string> = {
   compile: 'Turns a whole note into a clean document. A general model works best; OCR-only models do poorly here.',
   audio:
     '“Transcribe” on recordings and audio files, and background transcripts for search. Needs a speech-to-text server: a Home Assistant Wyoming Whisper server (e.g. wyoming-faster-whisper, port 10300), an OpenAI-compatible one (Speaches, whisper.cpp) or OpenAI (model whisper-1). Ollama and Claude can’t transcribe audio. The iPad app uses Apple’s recognition first.',
+  embed:
+    'Finds notes by meaning, not just matching words (“safety equipment” finds “safety glasses”), and helps “Ask your notes” find the right notes. Needs an embedding model, e.g. nomic-embed-text in Ollama (ollama pull nomic-embed-text – about 300 MB, fits beside your other models). Leave empty for word search only.',
 }
+
+/** Read all handwriting and pictures again for search (after changing models). */
+export const rereadAll = () => call<{ drawings: number; pictures: number }>('POST', '/api/ai/reread')
 
 export const agentsApi = {
   list: () => call<AgentsState>('GET', '/api/ai/agents'),

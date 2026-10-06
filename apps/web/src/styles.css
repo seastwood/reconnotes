@@ -3285,3 +3285,23 @@ a.button {
 .audio-head .block-copy {
   margin-left: 2px;
 }
+.related-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-text);
+  background: var(--active);
+  vertical-align: 1px;
+}
+.reread {
+  margin-top: 10px;
+}
+.reread button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--accent-text);
+}

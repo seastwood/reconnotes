@@ -5,6 +5,7 @@ import {
   DEFAULT_URLS,
   KIND_LABELS,
   TASK_HELP,
+  rereadAll,
   agentsApi,
   type Agent,
   type AgentInput,
@@ -235,6 +236,7 @@ export function AiAgentsSection() {
             />
             Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
           </label>
+          <RereadButton />
         </>
       )}
     </div>
@@ -619,6 +621,25 @@ function LoadProblem({ error, onRetry }: { error: ApiError; onRetry: () => void 
       <strong>{title}</strong>
       <div>{body}</div>
       <button onClick={onRetry}>Retry</button>
+    </div>
+  )
+}
+
+/** Read all handwriting and pictures again for search, e.g. after switching to a better model. */
+function RereadButton() {
+  const [msg, setMsg] = useState<string | null>(null)
+  return (
+    <div className="reread">
+      <button
+        onClick={() =>
+          void rereadAll()
+            .then((r) => setMsg(`Queued ${r.drawings} handwriting section${r.drawings === 1 ? '' : 's'} and ${r.pictures} picture${r.pictures === 1 ? '' : 's'} – they run in the background (see Jobs › Show background work).`))
+            .catch((e) => setMsg(`❌ ${(e as Error).message}`))
+        }
+      >
+        Re-read all handwriting and pictures for search
+      </button>
+      <p className="hint">{msg ?? 'After switching to a better model: searchable text is refreshed with the current agents. Your notes aren’t changed.'}</p>
     </div>
   )
 }

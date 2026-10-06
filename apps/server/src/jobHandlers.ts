@@ -44,6 +44,7 @@ export const JOB_KINDS: Record<string, string> = {
   tidy: 'Clean up recognised text',
   recognise: 'Read handwriting for search',
   'extract-text': 'Read file for search',
+  embed: 'Index for search by meaning',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -111,6 +112,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   compile: 'compile',
   ask: 'compile',
   tidy: 'format',
+  embed: 'embed',
 }
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs) {
@@ -229,7 +231,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   })
 
   jobs.register('ask', async (job) => {
-    const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000))
+    const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning)
     return { result: r as unknown as Record<string, unknown>, agent: r.agent }
   })
 
@@ -313,6 +315,17 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const { noteId, drawingId } = job.input as { noteId: string; drawingId: string }
     const { text, agent } = await sync.recogniseDrawing(noteId, drawingId)
     return { result: { noteId, text: preview(text) }, agent }
+  })
+
+  jobs.register('embed', async (job) => {
+    const noteId = String(job.input.noteId)
+    const meaning = sync.meaning
+    const doc = sync.getDoc(noteDocName(noteId))
+    if (!meaning?.available || !doc) return { result: { skipped: true } }
+    const ex = extractNote(doc)
+    const full = extractNote(doc, store.attachmentTexts(ex.attachments))
+    const made = await meaning.indexNote(noteId, full.title, full.text)
+    return { result: { noteId, passages: made } }
   })
 
   jobs.register('extract-text', async (job) => {

@@ -309,7 +309,10 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onMove
         {view.kind === 'search' &&
           results?.filter((r) => !ws.notes.find((n) => n.id === r.noteId)?.template).map((r) => (
             <li key={r.noteId} className={`note-row${r.noteId === noteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
-              <div className="note-title">{r.title || 'Untitled'}</div>
+              <div className="note-title">
+                {r.title || 'Untitled'}
+                {r.meaning && <span className="related-badge" title="Found by meaning – no exact word match">related</span>}
+              </div>
               <div className="note-snippet">{r.snippet}</div>
             </li>
           ))}

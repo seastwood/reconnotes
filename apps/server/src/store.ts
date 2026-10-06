@@ -236,15 +236,58 @@ export class Store {
   search(query: string, limit = 50): SearchHit[] {
     const fts = toFtsQuery(query)
     if (!fts) return []
-    const rows = this.db
-      .prepare(
-        `SELECT note_id, title,
-                snippet(notes_fts, 2, '[[', ']]', '…', 16) AS snippet,
-                bm25(notes_fts, 4.0, 1.0) AS rank
-         FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?`,
-      )
-      .all(fts, limit) as { note_id: string; title: string; snippet: string; rank: number }[]
-    return rows.map((r) => ({ noteId: r.note_id, title: r.title, snippet: r.snippet, rank: r.rank }))
+    const run = (q: string) =>
+      (
+        this.db
+          .prepare(
+            `SELECT note_id, title,
+                    snippet(notes_fts, 2, '[[', ']]', '…', 16) AS snippet,
+                    bm25(notes_fts, 4.0, 1.0) AS rank
+             FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?`,
+          )
+          .all(q, limit) as { note_id: string; title: string; snippet: string; rank: number }[]
+      ).map((r) => ({ noteId: r.note_id, title: r.title, snippet: r.snippet, rank: r.rank }))
+    const hits = run(fts)
+    // few results: allow small spelling differences (handwriting is sometimes read
+    // a letter off, and typing has typos) – "leutenant" still finds "lieutenant"
+    if (hits.length < 3) {
+      const fuzzy = this.fuzzyQuery(query)
+      if (fuzzy && fuzzy !== fts) {
+        const seen = new Set(hits.map((h) => h.noteId))
+        for (const h of run(fuzzy)) if (!seen.has(h.noteId)) hits.push(h)
+      }
+    }
+    return hits
+  }
+
+  /** Each word OR the indexed words within one or two letters of it. */
+  private fuzzyQuery(query: string): string | null {
+    this.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts_vocab USING fts5vocab(notes_fts, 'row')")
+    const terms = query
+      .normalize('NFKC')
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}_]+/u)
+      .filter(Boolean)
+      .slice(0, 8)
+    if (!terms.length) return null
+    const groups = terms.map((t) => {
+      const alts = new Set([`"${t.replace(/"/g, '')}"*`])
+      if (t.length >= 4) {
+        const tol = t.length <= 5 ? 1 : 2
+        const next = String.fromCodePoint(t.codePointAt(0)! + 1)
+        const vocab = this.db.prepare('SELECT term FROM notes_fts_vocab WHERE term >= ? AND term < ? LIMIT 20000').all(t[0], next) as { term: string }[]
+        for (const { term } of vocab) {
+          // the index holds word stems ("lieuten"): compare with the same length of the query word
+          if (term.length < 3 || term.length < t.length - 4 || term.length > t.length + 2) continue
+          let d = Infinity
+          for (let k = term.length - 1; k <= Math.min(t.length, term.length + 1); k++) if (k > 0) d = Math.min(d, levenshtein(t.slice(0, k), term))
+          if (d <= tol) alts.add(`"${term}"*`)
+          if (alts.size > 12) break
+        }
+      }
+      return alts.size > 1 ? `(${[...alts].join(' OR ')})` : [...alts][0]
+    })
+    return groups.join(' AND ')
   }
 
   /** Notes matching ANY of the words (best first) – for "Ask your notes". */
@@ -258,6 +301,11 @@ export class Store {
   }
 
   // --- Handwriting recognition bookkeeping --------------------------------
+
+  /** Forget which drawings were recognised (so all are read again). */
+  clearDrawingHashes() {
+    this.db.exec('DELETE FROM drawing_ocr')
+  }
 
   drawingHash(noteId: string, drawingId: string): string | null {
     const row = this.db
@@ -284,6 +332,18 @@ export class Store {
  * Turn free text typed by a user into a safe FTS5 query: every word becomes a
  * quoted prefix term, so "meet john" matches "meeting with Johnny".
  */
+/** Edit distance (insertions, deletions, substitutions). */
+export function levenshtein(a: string, b: string): number {
+  if (a === b) return 0
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    prev = cur
+  }
+  return prev[b.length]
+}
+
 export function toFtsQuery(q: string): string {
   const terms = q
     .normalize('NFKC')
