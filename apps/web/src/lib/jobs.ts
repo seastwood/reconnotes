@@ -220,6 +220,9 @@ export function setJobNavigator(n: Navigator) {
   nav = n
 }
 
+/** Open a note from outside React (toasts, file blocks). */
+export const navigateToNote = (id: string) => nav?.openNote(id)
+
 /** What a job made, if it's a note to open. */
 export function productNote(j: Job): string | null {
   if (j.result?.removed) return null

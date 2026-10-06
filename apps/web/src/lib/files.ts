@@ -91,6 +91,12 @@ export async function saveBlob(blob: Blob, name: string) {
 export async function addFilesToFolder(files: File[], folderId: string | null): Promise<string[]> {
   const ids: string[] = []
   for (const f of files) {
+    // a Markdown file opens as a note of its own
+    const { isMarkdownFile, noteFromMarkdown } = await import('./markdownNotes')
+    if (isMarkdownFile(f.name, f.type)) {
+      ids.push(await noteFromMarkdown(await f.text(), f.name, folderId))
+      continue
+    }
     const attachmentId = await addAttachment(f, f.name)
     const mime = f.type || 'application/octet-stream'
     const id = createNote(sync.workspace.doc, { folderId, title: f.name })

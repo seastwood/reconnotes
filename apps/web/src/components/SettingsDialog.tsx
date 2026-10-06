@@ -172,6 +172,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         )}
 
         <section>
+          <h3>Checklists</h3>
+          <label className="check">
+            <input type="checkbox" checked={s.sortChecked !== false} onChange={(e) => settings.set({ sortChecked: e.target.checked })} />
+            Move ticked items below the unticked ones (unticking moves an item back up)
+          </label>
+        </section>
+
+        <section>
           <h3>Apple Pencil &amp; drawing</h3>
           <label className="check">
             <input type="checkbox" checked={s.fingerDrawing} onChange={(e) => settings.set({ fingerDrawing: e.target.checked })} />

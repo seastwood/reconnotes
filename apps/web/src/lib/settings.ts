@@ -22,6 +22,8 @@ export interface Settings {
   deviceSpeech: boolean
   /** hold the pen still at the end of a stroke to snap it to a clean shape */
   shapeSnap?: boolean
+  /** ticking a checklist item moves it below the unticked ones (unticking moves it back up) */
+  sortChecked?: boolean
   /** iOS app: a notification at 9:00 on the day a checklist item is due */
   dueReminders?: boolean
   /** troubleshooting: log typing/Scribble events to the console (Xcode shows them) */

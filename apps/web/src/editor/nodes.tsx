@@ -4,7 +4,11 @@ import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeV
 import { useContext, useEffect, useRef, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Share, TextQuote } from 'lucide-react'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { getTranscripts, newId, wordsKey, type Stroke } from '@reconnotes/core'
+import { getNotes, getTranscripts, newId, readNote, wordsKey, type Stroke } from '@reconnotes/core'
+import * as Y from 'yjs'
+import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
+import { navigateToNote } from '../lib/jobs'
+import { workspaceDoc } from '../lib/workspace'
 import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
@@ -513,6 +517,7 @@ export const AudioNode = Node.create({
 // --- Generic file (PDF, documents, …) -----------------------------------------
 
 function FileView({ node }: ReactNodeViewProps) {
+  const ctx = useContext(NoteContext)
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
   const text = useAttachmentText(node.attrs.attachmentId)
   const [error, setError] = useState<string | null>(null)
@@ -537,6 +542,21 @@ function FileView({ node }: ReactNodeViewProps) {
           </div>
         </div>
         <div className="file-actions">
+          {isMarkdownFile(name, mime) && (
+            <button
+              {...tap(
+                run(async () => {
+                  const blob = await attachmentBlob(node.attrs.attachmentId)
+                  if (!blob) throw new Error('This file hasn’t been downloaded to this device yet.')
+                  const folderId = ctx ? (readNote(getNotes(workspaceDoc).get(ctx.noteId) ?? new Y.Map()).folderId ?? null) : null
+                  navigateToNote(await noteFromMarkdown(await blob.text(), name, folderId))
+                }),
+              )}
+              title="Make a note from this Markdown file (headings, lists and checklists become the real thing)"
+            >
+              <FileText size={16} /> Open as note
+            </button>
+          )}
           <button {...tap(run(() => openFile(node.attrs.attachmentId, name, mime)))} title="Open">
             <Eye size={16} /> Open
           </button>

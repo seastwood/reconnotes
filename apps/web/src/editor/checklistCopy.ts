@@ -4,6 +4,7 @@ import type { Node as PMNode, Slice } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
 import { markdownToHtml } from '../lib/ai'
 import { showToast } from '../lib/toast'
+import { settings } from '../lib/settings'
 
 /**
  * Checklists and the clipboard
@@ -98,6 +99,53 @@ async function copyText(text: string) {
 
 const HOLD_MS = 500
 
+/**
+ * Move a just-ticked item to just below the last unticked one in its list
+ * (and a just-unticked one up, to just after the other unticked items).
+ */
+export function sortItem(view: EditorView, li: HTMLElement) {
+  if (!li.isConnected) return
+  let inside: number
+  try {
+    inside = view.posAtDOM(li, 0)
+  } catch {
+    return
+  }
+  const { state } = view
+  const $pos = state.doc.resolve(inside)
+  let depth = -1
+  for (let d = $pos.depth; d > 0; d--) {
+    if ($pos.node(d).type.name === 'taskItem') {
+      depth = d
+      break
+    }
+  }
+  if (depth < 1) return
+  const list = $pos.node(depth - 1)
+  const index = $pos.index(depth - 1)
+  const item = list.child(index)
+  const others: PMNode[] = []
+  list.forEach((c, _o, i) => i !== index && others.push(c))
+  // ticked: right after the last unticked item; unticked: right before the first ticked one
+  let slot: number
+  if (item.attrs.checked) {
+    slot = 0
+    others.forEach((c, i) => {
+      if (!c.attrs.checked) slot = i + 1
+    })
+  } else {
+    slot = others.findIndex((c) => c.attrs.checked)
+    if (slot < 0) slot = others.length
+  }
+  if (slot === index) return // already there
+  const itemPos = $pos.before(depth)
+  const tr = state.tr.delete(itemPos, itemPos + item.nodeSize)
+  let at = $pos.before(depth - 1) + 1
+  for (let i = 0; i < slot; i++) at += others[i].nodeSize
+  tr.insert(at, item)
+  view.dispatch(tr.setMeta('addToHistory', true))
+}
+
 export const ChecklistClipboard = Extension.create({
   name: 'checklistClipboard',
   addProseMirrorPlugins() {
@@ -164,6 +212,14 @@ export const ChecklistClipboard = Extension.create({
               return false
             },
             pointerup: () => (cancel(), false),
+            // ticking a box: after a moment, move the item below the unticked ones
+            change: (view, e) => {
+              const input = e.target as HTMLInputElement
+              const li = input.closest?.('ul[data-type="taskList"] > li') as HTMLElement | null
+              if (!li || input.type !== 'checkbox' || settings.get().sortChecked === false) return false
+              setTimeout(() => sortItem(view, li), 350)
+              return false
+            },
             pointercancel: () => (cancel(), false),
             // no iOS callout / menu on a held checkbox
             contextmenu: (_view, e) => {

@@ -99,6 +99,7 @@
 				<string>public.audio</string>
 				<string>public.movie</string>
 				<string>public.plain-text</string>
+				<string>net.daringfireball.markdown</string>
 				<string>public.data</string>
 			</array>
 		</dict>

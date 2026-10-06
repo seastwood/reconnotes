@@ -61,7 +61,8 @@ class ShareViewController: UIViewController {
 
     /// One shared thing: a file (photo, PDF, recording…), a link, or text.
     private func load(_ provider: NSItemProvider, into dir: URL) async -> [String: Any]? {
-        let fileTypes: [UTType] = [.image, .pdf, .audio, .movie]
+        // Markdown files come as files (and become notes in the app), not as plain text
+        let fileTypes: [UTType] = [.image, .pdf, .audio, .movie] + [UTType("net.daringfireball.markdown")].compactMap { $0 }
         if let type = fileTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }),
            let entry = await copyFile(provider, type: type, into: dir) {
             return entry

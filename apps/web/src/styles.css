@@ -1024,6 +1024,12 @@ button.link {
   cursor: cell;
 }
 .drawing-header {
+  /* stays in view under the toolbar while you scroll down a tall drawing */
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--paper);
+  border-radius: 10px 10px 0 0;
   border-bottom: 1px solid var(--line);
   user-select: none;
   -webkit-user-select: none;

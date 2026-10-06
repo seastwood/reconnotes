@@ -57,6 +57,23 @@ function titleFor(share: Share): string {
 }
 
 async function toNote(share: Share): Promise<string> {
+  // Markdown files (shared, or opened from the Files app) become notes of their own
+  const files = share.items.filter((i) => i.kind === 'file' && i.file)
+  const { isMarkdownFile, noteFromMarkdown } = await import('./markdownNotes')
+  if (files.length && files.length === share.items.length && files.every((f) => isMarkdownFile(f.name ?? f.file!, f.mime))) {
+    let last = ''
+    for (const f of files) {
+      const res = await fetch(Capacitor.convertFileSrc(`${share.dir}/${f.file}`))
+      last = await noteFromMarkdown(await res.text(), f.name ?? f.file!, null)
+    }
+    return last
+  }
+  // text shared from a Markdown app (Obsidian, Bear…): formatted, not line by line
+  const only = share.items.length === 1 && share.items[0].kind === 'text' ? share.items[0].text ?? '' : ''
+  if (/^(#{1,6} |\s*[-*+] |\s*\d+[.)] |\s*> )/m.test(only)) {
+    const name = (share.title || only.split('\n').find((l) => l.trim()) || 'Shared').replace(/^#+\s*/, '').slice(0, 120)
+    return noteFromMarkdown(only, name + '.md', null)
+  }
   const title = titleFor(share)
   const blocks: Y.XmlElement[] = [paragraph(title)]
   for (const item of share.items) {
