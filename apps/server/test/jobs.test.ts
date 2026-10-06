@@ -127,6 +127,31 @@ describe('jobs', () => {
     expect(blocks()).toEqual(['paragraph:Shopping #home', 'drawing:', 'audio:', 'paragraph:The end'])
   })
 
+  it('converts a picture by tidying what the server read when it was added (no second reading)', async () => {
+    const { sampleHandwritingPng } = await import('../src/ai')
+    const put = await fetch(`${base}/api/attachments/attjobspicture0001`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'image/png' },
+      body: new Uint8Array(sampleHandwritingPng()),
+    })
+    expect(put.status).toBe(201)
+    app.store.setAttachmentText('attjobspicture0001', 'Buy milk\nDescription: a handwritten shopping list', 'done')
+    await app.sync.change(noteDocName(NOTE), (doc) => {
+      const img = new Y.XmlElement('image')
+      img.setAttribute('attachmentId', 'attjobspicture0001')
+      getContent(doc).push([img])
+    })
+    prompts.length = 0
+    const job = await waitFor((await api('POST', '/api/jobs', { kind: 'convert-picture', noteId: NOTE, input: { attachmentId: 'attjobspicture0001' } })).body.job.id)
+    expect(job.status).toBe('done')
+    expect(job.agent).toMatch(/Read when the picture was added/)
+    // the picture wasn't read again (here no separate text model tidies it), and the search description is left out
+    expect(prompts.every((p) => !/Transcribe all the text/.test(p))).toBe(true)
+    expect(blocks().slice(-2)).toEqual(['image:', 'paragraph:Buy milk*'])
+    await api('POST', `/api/jobs/${job.id}/remove-result`)
+    await app.sync.change(noteDocName(NOTE), (doc) => getContent(doc).delete(getContent(doc).length - 1, 1))
+  })
+
   it('adds a summary under the title', async () => {
     const { body } = await api('POST', '/api/jobs', { kind: 'summary', noteId: NOTE })
     const job = await waitFor(body.job.id)

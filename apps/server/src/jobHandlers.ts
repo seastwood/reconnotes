@@ -18,7 +18,7 @@ import {
 import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
-import { compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type Ai, type CompilePart } from './ai'
+import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
 import { processAttachment } from './attachments'
 import type { Job, Jobs } from './jobs'
@@ -123,17 +123,29 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     noteDoc(noteId)
     let data: Buffer
     let type: string
+    const att = store.getAttachment(attachmentId)
     if (fs.existsSync(jobs.filePath(job.id))) {
       data = fs.readFileSync(jobs.filePath(job.id))
       type = mime ?? 'image/jpeg'
     } else {
-      const att = store.getAttachment(attachmentId)
       if (!att || !store.hasBlob(att.id)) throw new Error("This picture hasn't reached the server yet – try again once it has synced.")
       if (!isAiImage(att.mime)) throw new Error('This picture’s format can’t be read. Try a PNG or JPEG.')
       data = fs.readFileSync(store.blobPath(att.id))
       type = att.mime
     }
-    const { text, agent } = await ai.transcribePhoto(data, type)
+    // The server already read the whole picture when it was added (for search):
+    // tidying that is one quick text-model call. A redo reads the picture again.
+    const earlier = !job.input.replace && !job.prompt && att?.text_status === 'done' ? Ai.searchTextAsTranscript(att.text ?? '') : ''
+    let text: string
+    let agent: string
+    if (earlier) {
+      text = await ai.tidy(earlier, isAiImage(type) ? data : null, isAiImage(type) ? type : 'image/png')
+      agent = 'Read when the picture was added, then tidied'
+    } else {
+      const r = await ai.transcribePhoto(data, type)
+      text = r.text
+      agent = r.agent
+    }
     if (!text.trim()) throw new Error('No text was found in this picture.')
     await writeResult(sync, noteId, job.id, text, { after: (el) => el.nodeName === 'image' && el.getAttribute('attachmentId') === attachmentId }, replaced(job))
     return { result: { noteId, text: preview(text) }, agent }

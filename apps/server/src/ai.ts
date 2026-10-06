@@ -311,7 +311,10 @@ export class Ai {
     // Find the written lines once (only needed for line-by-line agents).
     let lines: PictureLine[] | null | undefined
     const { result, agent } = await this.agents.run('handwriting', async (backend, agent) => {
-      if (readingMode(agent) === 'lines') {
+      // A photo or screenshot is read whole: line-by-line (the default for local
+      // models on Pencil drawings) loses the context that joins wrapped lines.
+      // Only an agent explicitly set to "line by line" reads pictures that way.
+      if (agent.reading === 'lines') {
         if (lines === undefined) lines = pictureLines(data, mime)
         if (lines) {
           const md = await this.readLines(backend, agent, lines)
@@ -428,6 +431,18 @@ export class Ai {
       log.warn(`clean-up skipped: ${(err as Error).message}`)
       return text
     }
+  }
+
+  /**
+   * Text the server read from a picture when it was added (for search), as a
+   * transcription: the "Description:" line it adds for search is left out.
+   */
+  static searchTextAsTranscript(text: string): string {
+    return text
+      .split('\n')
+      .filter((l) => !/^\s*\**\s*description\s*:/i.test(l))
+      .join('\n')
+      .trim()
   }
 
   /** Image → searchable text (OCR + short description). */

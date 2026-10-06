@@ -103,6 +103,9 @@ describe('line-by-line recognition', () => {
 describe('line-by-line recognition of pictures', () => {
   it('finds the written lines in a picture, reads them one by one and rebuilds the list', async () => {
     const { renderDrawingPng } = await import('../src/ai')
+    // pictures are read whole unless the agent is set to read line by line
+    const ocr = app.ai.agents.agents().find((a) => a.model === 'ocr')!
+    app.ai.agents.save({ ...ocr, reading: 'lines' })
     // a "photo" of three handwritten lines: a title, a bullet, an indented bullet
     const picture = renderDrawingPng([...word(70, 60, 10), dash(110, 200), ...word(160, 200, 8), dash(220, 330), ...word(270, 330, 4)])!
     tidyAnswer = '' // clean-up agent "fails", so we see the raw structure
