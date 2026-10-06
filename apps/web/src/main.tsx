@@ -31,6 +31,9 @@ function pinToViewport() {
     // not while pinch-zoomed: then the visible area is smaller on purpose
     if (vv && Math.abs(vv.scale - 1) < 0.01) {
       document.documentElement.style.setProperty('--app-height', `${Math.round(vv.height)}px`)
+      // iOS may also slide the visible area down the page as the keyboard
+      // opens (and leave it there): keep the app on the visible area
+      document.documentElement.style.setProperty('--app-top', `${Math.max(0, Math.round(vv.offsetTop))}px`)
       // the keyboard covers the home-indicator area, so bottom toolbars
       // shouldn't keep their safe-area gap above it
       const tallest = Math.max(full.get(window.innerWidth) ?? 0, vv.height, window.innerHeight)
@@ -45,6 +48,19 @@ function pinToViewport() {
   vv?.addEventListener('scroll', apply)
   window.addEventListener('scroll', apply, { passive: true })
   window.addEventListener('orientationchange', () => setTimeout(apply, 300))
+  // iOS also scrolls the app's fixed frames (which have no scroll bar, so
+  // they could never be scrolled back) to show a focused text box: undo it
+  document.addEventListener(
+    'scroll',
+    (e) => {
+      const el = e.target
+      if (!(el instanceof HTMLElement) || !el.scrollTop) return
+      const y = getComputedStyle(el).overflowY
+      if (y === 'hidden' || y === 'clip') el.scrollTop = 0
+    },
+    { capture: true, passive: true },
+  )
+  document.addEventListener('focusout', () => setTimeout(apply, 50))
   apply()
 }
 
