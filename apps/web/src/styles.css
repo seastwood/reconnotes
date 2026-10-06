@@ -2076,8 +2076,35 @@ li[data-checked='true'] .due-chip button {
 .ask-answer ul {
   margin: 0 0 8px;
 }
+.ask-answer ul,
+.ask-answer ol {
+  padding-left: 20px;
+}
 .ask-answer ul {
-  padding-left: 18px;
+  list-style: disc;
+}
+.ask-answer li {
+  list-style: inherit;
+  margin: 3px 0;
+}
+.ask-answer li::marker {
+  color: var(--accent-text);
+}
+/* a checklist answer ("what do I need to do") */
+.ask-answer li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -20px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ask-answer li > input[type='checkbox'] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  transform: translateY(2px);
 }
 .cite {
   display: inline-grid;
@@ -2107,6 +2134,17 @@ li[data-checked='true'] .due-chip button {
   padding: 4px 0;
   text-align: left;
   font-size: 14px;
+  min-width: 0;
+}
+.ask-sources button > svg,
+.ask-sources button > .cite {
+  flex: none;
+}
+.ask-sources button > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .audio-transcript {

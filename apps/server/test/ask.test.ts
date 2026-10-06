@@ -68,6 +68,20 @@ describe('excerpts', () => {
   })
 })
 
+describe('answer formatting', () => {
+  it('turns plain lines after "…:" into a list, and • bullets into Markdown ones', async () => {
+    const { listify } = await import('../src/ask')
+    const plain = 'After your last leadership meeting, you need to:\nSort the metal on the shelf.\nMake a decision about the lieutenant today.\nSort Team A + B bins.'
+    expect(listify(plain)).toBe(
+      'After your last leadership meeting, you need to:\n\n- Sort the metal on the shelf.\n- Make a decision about the lieutenant today.\n- Sort Team A + B bins.',
+    )
+    expect(listify('Things:\n• one\n• two')).toBe('Things:\n- one\n- two')
+    // already a list, or a single sentence: left alone
+    expect(listify('You need to:\n- [ ] one [1]\n- [ ] two [1]')).toBe('You need to:\n- [ ] one [1]\n- [ ] two [1]')
+    expect(listify('The answer is:\nGlasses.')).toBe('The answer is:\nGlasses.')
+  })
+})
+
 describe('ask your notes', () => {
   it('answers from the matching notes and cites them', async () => {
     await addNote('asknote000001', ['Monday plan', 'Team A sorts the T8 bins with all the parts'])

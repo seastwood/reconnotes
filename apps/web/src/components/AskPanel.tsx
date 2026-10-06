@@ -132,7 +132,7 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
           {result.sources.map((s) => (
             <button key={s.n} onClick={() => onOpen(s.noteId)}>
               <span className="cite">{s.n}</span>
-              <FileText size={14} /> {s.title}
+              <FileText size={14} /> <span>{s.title}</span>
             </button>
           ))}
         </div>

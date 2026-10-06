@@ -93,6 +93,7 @@ export async function askNotes(
   if (!ids.length) return { answer: "You don't have any notes yet.", sources: [], agent: '' }
 
   const sources: AskSource[] = []
+  const texts = new Map<number, string>()
   let context = ''
   for (const id of ids) {
     const doc = sync.getDoc(noteDocName(id))
@@ -102,15 +103,18 @@ export async function askNotes(
     if (context.length + md.length > TOTAL) break
     const n = sources.length + 1
     const m = meta.get(id)!
-    sources.push({ n, noteId: id, title: m.title || 'Untitled' })
+    sources.push({ n, noteId: id, title: shortTitle(m.title) })
+    texts.set(n, md)
     const updated = new Date(m.updatedAt).toISOString().slice(0, 10)
     context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (last edited ${updated}) ===\n${md}`
   }
 
   const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
-- Be brief and direct. Use short bullet points when listing several things.
-- After each fact, cite the note it came from like [1] or [2][3].
+- Be brief and direct. Start with the answer, not a restatement of the question.
+- When the answer is several things, write a Markdown list, one item per line starting with "- ".
+- When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
+- After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
 - Answer in the language of the question.
 
@@ -118,8 +122,57 @@ Question: ${question}
 
 Notes:${context}`
 
-  const { text, agent } = await ai.ask(prompt)
-  // keep only sources the answer actually cites (or all, if it cites none)
+  const { text: raw, agent } = await ai.ask(prompt)
+  const text = listify(raw)
+  // keep only sources the answer actually cites – or, if it cites none, the notes it plainly drew on
   const cited = new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))
-  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : sources, agent }
+  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), agent }
+}
+
+/** A note's title for the source list: handwritten notes can have a whole paragraph as their title. */
+function shortTitle(title: string): string {
+  const t = (title || 'Untitled').replace(/\s+/g, ' ').trim()
+  return t.length > 60 ? `${t.slice(0, 57).replace(/\s+\S*$/, '')}…` : t
+}
+
+const isListLine = (l: string) => /^\s*([-*+•]|\d+[.)])\s/.test(l)
+
+/**
+ * Small models often list things as plain lines ("After the meeting you need to:"
+ * then one line per task). Make those a proper Markdown list; "•" and "*" bullets too.
+ */
+export function listify(text: string): string {
+  const lines = text.replace(/^(\s*)[•*]\s+/gm, '$1- ').split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i])
+    if (!/:\s*$/.test(lines[i])) continue
+    // the plain lines after "…:" (until a blank line), if there are at least two
+    let j = i + 1
+    while (j < lines.length && !lines[j].trim()) j++
+    const run: string[] = []
+    while (j < lines.length && lines[j].trim() && !isListLine(lines[j]) && !/^#/.test(lines[j])) run.push(lines[j++])
+    if (run.length < 2 || (j < lines.length && lines[j].trim())) continue
+    out.push('', ...run.map((l) => `- ${l.trim()}`))
+    i = j - 1
+  }
+  return out.join('\n')
+}
+
+/** Sources for an answer that cites none: the notes sharing the most words with it. */
+function usedSources(answer: string, sources: AskSource[], texts: Map<number, string>): AskSource[] {
+  const words = new Set(answer.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu)?.filter((w) => !STOP.has(w)) ?? [])
+  if (!words.size) return sources
+  const scored = sources.map((s) => {
+    const have = new Set(texts.get(s.n)?.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])
+    let n = 0
+    for (const w of words) if (have.has(w)) n++
+    return { s, n }
+  })
+  const best = Math.max(...scored.map((x) => x.n))
+  if (!best) return sources.slice(0, 3)
+  return scored
+    .filter((x) => x.n >= Math.ceil(best * 0.5))
+    .slice(0, 4)
+    .map((x) => x.s)
 }
