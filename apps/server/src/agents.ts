@@ -229,6 +229,7 @@ const KEEP_ALIVE = '30m'
 export async function warmOllama(agent: AgentConfig): Promise<boolean> {
   if (agent.kind !== 'ollama') return false
   try {
+    await makeRoomOnGpu(agent)
     const res = await fetch(trimSlash(agent.baseUrl) + '/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -255,6 +256,58 @@ const THINK_ROOM = 6144
 /** Thinking was cut off by the token limit (in the thinking field, or an unclosed <think> in the text). */
 const ranOutThinking = (r: OllamaReply) =>
   r.doneReason === 'length' && (Boolean(r.thinking.trim()) || (/<think>/i.test(r.content) && !/<\/think>/i.test(r.content)))
+
+/** Ollama servers seen running a model partly on the CPU: their GPU only fits one big model at a time */
+const tightGpu = new Set<string>()
+/** the context size each model was last loaded with (another size makes Ollama load it again) */
+const lastCtx = new Map<string, { ctx: number; at: number }>()
+
+interface OllamaLoaded {
+  name: string
+  size: number
+  size_vram: number
+}
+const spilled = (m: OllamaLoaded) => m.size > 0 && m.size_vram < m.size * 0.95
+const sameModel = (loaded: string, model: string) => loaded === model || loaded === `${model}:latest` || `${loaded}:latest` === model
+
+/**
+ * Before a job: make sure its model will run on the GPU. On a small GPU
+ * (8 GB) Ollama keeps the last model in memory and squeezes the next one in
+ * beside it – mostly on the CPU, many times slower. Once that's been seen on a
+ * server, other models are unloaded first, so each job gets the whole GPU.
+ * (Small embedding models are left alone.)
+ */
+export async function makeRoomOnGpu(agent: AgentConfig): Promise<string[]> {
+  const base = trimSlash(agent.baseUrl)
+  let models: OllamaLoaded[]
+  try {
+    const res = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(3000) })
+    models = (((await res.json()) as { models?: OllamaLoaded[] }).models ?? []).filter((m) => !EMBED_MODEL.test(m.name))
+  } catch {
+    return []
+  }
+  if (models.some(spilled)) tightGpu.add(base)
+  if (!tightGpu.has(base)) return []
+  const self = models.find((m) => sameModel(m.name, agent.model))
+  if (self && !spilled(self)) return []
+  // everything else out – and this model too if it's half on the CPU, so it loads again fully on the GPU
+  const out = models.filter((m) => m !== self || spilled(m))
+  await Promise.all(
+    out.map((m) =>
+      fetch(`${base}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+        signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined),
+    ),
+  )
+  if (out.length) {
+    for (const m of out) lastCtx.delete(`${base}|${m.name}`)
+    log.info(`made room on the GPU for ${agent.model}: unloaded ${out.map((m) => m.name).join(', ')}`)
+  }
+  return out.map((m) => m.name)
+}
 
 class OllamaBackend implements Backend {
   constructor(private agent: AgentConfig) {}
@@ -288,6 +341,7 @@ class OllamaBackend implements Backend {
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
     const info = await this.info()
+    await makeRoomOnGpu(this.agent)
     // room for the answer itself (callers size it to the job, e.g. small per handwritten line)
     const limit = Math.min(maxTokens, 8192)
     // Ollama's default context (often 4K) silently cuts long jobs short:
@@ -296,7 +350,13 @@ class OllamaBackend implements Backend {
     const ctxFor = (predict: number) => {
       const need = inputTokens + predict + 512
       const cap = Math.min(info.contextLength ?? 32768, 32768)
-      return Math.min(cap, [8192, 16384, 32768].find((b) => b >= need) ?? 32768)
+      const want = Math.min(cap, [8192, 16384, 32768].find((b) => b >= need) ?? 32768)
+      // a different size makes Ollama load the model again: keep a bigger one it already has
+      const key = `${trimSlash(this.agent.baseUrl)}|${this.agent.model}`
+      const last = lastCtx.get(key)
+      const ctx = last && last.ctx > want && Date.now() - last.at < 30 * 60_000 ? last.ctx : want
+      lastCtx.set(key, { ctx, at: Date.now() })
+      return ctx
     }
     const tried: string[] = []
     let thoughtTooLong = 0

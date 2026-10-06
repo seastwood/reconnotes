@@ -24,6 +24,8 @@ beforeAll(async () => {
     for await (const c of req) body += c
     const json = JSON.parse(body || '{}')
     res.writeHead(200, { 'Content-Type': 'application/json' })
+    // what's loaded (asked before each job): nothing
+    if (req.url === '/api/ps') return res.end('{"models":[]}')
     if (req.url === '/api/show') {
       // what Ollama says about a model: "qwen3-vl" models say they think
       const thinks = /qwen3-vl/.test(json.model)

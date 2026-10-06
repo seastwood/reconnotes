@@ -25,6 +25,8 @@ beforeAll(async () => {
     let body = ''
     for await (const c of req) body += c
     res.writeHead(200, { 'Content-Type': 'application/json' })
+    // what's loaded (asked before each job): nothing
+    if (req.url === '/api/ps') return res.end('{"models":[]}')
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion'] }))
     if (req.url === '/api/chat' || req.url === '/api/generate')
       return res.end(JSON.stringify({ message: { role: 'assistant', content: '- It works' }, response: '- It works', done_reason: 'stop', eval_count: 5 }))

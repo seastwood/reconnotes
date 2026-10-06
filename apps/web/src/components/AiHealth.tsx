@@ -64,8 +64,14 @@ export function AiHealthLine({ trigger }: { trigger?: string }) {
               {loaded.map((m, i) => (
                 <span key={m.name} className="ai-model">
                   {i > 0 && ', '}
-                  <b>{m.name.replace(/:latest$/, '')}</b> {gb(m.vramMb || m.sizeMb)}
-                  {m.vramMb < m.sizeMb * 0.95 ? (m.vramMb ? ' (partly on CPU)' : ' (on CPU)') : ''}
+                  <b>{m.name.replace(/:latest$/, '')}</b>{' '}
+                  {m.vramMb < m.sizeMb * 0.95 ? (
+                    <span className="ai-health-err">
+                      {gb(m.vramMb)} of {gb(m.sizeMb)} on the GPU – {m.vramMb < m.sizeMb / 2 ? 'mostly' : 'partly'} on the CPU, slow
+                    </span>
+                  ) : (
+                    gb(m.sizeMb)
+                  )}
                   {unloadsIn(m.until) && <span className="muted"> · {unloadsIn(m.until)}</span>}
                 </span>
               ))}
@@ -125,7 +131,7 @@ export function AiHealthBox() {
             <p key={o.url} className="hint">
               Ollama {o.version ?? ''} at {o.url}:{' '}
               {o.loaded.length
-                ? o.loaded.map((m) => `${m.name} (${m.vramMb >= 1024 ? `${(m.vramMb / 1024).toFixed(1)} GB` : `${m.vramMb} MB`} on the GPU${m.vramMb < m.sizeMb * 0.95 ? ', partly on the CPU – slower' : ''})`).join(', ')
+                ? o.loaded.map((m) => (m.vramMb < m.sizeMb * 0.95 ? `${m.name} (only ${gb(m.vramMb)} of ${gb(m.sizeMb)} on the GPU – the rest on the CPU, slow)` : `${m.name} (${gb(m.sizeMb)} on the GPU)`)).join(', ')
                 : 'nothing loaded right now (the first job loads a model, which takes a little longer)'}
             </p>
           ),
