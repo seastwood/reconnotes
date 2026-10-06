@@ -3496,3 +3496,53 @@ a.button {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* sort and filter for search results */
+.search-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.search-count {
+  flex: 1;
+  min-width: 0;
+}
+.search-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.search-tools button.on {
+  color: var(--accent-text);
+  background: var(--active);
+}
+.search-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 6px 8px;
+}
+.search-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--accent-text);
+  background: var(--active);
+}
+.search-chip button {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+}

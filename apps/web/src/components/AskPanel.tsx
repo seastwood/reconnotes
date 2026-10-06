@@ -9,17 +9,22 @@ interface Source {
   title: string
 }
 
+/** answers already given, so going back to the search doesn't ask again */
+const answers = new Map<string, { answer: string; sources: Source[] }>()
+
 /**
  * "Ask your notes": the answer to a question, written by your AI agents from
  * your own notes, with numbered links to the notes it used.
  */
 export function AskPanel({ question, onOpen }: { question: string; onOpen: (noteId: string) => void }) {
-  const [result, setResult] = useState<{ answer: string; sources: Source[] } | null>(null)
+  const [result, setResult] = useState<{ answer: string; sources: Source[] } | null>(() => answers.get(question) ?? null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setResult(null)
+    const known = answers.get(question)
+    setResult(known ?? null)
     setError(null)
+    if (known) return
     if (!isSyncConfigured()) return setError('Asking your notes uses the AI agents on your ReconNotes server – connect one in Settings.')
     const ctl = new AbortController()
     fetch(apiUrl('/api/ai/ask'), {
@@ -31,6 +36,7 @@ export function AskPanel({ question, onOpen }: { question: string; onOpen: (note
       .then(async (res) => {
         const json = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error((json as { error?: string }).error ?? `Server error ${res.status}`)
+        answers.set(question, json as { answer: string; sources: Source[] })
         setResult(json as { answer: string; sources: Source[] })
       })
       .catch((e) => (e as Error).name !== 'AbortError' && setError((e as Error).message))
