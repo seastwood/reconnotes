@@ -143,7 +143,12 @@ export function App() {
   const meta = nav.noteId ? getNotes(workspaceDoc).get(nav.noteId) : undefined
   const note = meta ? readNote(meta) : null
   useEffect(() => {
-    if (ws.loaded && nav.noteId && (!note || note.trashedAt)) setNav({ ...nav, noteId: null })
+    if (!ws.loaded || !nav.noteId || (note && !note.trashedAt)) return
+    // back to the list of the folder it was in (search results stay, to carry on with them)
+    const folder = note?.folderId ? ws.folders.find((f) => f.id === note.folderId && !f.trashedAt) : undefined
+    const view: View = nav.view.kind === 'search' || !note ? nav.view : folder ? { kind: 'folder', folderId: folder.id } : nav.view.kind === 'folder' ? { kind: 'all' } : nav.view
+    setNav({ ...nav, view, noteId: null })
+    if (narrow && pane === 'note') setPane('list')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, nav.noteId])
 
