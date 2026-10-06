@@ -454,7 +454,11 @@ export class Ai {
 
     const { result } = await this.agents.run('compile', async (backend, agent) => {
       const input: Part[] = []
-      if (agent.vision) {
+      // Cloud models read the drawings and pictures themselves. Local (Ollama)
+      // models get the handwriting read first and compile plain text: small
+      // models do much better with text, and a note's worth of images at once
+      // overflows a home graphics card.
+      if (agent.vision && agent.kind !== 'ollama') {
         for (const p of parts) {
           if ('text' in p) {
             if (p.text.trim()) input.push({ text: p.text })

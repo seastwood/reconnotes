@@ -193,7 +193,7 @@ describe('converting a picture to text', () => {
 })
 
 describe('compiling a note with pictures', () => {
-  it('sends drawings and pasted pictures to a vision agent in reading order', async () => {
+  it('has a local model compile text: drawings and pictures are read first, in reading order', async () => {
     mode = 'answer'
     const noteId = 'notehwcompile0000001'
     // an uploaded picture
@@ -224,10 +224,12 @@ describe('compiling a note with pictures', () => {
       body: JSON.stringify({ noteId }),
     })
     expect(res.status).toBe(200)
-    const sent = requests[0] as unknown as { messages: { content: string; images: string[] }[] }
-    expect(sent.messages[0].images).toHaveLength(2) // the drawing and the picture
-    expect(sent.messages[0].content).toMatch(/Meeting notes/)
-    expect(sent.messages[0].content).toMatch(/picture attached to the note/)
+    const sent = requests as unknown as { messages?: { content: string; images?: string[] }[] }[]
+    const last = sent[sent.length - 1].messages![0]
+    expect(last.images ?? []).toHaveLength(0) // the compile request itself is text only
+    expect(last.content).toMatch(/Meeting notes[\s\S]*\[handwritten section\][\s\S]*Buy milk[\s\S]*\[picture, transcribed\]/)
+    // the drawing and the picture were each read before that
+    expect(sent.slice(0, -1).filter((r) => r.messages?.[0].images?.length).length).toBeGreaterThanOrEqual(2)
   })
 })
 
