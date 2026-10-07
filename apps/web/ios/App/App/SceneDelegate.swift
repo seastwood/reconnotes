@@ -87,6 +87,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(AudioRecorderPlugin())
         // Face ID / Touch ID for locked folders (see BiometricPlugin below).
         bridge?.registerPluginInstance(BiometricPlugin())
+        // Copying text with pictures (see NativeClipboardPlugin below).
+        bridge?.registerPluginInstance(NativeClipboardPlugin())
         Self.current = self
         guard let webView = webView else { return }
         installScribbleBlocker(in: webView)
@@ -1078,5 +1080,41 @@ public class BiometricPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func remove(_ call: CAPPluginCall) {
         if let key = call.getString("key") { SecItemDelete(query(key) as CFDictionary) }
         call.resolve()
+    }
+}
+
+
+// MARK: - Clipboard with pictures
+
+/// Puts text (plain + rich) and pictures on the clipboard at once, like
+/// copying from Notes: a web page can only do that during a tap, and only
+/// one picture. The first item is the text (with ReconNotes' own copy of the
+/// note content in its HTML, for pasting back into a note); each picture is
+/// an item of its own, so Notes, Messages and Mail paste them too.
+///
+///     NativeClipboard.write({ text, html?, images?: [{ data (base64), mime }] })
+@objc(NativeClipboardPlugin)
+public class NativeClipboardPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "NativeClipboardPlugin"
+    public let jsName = "NativeClipboard"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "write", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func write(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        var first: [String: Any] = [UTType.utf8PlainText.identifier: text]
+        if let html = call.getString("html"), !html.isEmpty { first[UTType.html.identifier] = html }
+        var items: [[String: Any]] = [first]
+        for img in call.getArray("images", JSObject.self) ?? [] {
+            guard let b64 = img["data"] as? String, let data = Data(base64Encoded: b64) else { continue }
+            let mime = (img["mime"] as? String) ?? "image/png"
+            let type = UTType(mimeType: mime) ?? .png
+            items.append([type.identifier: data])
+        }
+        DispatchQueue.main.async {
+            UIPasteboard.general.setItems(items, options: [:])
+            call.resolve()
+        }
     }
 }

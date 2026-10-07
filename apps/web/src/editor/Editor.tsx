@@ -101,7 +101,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         TaskItem.configure({ nested: true }),
         JobTag,
         Uncertain,
-        ChecklistClipboard,
+        ChecklistClipboard.configure({ doc }),
         BlockClipboard.configure({ doc }),
         TableKit.configure({ table: { resizable: true, lastColumnResizable: false, cellMinWidth: 60 } }),
         DrawingNode,
@@ -130,6 +130,8 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         handlePaste: (view, event) => {
           const files = Array.from(event.clipboardData?.files ?? [])
           if (!files.length) return false
+          // copied from ReconNotes (a checklist item with its pictures…): the blocks, not just the picture
+          if (event.clipboardData?.getData('text/html').includes('data-reconnotes-blocks')) return false
           event.preventDefault()
           void insertFiles(editorRef.current!, files)
           return true

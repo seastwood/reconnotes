@@ -3956,3 +3956,22 @@ a.button {
 .offsite .error-text svg {
   vertical-align: -2px;
 }
+
+/* a held checkbox: let go to copy the item */
+.copy-armed {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.search-scope {
+  align-items: center;
+  padding: 0 14px 8px;
+  font-size: 13px;
+}
+.search-scope .text {
+  font-size: 13px;
+  padding: 2px 4px;
+}

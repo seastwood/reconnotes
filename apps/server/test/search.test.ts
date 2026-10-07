@@ -103,5 +103,8 @@ describe('search', () => {
     expect(r.related.map((h: { noteId: string }) => h.noteId)).toEqual([id])
     expect(r.related[0].title).toBe('Lab rules')
     expect(embedCalls).toBe(before)
+    // a note with hardly anything in it says too little to find related ones
+    await app.sync.meaning!.indexNote(id, 'Lab', 'Goggles')
+    expect(app.sync.meaning!.related(id)).toEqual([])
   })
 })

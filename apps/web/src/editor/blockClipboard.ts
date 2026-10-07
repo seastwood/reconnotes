@@ -7,6 +7,8 @@ import * as Y from 'yjs'
 import { getDrawingMeta, getStrokes, getTranscripts, newId, transcriptSourceKey, wordsKey, type Stroke } from '@reconnotes/core'
 import { blocksToText } from './checklistCopy'
 import { showToast } from '../lib/toast'
+import { Capacitor, registerPlugin } from '@capacitor/core'
+import { attachmentBlob } from '../lib/attachments'
 
 /**
  * Copying handwriting, pictures, recordings and files
@@ -138,6 +140,98 @@ async function writeClipboard(html: string, text: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Copying with pictures (a checklist item with photos, say)
+
+interface NativeClipboardPlugin {
+  write(o: { text: string; html?: string; images?: { data: string; mime: string }[] }): Promise<void>
+}
+const NativeClipboard = registerPlugin<NativeClipboardPlugin>('NativeClipboard')
+const nativeClipboard = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('NativeClipboard')
+
+const toBase64 = (b: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''))
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(b)
+  })
+
+/** A picture as PNG (the one picture type every browser can put on the clipboard). */
+async function asPng(b: Blob): Promise<Blob> {
+  if (b.type === 'image/png') return b
+  const bmp = await createImageBitmap(b)
+  const c = document.createElement('canvas')
+  c.width = bmp.width
+  c.height = bmp.height
+  c.getContext('2d')!.drawImage(bmp, 0, 0)
+  return new Promise((resolve, reject) => c.toBlob((p) => (p ? resolve(p) : reject(new Error('no PNG'))), 'image/png'))
+}
+
+/** The pictures in a slice, in order. */
+function picturesIn(slice: Slice): string[] {
+  const ids: string[] = []
+  slice.content.descendants((n) => {
+    if (n.type.name === 'image' && n.attrs.attachmentId) ids.push(n.attrs.attachmentId as string)
+    return true
+  })
+  return ids
+}
+
+/** The HTML with each picture's file inside it (other apps can't fetch ours). */
+async function inlinePictures(html: string, blobs: Map<string, Blob>): Promise<string> {
+  let out = html
+  for (const [id, b] of blobs) out = out.split(`data-attachment-id="${id}"`).join(`data-attachment-id="${id}" src="data:${b.type};base64,${await toBase64(b)}"`)
+  return out
+}
+
+/**
+ * Copy some blocks with their pictures: the text (and ReconNotes' own copy,
+ * to paste back as a checklist with its pictures), and the pictures as
+ * pictures for other apps. Call it straight from a tap / release: browsers
+ * only allow the clipboard then. Resolves to whether it worked.
+ */
+export function copyRich(view: EditorView, slice: Slice, doc: Y.Doc): Promise<boolean> {
+  const { html, text } = clipboardContent(view, slice, doc)
+  const ids = picturesIn(slice)
+  const blobs = async () => {
+    const m = new Map<string, Blob>()
+    for (const id of ids) {
+      const b = await attachmentBlob(id)
+      if (b && b.type.startsWith('image/')) m.set(id, b)
+    }
+    return m
+  }
+  // the iPhone / iPad app: any time, every picture
+  if (nativeClipboard())
+    return (async () => {
+      const m = await blobs()
+      const images = await Promise.all([...m.values()].map(async (b) => ({ data: await toBase64(b), mime: b.type })))
+      await NativeClipboard.write({ text, html: await inlinePictures(html, m), images })
+      return true
+    })().catch(() => writeClipboard(html, text))
+  if (!ids.length || typeof ClipboardItem === 'undefined') return writeClipboard(html, text)
+  // a browser: one clipboard item, made now (during the tap), filled in as the pictures load
+  const loaded = blobs()
+  try {
+    const item = new ClipboardItem({
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+      'text/html': loaded.then(async (m) => new Blob([await inlinePictures(html, m)], { type: 'text/html' })),
+      'image/png': loaded.then((m) => {
+        const first = [...m.values()][0]
+        if (!first) throw new Error('no picture')
+        return asPng(first)
+      }),
+    })
+    return navigator.clipboard.write([item]).then(
+      () => true,
+      () => writeClipboard(html, text),
+    )
+  } catch {
+    return writeClipboard(html, text)
   }
 }
 

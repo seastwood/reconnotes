@@ -47,7 +47,7 @@ import { useJobs } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { lockFolder, useFolderAccess } from '../lib/folderLock'
-import { setSearchFolders } from '../lib/searchScope'
+import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useSavedSearches } from '../lib/searchHistory'
 import { openDailyNote } from '../lib/daily'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
@@ -114,6 +114,10 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   // saved searches shown here (pin them in the search suggestions)
   const smart = useSavedSearches().filter((s) => s.pinned)
   const ws = useWorkspace()
+  // the folders search looks in (chosen with "Search in this folder…" or the filter): shown before you type
+  const scope = useSearchScope()
+  const scopeName = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
+  const scopeLabel = scope.length === 1 ? `Search in ${scopeName(scope[0])}` : scope.length ? `Search in ${scope.length} folders` : 'Search everything'
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
   const searchBox = useRef<HTMLTextAreaElement>(null)
@@ -381,8 +385,8 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             ref={searchBox}
             rows={1}
             enterKeyHint="search"
-            placeholder="Search everything"
-            aria-label="Search everything"
+            placeholder={scopeLabel}
+            aria-label={scopeLabel}
             value={search}
             autoCapitalize="off"
             onChange={(e) => onSearch(e.target.value.replace(/\n/g, ' '))}
@@ -412,6 +416,22 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           </button>
         )}
       </div>
+      {!search.trim() && scope.length > 0 && (
+        <div className="search-chips search-scope" onPointerDown={(e) => e.preventDefault()}>
+          <span className="muted">Searching in</span>
+          {scope.map((id) => (
+            <span key={id} className="search-chip">
+              <Folder size={12} /> {scopeName(id)}
+              <button aria-label={`Stop searching only in ${scopeName(id)}`} onClick={() => toggleSearchFolder(id)}>
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          <button className="text" onClick={() => setSearchFolders([])}>
+            Everywhere
+          </button>
+        </div>
+      )}
       {!search.trim() && searchFocus && (
         <SearchSuggestions
           onPick={(q, folders) => {

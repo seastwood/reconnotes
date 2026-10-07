@@ -74,6 +74,10 @@ interface Row {
   vec: Buffer
 }
 
+/** too little text to say what a note is about */
+const MIN_RELATED_TEXT = 60
+const MIN_RELATED_PASSAGE = 25
+
 export class MeaningIndex {
   /** all vectors in memory (a few thousand passages is a few MB), loaded on first search */
   private cache: { noteId: string; passage: string; vec: Float32Array }[] | null = null
@@ -170,26 +174,39 @@ export class MeaningIndex {
    * Notes about the same things as this one, closest first: each note's best
    * passage against the gist of this note (the average of its passages).
    * Uses the vectors already made for search – no AI call.
+   *
+   * Embedding models rate almost any two notes as somewhat alike (0.5–0.65
+   * is usual for unrelated text), so a note only counts as related when it's
+   * clearly closer than that: above `minScore`, and – in a library big
+   * enough to tell – well above how alike notes typically are to this one.
+   * Very short notes (a title, a line) say too little to compare.
    */
-  related(noteId: string, limit = 6, minScore = 0.6): MeaningHit[] {
+  related(noteId: string, limit = 5, minScore = 0.7): MeaningHit[] {
     const model = this.modelKey()
     if (!model) return []
     const all = this.vectors(model)
     const own = all.filter((c) => c.noteId === noteId)
-    if (!own.length) return []
+    if (!own.length || own.reduce((n, c) => n + c.passage.length, 0) < MIN_RELATED_TEXT) return []
     const gist = new Float32Array(own[0].vec.length)
     for (const c of own) for (let i = 0; i < gist.length; i++) gist[i] += c.vec[i] / own.length
     const best = new Map<string, MeaningHit>()
     for (const c of all) {
-      if (c.noteId === noteId) continue
+      if (c.noteId === noteId || c.passage.length < MIN_RELATED_PASSAGE) continue
       const score = cosine(gist, c.vec)
       const cur = best.get(c.noteId)
       if (!cur || score > cur.score) best.set(c.noteId, { noteId: c.noteId, score, passage: c.passage })
     }
-    return [...best.values()]
-      .filter((h) => h.score >= minScore)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
+    const scores = [...best.values()].map((h) => h.score)
+    let floor = minScore
+    if (scores.length >= 8) {
+      // how alike notes usually are to this one: related ones stand out from that
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length
+      const sd = Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length)
+      floor = Math.max(floor, mean + 2 * sd)
+    }
+    const ranked = [...best.values()].filter((h) => h.score >= floor).sort((a, b) => b.score - a.score)
+    // and close to the best one (not a long tail of maybes)
+    return ranked.filter((h) => h.score >= ranked[0].score - 0.1).slice(0, limit)
   }
 
   /**
