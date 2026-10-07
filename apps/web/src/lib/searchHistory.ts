@@ -28,6 +28,8 @@ export interface SavedSearch {
   query: string
   /** the folders it searches in ([] = everywhere) */
   folders: string[]
+  /** shown in the sidebar as a smart folder */
+  pinned?: boolean
 }
 const settings = () => getSettings(workspaceDoc)
 const readSaved = (): SavedSearch[] => (settings().get('savedSearches') as SavedSearch[] | undefined) ?? []
@@ -58,5 +60,13 @@ export function removeSavedSearch(id: string) {
   settings().set(
     'savedSearches',
     readSaved().filter((s) => s.id !== id),
+  )
+}
+
+/** Show (or stop showing) a saved search in the sidebar, as a smart folder. */
+export function pinSavedSearch(id: string, pinned: boolean) {
+  settings().set(
+    'savedSearches',
+    readSaved().map((s) => (s.id === id ? { ...s, pinned } : s)),
   )
 }

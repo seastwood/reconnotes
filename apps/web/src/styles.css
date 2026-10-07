@@ -3900,3 +3900,21 @@ a.button {
   background: rgba(127, 127, 127, 0.14);
   white-space: nowrap;
 }
+
+/* "Ask about this note" */
+.ask-note-dialog h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ask-note-dialog .ask-followup-box {
+  margin: 8px 0 4px;
+}
+.ask-note-answer {
+  padding: 0;
+  margin: 8px -8px 0;
+}
+.related-notes h4 {
+  margin-top: 4px;
+}

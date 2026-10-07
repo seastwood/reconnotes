@@ -15,6 +15,8 @@ import {
   Hash,
   LayoutTemplate,
   CalendarDays,
+  CalendarCheck,
+  SearchCheck,
   CloudDownload,
   Command as CommandIcon,
   Activity,
@@ -45,6 +47,8 @@ import { isSyncConfigured } from '../lib/settings'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { lockFolder, useFolderAccess } from '../lib/folderLock'
 import { setSearchFolders } from '../lib/searchScope'
+import { useSavedSearches } from '../lib/searchHistory'
+import { openDailyNote } from '../lib/daily'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 
 export type View =
@@ -105,6 +109,8 @@ export function getDrag(e: React.DragEvent): DragPayload | null {
 }
 
 export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder, search, onSearch, onOpenResult, activeNoteId }: Props) {
+  // saved searches shown here (pin them in the search suggestions)
+  const smart = useSavedSearches().filter((s) => s.pinned)
   const ws = useWorkspace()
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
@@ -430,7 +436,28 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             </span>
           </div>
         )}
+        <div className="folder-row special" onClick={() => void openDailyNote().then((id) => onOpenResult(id))} title="Today’s daily note – made for you the first time, with yesterday’s unfinished to-dos">
+          <CalendarCheck size={16} /> <span className="folder-name">Today</span>
+        </div>
         {isSyncConfigured() && <JobsRow active={view.kind === 'jobs'} onClick={() => onView({ kind: 'jobs' })} />}
+        {smart.length > 0 && (
+          <>
+            <div className="section-label">Smart folders</div>
+            {smart.map((s) => (
+              <div
+                key={s.id}
+                className="folder-row special"
+                onClick={() => {
+                  setSearchFolders(s.folders)
+                  onSearch(s.query)
+                }}
+                title={`Search: ${s.query}`}
+              >
+                <SearchCheck size={16} /> <span className="folder-name">{s.query}</span>
+              </div>
+            ))}
+          </>
+        )}
         <div className="section-label">
           Folders
           <div className="menu-anchor">

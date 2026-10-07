@@ -35,6 +35,7 @@ import * as Y from 'yjs'
 import { getContent, noteDocName } from '@reconnotes/core'
 import { sync } from './lib/sync'
 import { startMeeting } from './lib/meeting'
+import { openDailyNote } from './lib/daily'
 
 function useMedia(q: string) {
   const [m, setM] = useState(() => matchMedia(q).matches)
@@ -359,6 +360,7 @@ export function App() {
     const folderNow = () => (a().nav.view.kind === 'folder' ? (a().nav.view as { folderId: string }).folderId : null)
     const commands = [
       { id: 'new-note', label: 'New note', section: N, keywords: 'create add', run: () => a().openNote(createNote(workspaceDoc, { folderId: folderNow() })) },
+      { id: 'today', label: 'Today’s note', section: N, keywords: 'daily journal date', run: () => void openDailyNote().then((id) => a().openNote(id)) },
       { id: 'new-meeting', label: 'New meeting', section: N, keywords: 'record minutes agenda action items', run: () => void startMeeting(folderNow()).then((id) => a().openNote(id)) },
       {
         id: 'new-folder',

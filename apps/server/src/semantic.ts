@@ -159,6 +159,39 @@ export class MeaningIndex {
     return noteIds.filter((id) => !have.has(id))
   }
 
+  private vectors(model: string) {
+    this.cache ??= (this.store.db.prepare('SELECT note_id, passage, vec, model FROM note_vectors').all() as Row[])
+      .filter((r) => r.model === model)
+      .map((r) => ({ noteId: r.note_id, passage: r.passage, vec: new Float32Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength / 4) }))
+    return this.cache
+  }
+
+  /**
+   * Notes about the same things as this one, closest first: each note's best
+   * passage against the gist of this note (the average of its passages).
+   * Uses the vectors already made for search – no AI call.
+   */
+  related(noteId: string, limit = 6, minScore = 0.6): MeaningHit[] {
+    const model = this.modelKey()
+    if (!model) return []
+    const all = this.vectors(model)
+    const own = all.filter((c) => c.noteId === noteId)
+    if (!own.length) return []
+    const gist = new Float32Array(own[0].vec.length)
+    for (const c of own) for (let i = 0; i < gist.length; i++) gist[i] += c.vec[i] / own.length
+    const best = new Map<string, MeaningHit>()
+    for (const c of all) {
+      if (c.noteId === noteId) continue
+      const score = cosine(gist, c.vec)
+      const cur = best.get(c.noteId)
+      if (!cur || score > cur.score) best.set(c.noteId, { noteId: c.noteId, score, passage: c.passage })
+    }
+    return [...best.values()]
+      .filter((h) => h.score >= minScore)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+  }
+
   /**
    * Notes whose passages are closest in meaning to the query, best first.
    * Asked straight away (not through the job queue) with a short timeout:
@@ -180,12 +213,9 @@ export class MeaningIndex {
       log.warn(`search by meaning skipped: ${(err as Error).message}`)
       return []
     }
-    this.cache ??= (this.store.db.prepare('SELECT note_id, passage, vec, model FROM note_vectors').all() as Row[])
-      .filter((r) => r.model === model)
-      .map((r) => ({ noteId: r.note_id, passage: r.passage, vec: new Float32Array(r.vec.buffer, r.vec.byteOffset, r.vec.byteLength / 4) }))
     const qv = new Float32Array(q)
     const best = new Map<string, MeaningHit>()
-    for (const c of this.cache) {
+    for (const c of this.vectors(model)) {
       const score = cosine(qv, c.vec)
       const cur = best.get(c.noteId)
       if (!cur || score > cur.score) best.set(c.noteId, { noteId: c.noteId, score, passage: c.passage })

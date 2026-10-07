@@ -159,9 +159,12 @@ export async function askNotes(
     .map(([id]) => id)
     .filter(usable)
     .slice(0, 8)
+  // "Ask about this note": just those notes, as much of each as fits
+  const pinned = (scope.notes ?? []).filter(usable).slice(0, 8)
+  if (pinned.length) ids = pinned
   // a question about a time ("yesterday", "last week", "on 10/5"): the notes
   // written or edited then – those that also match its words first
-  if (range) {
+  else if (range) {
     const then = notesActiveIn(store, meta, range.from, range.to).filter(usable)
     ids = [...new Set([...earlier, ...then])].sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0) || meta.get(b)!.updatedAt - meta.get(a)!.updatedAt).slice(0, 8)
   }
@@ -182,7 +185,7 @@ export async function askNotes(
     const doc = sync.getDoc(noteDocName(id))
     if (!doc) continue
     // every date explained ("5/4/26 [Mon 4 May 2026, 156 days ago]"): small models can't count days
-    const md = annotateDates(excerpt(noteToMarkdown(doc, { attachmentText: true }), words, PER_NOTE), now, tz)
+    const md = annotateDates(excerpt(noteToMarkdown(doc, { attachmentText: true }), words, pinned.length ? Math.floor(TOTAL / pinned.length) - 200 : PER_NOTE), now, tz)
     if (!md.trim()) continue
     if (context.length + md.length > TOTAL) break
     const n = sources.length + 1
@@ -204,7 +207,7 @@ export async function askNotes(
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
 
-Today is ${todayLabel(now, tz)}.${range ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
+Today is ${todayLabel(now, tz)}.${range && !pinned.length ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
 
 ${
     history.length

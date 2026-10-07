@@ -92,4 +92,16 @@ describe('search', () => {
     await app.sync.meaning!.indexNote('notesearch0000000002', 'Shopping', 'Buy milk, eggs and bread')
     expect(embedCalls).toBe(before)
   })
+
+  it('finds related notes by meaning, without asking the AI again', async () => {
+    const id = 'notesearch0000000003'
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title: 'Lab rules' }))
+    await app.sync.meaning!.indexNote(id, 'Lab rules', 'Goggles on at all times')
+    const before = embedCalls
+    const r = await (await fetch(`${base}/api/notes/notesearch0000000001/related`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()
+    expect(r.available).toBe(true)
+    expect(r.related.map((h: { noteId: string }) => h.noteId)).toEqual([id])
+    expect(r.related[0].title).toBe('Lab rules')
+    expect(embedCalls).toBe(before)
+  })
 })

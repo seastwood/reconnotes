@@ -308,3 +308,16 @@ describe('folder names in questions', () => {
     expect(prompts[0]).toMatch(/=== \[1\] "Breaker checks" \(in folder FRC › Pit crew,/)
   })
 })
+
+describe('ask about this note', () => {
+  it('reads only the note asked about, even when others match better', async () => {
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    prompts.length = 0
+    const job = (await api('POST', '/api/jobs', { kind: 'ask', input: { question: 'What is team A doing with the bins?', notes: ['asknote000002'] } })).job
+    const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+    expect(done.status).toBe('done')
+    expect(prompts[0]).toContain('milk')
+    expect(prompts[0]).not.toContain('T8 bins')
+  })
+})

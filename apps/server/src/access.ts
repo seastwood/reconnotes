@@ -15,6 +15,8 @@ import type { SyncEngine } from './sync'
 export interface Scope {
   folders?: string[] | null
   unlocked?: string[]
+  /** only these notes ("Ask about this note") */
+  notes?: string[]
 }
 
 export function noteFilter(sync: SyncEngine, scope: Scope = {}): (noteId: string) => boolean {
@@ -24,6 +26,7 @@ export function noteFilter(sync: SyncEngine, scope: Scope = {}): (noteId: string
   const live = new Set(rules.keys())
   const meta = sync.noteMeta()
   const unlocked = new Set(scope.unlocked ?? [])
+  const only = scope.notes?.length ? new Set(scope.notes) : null
   let inScope: Set<string> | null = null
   if (scope.folders?.length) {
     inScope = new Set(scope.folders)
@@ -40,6 +43,7 @@ export function noteFilter(sync: SyncEngine, scope: Scope = {}): (noteId: string
     const f = effectiveFolderId(n, live)
     const rule = f ? rules.get(f) : undefined
     if (rule?.lockedBy && !unlocked.has(rule.lockedBy)) return false
+    if (only) return only.has(noteId)
     if (inScope) return inScope.has(f ?? 'none')
     return !rule?.noSearch
   }
@@ -53,5 +57,5 @@ export function scopeFromQuery(params: URLSearchParams): Scope {
 
 export function scopeFromInput(input: Record<string, unknown>): Scope {
   const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((id) => /^([a-z0-9]{8,64}|none)$/.test(id)) : [])
-  return { folders: list(input.folders), unlocked: list(input.unlocked) }
+  return { folders: list(input.folders), unlocked: list(input.unlocked), notes: list(input.notes).filter((id) => id !== 'none') }
 }

@@ -762,6 +762,21 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- Version history ------------------------------------------------------
+  // notes about the same things (by meaning; needs an embedding model)
+  route('GET', `/api/notes/${ID}/related`, (_req, res, [id], url) => {
+    const meta = sync.noteMeta()
+    const allowed = noteFilter(sync, scopeFromQuery(url.searchParams))
+    const usable = (n: string) => {
+      const m = meta.get(n)
+      return Boolean(m && !m.trashedAt && !m.template && allowed(n))
+    }
+    const related = (sync.meaning?.related(id, 20) ?? [])
+      .filter((h) => usable(h.noteId))
+      .slice(0, 6)
+      .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, score: Math.round(h.score * 100) / 100, passage: h.passage.replace(/\s+/g, ' ').slice(0, 160) }))
+    json(res, 200, { available: Boolean(sync.meaning?.available), related })
+  })
+
   route('GET', `/api/notes/${ID}/versions`, (_req, res, [id]) => {
     json(res, 200, { versions: store.listVersions(noteDocName(id)) })
   })

@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUpDown, History, Star, AudioLines, File as FileIcon, Folder, Image as ImageIcon, ListFilter, Lock, PenLine, Sparkles, X } from 'lucide-react'
+import { ArrowUpDown, History, Star, AudioLines, File as FileIcon, Folder, Image as ImageIcon, ListFilter, Lock, PenLine, Sparkles, X, Pin, PinOff } from 'lucide-react'
 import { buildTree, effectiveFolderId, folderPaths, foldersNamedIn, type FolderData, type NoteData, type TreeNode } from '@reconnotes/core'
 import { localText, searchNotes, type SearchResult } from '../lib/search'
 import { parseQuery, textPasses, type ParsedQuery } from '../lib/searchQuery'
-import { addRecentSearch, clearRecentSearches, findSaved, removeSavedSearch, saveSearch, useRecentSearches, useSavedSearches } from '../lib/searchHistory'
+import { addRecentSearch, clearRecentSearches, findSaved, pinSavedSearch, removeSavedSearch, saveSearch, useRecentSearches, useSavedSearches } from '../lib/searchHistory'
 import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useFolderAccess } from '../lib/folderLock'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
@@ -456,6 +456,17 @@ export function SearchSuggestions({ onPick }: { onPick: (query: string, folders?
                 {s.query}
                 {s.folders.length > 0 && <span className="muted"> · in {s.folders.map(name).join(', ')}</span>}
               </span>
+              <button
+                className={`icon${s.pinned ? ' on' : ''}`}
+                aria-label={s.pinned ? `Take ${s.query} out of the sidebar` : `Show ${s.query} in the sidebar as a smart folder`}
+                title={s.pinned ? 'In the sidebar – tap to take it out' : 'Show in the sidebar (smart folder)'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  pinSavedSearch(s.id, !s.pinned)
+                }}
+              >
+                {s.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+              </button>
               <button
                 className="icon"
                 aria-label={`Remove saved search ${s.query}`}

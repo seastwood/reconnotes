@@ -29,6 +29,7 @@ import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
+import { RelatedNotes } from '../components/RelatedNotes'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { ShareDialog } from '../components/ShareDialog'
@@ -297,6 +298,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
             <LinkedFrom noteId={noteId} onOpen={onFollowLink} />
+            <RelatedNotes noteId={noteId} onOpen={onFollowLink} />
           </div>
           {tagChip && onOpenTag && (
             <button
