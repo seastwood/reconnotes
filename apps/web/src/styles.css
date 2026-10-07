@@ -3755,3 +3755,55 @@ a.button {
   color: var(--muted);
   margin-left: 2px;
 }
+
+/* follow-up questions under an answer */
+.ask-followup {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.ask-followup .ask-q {
+  font-size: 14px;
+}
+.ask-followup-box {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.ask-followup-box textarea {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 0;
+  field-sizing: content;
+  max-height: 120px;
+}
+.ask-followup-box button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background: var(--accent);
+  color: #1c1c1e;
+  display: grid;
+  place-items: center;
+}
+.ask-followup-box button:disabled {
+  background: rgba(127, 127, 127, 0.2);
+  color: var(--muted);
+}
+.ask-followup-box .error-text {
+  flex-basis: 100%;
+  margin: 0;
+}

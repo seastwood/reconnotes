@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { FileText, Loader2, Sparkles, XCircle } from 'lucide-react'
+import { ArrowUp, CornerDownRight, FileText, Loader2, Sparkles, XCircle } from 'lucide-react'
 import { marked } from 'marked'
 import { isSyncConfigured } from '../lib/settings'
 import { cancelJob, isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
@@ -23,6 +23,7 @@ function jobFor(jobs: Job[], question: string, folders: string[]): Job | undefin
     .filter(
       (j) =>
         j.kind === 'ask' &&
+        !j.input.thread &&
         j.input.question === question &&
         sameFolders(j.input.folders, folders) &&
         j.status !== 'cancelled' &&
@@ -66,56 +67,148 @@ export function AskPanel({ question, where = {}, onOpen }: { question: string; w
     return () => watchingJob(job.id, false)
   }, [job?.id])
 
-  const [, tick] = useState(0)
+  // follow-up questions asked under this answer, oldest first
+  const thread = job ? jobs.filter((j) => j.kind === 'ask' && j.input.thread === job.id && j.status !== 'cancelled').sort((a, b) => a.createdAt - b.createdAt) : []
   useEffect(() => {
-    if (!job || isFinished(job)) return
-    const t = setInterval(() => tick((n) => n + 1), 1000)
-    return () => clearInterval(t)
-  }, [job?.id, job?.status])
+    thread.forEach((j) => watchingJob(j.id, true))
+    return () => thread.forEach((j) => watchingJob(j.id, false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.map((j) => j.id).join(',')])
 
-  const result = job?.status === 'done' ? (job.result as unknown as AskResult) : null
-  const failed = job?.status === 'failed' ? (job.error ?? 'Couldn’t answer.') : null
+  const retry = () =>
+    void submitJob({ kind: 'ask', title: question, input })
+      .then((j) => watchingJob(j.id, true))
+      .catch((e) => setError((e as Error).message))
+
+  const askFollowUp = async (q: string) => {
+    // the conversation so far: each question with its answer and the notes it used
+    const history = [job!, ...thread]
+      .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
+      .map((j) => {
+        const r = j.result as unknown as AskResult
+        return { question: String(j.input.question), answer: r.answer, sources: r.sources.map((s) => s.noteId) }
+      })
+    const j = await submitJob({ kind: 'ask', title: q, input: { ...input, question: q, thread: job!.id, history } })
+    watchingJob(j.id, true)
+  }
+  const busy = !job || !isFinished(job) || thread.some((j) => !isFinished(j))
 
   return (
     <li className="ask-panel">
       <div className="ask-q">
         <Sparkles size={16} /> {question}
       </div>
-      {(error || failed) && <p className="error-text">{error ?? failed}</p>}
-      {failed && !error && (
-        <button
-          className="text"
-          onClick={() =>
-            void submitJob({ kind: 'ask', title: question, input })
-              .then((j) => watchingJob(j.id, true))
-              .catch((e) => setError((e as Error).message))
-          }
-        >
-          Try again
+      <Turn job={job} error={error} onRetry={retry} onOpen={onOpen} />
+      {thread.map((j) => (
+        <div key={j.id} className="ask-followup">
+          <div className="ask-q">
+            <CornerDownRight size={15} /> {String(j.input.question)}
+          </div>
+          <Turn
+            job={j}
+            onRetry={() =>
+              void submitJob({ kind: 'ask', title: String(j.input.question), input: j.input })
+                .then((n) => watchingJob(n.id, true))
+                .catch((e) => setError((e as Error).message))
+            }
+            onOpen={onOpen}
+          />
+        </div>
+      ))}
+      {job?.status === 'done' && !busy && <FollowUpBox onAsk={askFollowUp} />}
+    </li>
+  )
+}
+
+/** One question's state: waiting, the answer, or what went wrong. */
+function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: string | null; onRetry: () => void; onOpen: (noteId: string) => void }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!job || isFinished(job)) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [job?.id, job?.status])
+  const result = job?.status === 'done' ? (job.result as unknown as AskResult) : null
+  const failed = job?.status === 'failed' ? (job.error ?? 'Couldn’t answer.') : null
+  if (error || failed)
+    return (
+      <>
+        <p className="error-text">{error ?? failed}</p>
+        {failed && !error && (
+          <button className="text" onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </>
+    )
+  if (result) return <AskAnswer result={result} onOpen={onOpen} />
+  return (
+    <div className="ask-wait">
+      <p className="hint">
+        <Loader2 size={14} className="spin" />{' '}
+        {job?.retryAt
+          ? 'Your AI server can’t be reached – it will try again by itself.'
+          : job?.status === 'running'
+            ? `Reading your notes… ${job.startedAt ? duration(Date.now() - job.startedAt) : ''}`
+            : job?.status === 'paused'
+              ? 'Paused in Jobs.'
+              : 'Waiting its turn in Jobs…'}
+      </p>
+      <p className="hint">You can leave – it keeps going in Jobs, and you’ll be told when the answer is ready.</p>
+      {job && (
+        <button className="text" onClick={() => void cancelJob(job.id)}>
+          <XCircle size={13} /> Stop
         </button>
       )}
-      {!result && !error && !failed && (
-        <div className="ask-wait">
-          <p className="hint">
-            <Loader2 size={14} className="spin" />{' '}
-            {job?.retryAt
-              ? 'Your AI server can’t be reached – it will try again by itself.'
-              : job?.status === 'running'
-                ? `Reading your notes… ${job.startedAt ? duration(Date.now() - job.startedAt) : ''}`
-                : job?.status === 'paused'
-                  ? 'Paused in Jobs.'
-                  : 'Waiting its turn in Jobs…'}
-          </p>
-          <p className="hint">You can leave – it keeps going in Jobs, and you’ll be told when the answer is ready.</p>
-          {job && (
-            <button className="text" onClick={() => void cancelJob(job.id)}>
-              <XCircle size={13} /> Stop
-            </button>
-          )}
-        </div>
-      )}
-      {result && <AskAnswer result={result} onOpen={onOpen} />}
-    </li>
+    </div>
+  )
+}
+
+/** "Ask a follow-up…" under an answer. */
+function FollowUpBox({ onAsk }: { onAsk: (q: string) => Promise<void> }) {
+  const [q, setQ] = useState('')
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const send = async () => {
+    const text = q.trim()
+    if (!text || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      await onAsk(text)
+      setQ('')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <form
+      className="ask-followup-box"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void send()
+      }}
+    >
+      <textarea
+        rows={1}
+        value={q}
+        placeholder="Ask a follow-up…"
+        enterKeyHint="send"
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault()
+            void send()
+          }
+        }}
+      />
+      <button type="submit" className="icon" disabled={!q.trim() || sending} aria-label="Ask">
+        {sending ? <Loader2 size={16} className="spin" /> : <ArrowUp size={16} />}
+      </button>
+      {error && <p className="error-text">{error}</p>}
+    </form>
   )
 }
 

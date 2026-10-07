@@ -265,3 +265,20 @@ describe('what’s due', () => {
     expect(prompts).toHaveLength(0) // no AI needed
   })
 })
+
+describe('follow-up questions', () => {
+  it('sends the conversation and reads the notes the earlier answer used', async () => {
+    prompts.length = 0
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const history = [{ question: 'What is team A doing with the bins?', answer: 'Team A sorts the T8 bins on Monday [1].', sources: ['asknote000001'] }]
+    const job = (await api('POST', '/api/jobs', { kind: 'ask', input: { question: 'and when is that happening?', history } })).job
+    const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+    expect(done.status).toBe('done')
+    expect(prompts[0]).toContain('Earlier in this conversation')
+    expect(prompts[0]).toContain('Q: What is team A doing with the bins?')
+    expect(prompts[0]).toContain('Follow-up question: and when is that happening?')
+    expect(prompts[0]).toContain('T8 bins with all the parts') // the earlier answer's note
+    expect(done.result.sources.map((s: { noteId: string }) => s.noteId)).toContain('asknote000001')
+  })
+})

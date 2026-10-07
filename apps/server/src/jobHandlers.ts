@@ -27,6 +27,7 @@ import { runBench, type Samples } from './bench'
 import type { AiTask } from './agents'
 import { guessedWords } from './vocabulary'
 import { scopeFromInput } from './access'
+import type { AskTurn } from './ask'
 import { markdownToNodes, type Ctx } from './importNotes'
 
 /**
@@ -259,7 +260,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const tzOffset = Number(job.input.tzOffset)
     const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning, {
       tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
-    }, scopeFromInput(job.input))
+    }, scopeFromInput(job.input), historyFromInput(job.input.history))
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 
@@ -424,4 +425,18 @@ export async function compileMarkdown(store: Store, ai: Ai, doc: Y.Doc): Promise
   const links = [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1])
   const { markdown, dropped } = await ai.compile(parts)
   return { markdown: keepCompileExtras(markdown, markers, note.tags, links), title: note.title, dropped }
+}
+
+/** The earlier questions and answers a follow-up sends (at most the last 6). */
+function historyFromInput(v: unknown): AskTurn[] {
+  if (!Array.isArray(v)) return []
+  return v
+    .slice(-6)
+    .filter((t): t is Record<string, unknown> => Boolean(t) && typeof t === 'object')
+    .map((t) => ({
+      question: String(t.question ?? '').slice(0, 1000),
+      answer: String(t.answer ?? '').slice(0, 4000),
+      sources: Array.isArray(t.sources) ? t.sources.map(String).filter((id) => /^[a-z0-9]{8,64}$/.test(id)).slice(0, 10) : [],
+    }))
+    .filter((t) => t.question)
 }

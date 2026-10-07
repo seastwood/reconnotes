@@ -21,6 +21,14 @@ const STOP = new Set(
   ),
 )
 
+/** an earlier question and answer in a conversation */
+export interface AskTurn {
+  question: string
+  answer: string
+  /** the notes that answer used */
+  sources?: string[]
+}
+
 export interface AskSource {
   n: number
   noteId: string
@@ -96,12 +104,15 @@ export async function askNotes(
   when: { tzOffset?: number; now?: number } = {},
   /** which folders: locked ones only if unlocked on the asking device; a chosen set of folders */
   scope: Scope = {},
+  /** a follow-up: the questions and answers before it, oldest first (with the notes each used) */
+  history: AskTurn[] = [],
 ): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
   const meta = sync.noteMeta()
   const allowed = noteFilter(sync, scope)
   const now = when.now ?? Date.now()
   const tz = when.tzOffset ?? 0
-  const range = timeRange(question, now, tz)
+  // a follow-up without a time of its own ("and the second one?") keeps the conversation's
+  const range = timeRange(question, now, tz) ?? history.map((h) => timeRange(h.question, now, tz)).find(Boolean) ?? null
   const allowedEarly = noteFilter(sync, scope)
   // what's due / overdue: worked out from the dates themselves – no guessing by the AI
   if (isDueQuestion(question)) return dueAnswer(sync, meta, (id) => allowedEarly(id), question, now, tz)
@@ -109,16 +120,24 @@ export async function askNotes(
     const m = meta.get(id)
     return Boolean(m && !m.trashedAt && !m.template && allowed(id))
   }
-  const words = question
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}_]+/u)
-    .filter((w) => w.length >= 3 && !STOP.has(w))
+  const wordsOf = (q: string) =>
+    q
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}_]+/u)
+      .filter((w) => w.length >= 3 && !STOP.has(w))
+  const ownWords = wordsOf(question)
+  // a follow-up ("what about the first one?") is about what was asked before too
+  const words = [...new Set([...ownWords, ...history.flatMap((h) => wordsOf(h.question))])]
   // notes that share words with the question, and notes about the same thing in
   // other words (search by meaning), merged by rank
   const byWords = store.searchAny(words, 200).map((h) => h.noteId).filter(usable).slice(0, 20)
-  const byMeaning = meaning?.available ? (await meaning.search(question, 200)).map((h) => h.noteId).filter(usable).slice(0, 20) : []
+  const meaningQuery = [...history.map((h) => h.question), question].join(' ')
+  const byMeaning = meaning?.available ? (await meaning.search(meaningQuery, 200)).map((h) => h.noteId).filter(usable).slice(0, 20) : []
   const score = new Map<string, number>()
   for (const list of [byWords, byMeaning]) list.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (10 + i)))
+  // the notes the earlier answers used come first: a follow-up is usually about them
+  const earlier = [...new Set(history.flatMap((h) => h.sources ?? []))].filter(usable)
+  earlier.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 - i / 100))
   let ids = [...score.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id]) => id)
@@ -128,7 +147,7 @@ export async function askNotes(
   // written or edited then – those that also match its words first
   if (range) {
     const then = notesActiveIn(store, meta, range.from, range.to).filter(usable)
-    ids = then.sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0) || meta.get(b)!.updatedAt - meta.get(a)!.updatedAt).slice(0, 8)
+    ids = [...new Set([...earlier, ...then])].sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0) || meta.get(b)!.updatedAt - meta.get(a)!.updatedAt).slice(0, 8)
   }
   // nothing matched: the latest notes
   if (!ids.length && !range)
@@ -170,14 +189,18 @@ export async function askNotes(
 
 Today is ${todayLabel(now, tz)}.${range ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
 
-Question: ${question}
+${
+    history.length
+      ? `Earlier in this conversation (the new question may refer to it):\n${history.map((h) => `Q: ${h.question}\nA: ${h.answer.slice(0, 1500)}`).join('\n\n')}\n\n`
+      : ''
+  }${history.length ? 'Follow-up question' : 'Question'}: ${question}
 
 Notes:${context}`
 
   const { text: raw, agent } = await ai.ask(prompt)
   let text = listify(raw)
   // the list items of the note sections the question is about, that the answer left out
-  const missing = missingItems(text, sectionItems(texts, words))
+  const missing = missingItems(text, sectionItems(texts, ownWords))
   if (missing.length && !/don't contain|do not contain|doesn't contain|no information|not (?:found|mentioned)/i.test(text)) {
     const box = /^\s*- \[ \]/m.test(text) ? '- [ ] ' : '- '
     text += `\n\nAlso in your notes:\n${missing.map((m) => `${box}${m.text} [${m.n}]`).join('\n')}`
