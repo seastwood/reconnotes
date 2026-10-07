@@ -16,7 +16,7 @@ import { reportPartial } from './jobs'
  * the "Compile notes" agents and ask for an answer that cites them.
  */
 
-const STOP = new Set(
+export const STOP = new Set(
   'a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about any all also did didnt dont get got just know like make need should tell than want note notes wrote write written work worked working yesterday today tonight week month last past previous day days morning afternoon evening monday tuesday wednesday thursday friday saturday sunday'.split(
     ' ',
   ),

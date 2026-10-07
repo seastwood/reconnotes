@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { Store } from './store'
 import type { AgentRegistry } from './agents'
 import { log } from './log'
+import { STOP } from './ask'
 
 /**
  * Search by meaning
@@ -73,6 +74,12 @@ interface Row {
   passage: string
   vec: Buffer
 }
+
+/** words that say nothing about what a note is about (on top of the question words) */
+const FILLER = new Set(
+  'yeah okay right mean think thing things something really maybe going sure good great much many some more most very well here time times also only even still then each every other another first second third same new old because there their these those were been being have having make made take want said says saying testing test'.split(' '),
+)
+const wordsOf = (s: string) => new Set((s.toLowerCase().match(/[\p{L}][\p{L}\p{N}'’-]{3,}/gu) ?? []).filter((w) => !STOP.has(w) && !FILLER.has(w)))
 
 /** too little text to say what a note is about */
 const MIN_RELATED_TEXT = 60
@@ -196,7 +203,26 @@ export class MeaningIndex {
       const cur = best.get(c.noteId)
       if (!cur || score > cur.score) best.set(c.noteId, { noteId: c.noteId, score, passage: c.passage })
     }
+    // how alike notes usually are to this one (all of them, before the word check below)
     const scores = [...best.values()].map((h) => h.score)
+    // and they must share what they're about in so many words: at least two
+    // uncommon words (in at most a few notes; a #tag counts as its word). Similar "feel" alone
+    // (two rambling recordings, two to-do lists) isn't related.
+    const textOf = new Map<string, string>()
+    for (const c of all) textOf.set(c.noteId, `${textOf.get(c.noteId) ?? ''}\n${c.passage}`)
+    const wordSets = new Map([...textOf].map(([id, t]) => [id, wordsOf(t)]))
+    const df = new Map<string, number>()
+    for (const ws of wordSets.values()) for (const w of ws) df.set(w, (df.get(w) ?? 0) + 1)
+    const rare = Math.max(3, Math.ceil(wordSets.size * 0.08))
+    const mine = wordSets.get(noteId) ?? new Set<string>()
+    const sharesTopic = (id: string) => {
+      const theirs = wordSets.get(id) ?? new Set<string>()
+      let shared = 0
+      for (const w of mine) if (theirs.has(w) && (df.get(w) ?? 0) <= rare) shared++
+      return shared >= 2
+    }
+    for (const id of [...best.keys()]) if (!sharesTopic(id)) best.delete(id)
+
     let floor = minScore
     if (scores.length >= 8) {
       // how alike notes usually are to this one: related ones stand out from that

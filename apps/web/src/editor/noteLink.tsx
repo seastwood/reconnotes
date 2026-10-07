@@ -214,7 +214,7 @@ export function LinkedFrom({ noteId, onOpen }: { noteId: string; onOpen: (id: st
       <h4>Linked from</h4>
       {from.map((n) => (
         <button key={n.id} onClick={() => onOpen(n.id)}>
-          <FileText size={14} /> {n.title || 'Untitled'}
+          <FileText size={14} /> <span>{(n.title || 'Untitled').replace(/\s+/g, ' ')}</span>
         </button>
       ))}
     </aside>

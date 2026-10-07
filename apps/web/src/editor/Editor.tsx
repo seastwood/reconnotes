@@ -299,8 +299,10 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             {/* The blank space below the text is part of the editable area (padding),
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />
-            <LinkedFrom noteId={noteId} onOpen={onFollowLink} />
-            <RelatedNotes noteId={noteId} onOpen={onFollowLink} />
+            <div className="note-footer">
+              <LinkedFrom noteId={noteId} onOpen={onFollowLink} />
+              <RelatedNotes noteId={noteId} onOpen={onFollowLink} />
+            </div>
           </div>
           {tagChip && onOpenTag && (
             <button

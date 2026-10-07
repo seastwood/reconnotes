@@ -50,7 +50,7 @@ export function RelatedNotes({ noteId, onOpen }: { noteId: string; onOpen: (id: 
       <h4>Related notes</h4>
       {list.map((n) => (
         <button key={n.noteId} onClick={() => onOpen(n.noteId)} title={n.passage}>
-          <Sparkles size={14} /> {n.title || 'Untitled'}
+          <Sparkles size={14} /> <span>{(n.title || 'Untitled').replace(/\s+/g, ' ')}</span>
         </button>
       ))}
     </aside>

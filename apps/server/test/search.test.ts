@@ -96,11 +96,14 @@ describe('search', () => {
   it('finds related notes by meaning, without asking the AI again', async () => {
     const id = 'notesearch0000000003'
     await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title: 'Lab rules' }))
-    await app.sync.meaning!.indexNote(id, 'Lab rules', 'Goggles on at all times')
+    await app.sync.meaning!.indexNote(id, 'Lab rules', 'Safety glasses on at all times, goggles for grinding')
+    // about the same thing in other words only: not related (embeddings alone rate too much as alike)
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notesearch0000000004', title: 'Workshop' }))
+    await app.sync.meaning!.indexNote('notesearch0000000004', 'Workshop', 'Protective gear required near the lathe and drill press')
     const before = embedCalls
     const r = await (await fetch(`${base}/api/notes/notesearch0000000001/related`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()
     expect(r.available).toBe(true)
-    expect(r.related.map((h: { noteId: string }) => h.noteId)).toEqual([id])
+    expect(r.related.map((h: { noteId: string }) => h.noteId)).toEqual([id]) // shares “safety glasses”; the workshop note doesn't
     expect(r.related[0].title).toBe('Lab rules')
     expect(embedCalls).toBe(before)
     // a note with hardly anything in it says too little to find related ones
