@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
-import { timeRange } from '../src/timeRange'
+import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 
@@ -73,6 +73,23 @@ describe('questions about a time', () => {
     expect(day(timeRange('my notes from Oct 1st', now, TZ))).toEqual(['2026-10-01', 1])
     expect(day(timeRange('2 September notes', now, TZ))).toEqual(['2026-09-02', 1])
     expect(timeRange('what do I need to do after my leadership meeting', now, TZ)).toBeNull()
+  })
+})
+
+describe('dates in notes', () => {
+  // Wednesday 7 October 2026, in a time zone 6 hours behind UTC
+  const now = Date.UTC(2026, 9, 7, 18, 0)
+  const TZ = 360
+  it('finds the ways dates are written, and not fractions', () => {
+    expect(findDates('Fill out paperwork by 10/22/26', now, TZ)).toHaveLength(1)
+    expect(findDates('due !2026-10-22, or Oct 3rd, or 4 May', now, TZ)).toHaveLength(3)
+    expect(findDates('add 1/2 cup of sugar', now, TZ)).toHaveLength(0)
+    expect(findDates('done by 5/4', now, TZ)).toHaveLength(1)
+  })
+  it('explains each date so the AI doesn’t have to count', () => {
+    expect(annotateDates('Eat an Apple by 5/4/26', now, TZ)).toBe('Eat an Apple by 5/4/26 [Mon 4 May 2026, 156 days ago]')
+    expect(annotateDates('Fill out paperwork by 10/22/26', now, TZ)).toBe('Fill out paperwork by 10/22/26 [Thu 22 Oct 2026, in 15 days]')
+    expect(annotateDates('call back tomorrow, 10/8/2026', now, TZ)).toContain('[Thu 8 Oct 2026, tomorrow]')
   })
 })
 
@@ -219,5 +236,32 @@ describe('ask about a day', () => {
     const r = (await api('GET', `/api/jobs/${none.id}/wait`)).job
     expect(r.result.answer).toMatch(/didn't write or edit any notes/)
     expect(prompts).toHaveLength(0)
+  })
+})
+
+describe('what’s due', () => {
+  it('sorts dated to-dos into overdue and coming up, without asking the AI', async () => {
+    const DAY = 86_400_000
+    const md = (t: number) => {
+      const d = new Date(t)
+      return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`
+    }
+    await addNote('asknote000005', ['Errands', `Eat an Apple by ${md(Date.now() - 30 * DAY)}`, `Fill out paperwork by ${md(Date.now() + 15 * DAY)}`, 'Buy milk'])
+    prompts.length = 0
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const ask = async (question: string) => {
+      const job = (await api('POST', '/api/jobs', { kind: 'ask', input: { question, tzOffset: new Date().getTimezoneOffset() } })).job
+      return (await api('GET', `/api/jobs/${job.id}/wait`)).job
+    }
+    const past = await ask('what are past due things?')
+    expect(past.result.answer).toContain('**Overdue**')
+    expect(past.result.answer).toMatch(/Eat an Apple .*30 days ago/)
+    expect(past.result.answer).not.toContain('Fill out paperwork')
+    expect(past.result.sources.map((s: { noteId: string }) => s.noteId)).toEqual(['asknote000005'])
+    const all = await ask('what do I have due?')
+    expect(all.result.answer).toMatch(/\*\*Coming up\*\*\n- \[ \] Fill out paperwork .*in 15 days/)
+    expect(all.result.answer).not.toContain('Buy milk')
+    expect(prompts).toHaveLength(0) // no AI needed
   })
 })

@@ -118,3 +118,83 @@ export function timeRange(question: string, now = Date.now(), tzOffset = 0): Tim
   }
   return null
 }
+
+// --- dates written in notes ----------------------------------------------------
+
+export interface FoundDate {
+  index: number
+  length: number
+  /** local midnight of that day */
+  at: number
+}
+
+const MONTH_RE = MONTHS.map((m) => m.slice(0, 3)).join('|')
+
+/**
+ * Dates written in text: 2026-10-22 (and due dates, !2026-10-22), 10/22/26,
+ * 10/22/2026, "Oct 22", "October 22nd, 2026", "22 October". A month/day with
+ * no year ("by 5/4") only after by / on / due / until / before, so "1/2 cup"
+ * isn't taken for a date.
+ */
+export function findDates(text: string, now = Date.now(), tzOffset = 0): FoundDate[] {
+  const { dateAt, local } = localTools(now, tzOffset)
+  const thisYear = local(now).getUTCFullYear()
+  const out: FoundDate[] = []
+  const taken = (i: number, len: number) => out.some((d) => i < d.index + d.length && d.index < i + len)
+  const add = (i: number, len: number, y: number, m: number, d: number) => {
+    if (m < 0 || m > 11 || d < 1 || d > 31 || y < 1990 || y > 2200 || taken(i, len)) return
+    out.push({ index: i, length: len, at: dateAt(y, m, d) })
+  }
+  for (const m of text.matchAll(/!?\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g)) add(m.index!, m[0].length, +m[1], +m[2] - 1, +m[3])
+  for (const m of text.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b/g)) add(m.index!, m[0].length, m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[1] - 1, +m[2])
+  for (const m of text.matchAll(/\b(?:by|on|due|until|before|till)\s+(\d{1,2})\/(\d{1,2})\b(?!\/)/gi)) {
+    const at = m.index! + m[0].length - `${m[1]}/${m[2]}`.length
+    add(at, `${m[1]}/${m[2]}`.length, thisYear, +m[1] - 1, +m[2])
+  }
+  const monthIdx = (s: string) => MONTHS.findIndex((x) => x.startsWith(s.slice(0, 3).toLowerCase()))
+  for (const m of text.matchAll(new RegExp(`\\b(${MONTH_RE})[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(\\d{4}))?`, 'gi')))
+    add(m.index!, m[0].length, m[3] ? +m[3] : thisYear, monthIdx(m[1]), +m[2])
+  for (const m of text.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_RE})[a-z]*\\b(?:,?\\s+(\\d{4}))?`, 'gi')))
+    add(m.index!, m[0].length, m[3] ? +m[3] : thisYear, monthIdx(m[2]), +m[1])
+  return out.sort((a, b) => a.index - b.index)
+}
+
+/** "Mon 4 May 2026, 156 days ago" / "today" / "tomorrow" / "Thu 22 Oct 2026, in 15 days" */
+export function describeDate(at: number, now = Date.now(), tzOffset = 0): string {
+  const { today } = localTools(now, tzOffset)
+  const days = Math.round((at - today) / DAY)
+  const when = days === 0 ? 'today' : days === 1 ? 'tomorrow' : days === -1 ? 'yesterday' : days > 0 ? `in ${days} days` : `${-days} days ago`
+  return `${shortDate(at, tzOffset)}, ${when}`
+}
+
+/** Text with each date it mentions explained: "by 5/4/26 [Mon 4 May 2026, 156 days ago]". */
+export function annotateDates(text: string, now = Date.now(), tzOffset = 0): string {
+  let out = ''
+  let last = 0
+  for (const d of findDates(text, now, tzOffset)) {
+    out += text.slice(last, d.index + d.length) + ` [${describeDate(d.at, now, tzOffset)}]`
+    last = d.index + d.length
+  }
+  return out + text.slice(last)
+}
+
+/** The days a question about due things means: today, tomorrow, this / next week, this month. */
+export function dueWindow(question: string, now = Date.now(), tzOffset = 0): { from: number; to: number; label: string } | null {
+  const q = question.toLowerCase()
+  const { today, weekday, dateAt, local } = localTools(now, tzOffset)
+  const nextMonday = today + ((8 - weekday) % 7 || 7) * DAY
+  if (/\btoday\b|\btonight\b/.test(q)) return { from: today, to: today + DAY, label: 'today' }
+  if (/\btomorrow\b/.test(q)) return { from: today + DAY, to: today + 2 * DAY, label: 'tomorrow' }
+  if (/\bnext week\b/.test(q)) return { from: nextMonday, to: nextMonday + 7 * DAY, label: 'next week' }
+  if (/\bthis week\b/.test(q)) return { from: today, to: nextMonday, label: 'this week' }
+  if (/\bthis month\b/.test(q)) {
+    const d = local(now)
+    return { from: today, to: dateAt(d.getUTCFullYear(), d.getUTCMonth() + 1, 1), label: 'this month' }
+  }
+  return null
+}
+
+/** Local midnight today, as the asker sees it. */
+export function startOfToday(now = Date.now(), tzOffset = 0): number {
+  return localTools(now, tzOffset).today
+}

@@ -3,7 +3,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
-import { shortDate, timeRange, todayLabel } from './timeRange'
+import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { noteFilter, type Scope } from './access'
 
 /**
@@ -102,6 +102,9 @@ export async function askNotes(
   const now = when.now ?? Date.now()
   const tz = when.tzOffset ?? 0
   const range = timeRange(question, now, tz)
+  const allowedEarly = noteFilter(sync, scope)
+  // what's due / overdue: worked out from the dates themselves – no guessing by the AI
+  if (isDueQuestion(question)) return dueAnswer(sync, meta, (id) => allowedEarly(id), question, now, tz)
   const usable = (id: string) => {
     const m = meta.get(id)
     return Boolean(m && !m.trashedAt && !m.template && allowed(id))
@@ -143,7 +146,8 @@ export async function askNotes(
   for (const id of ids) {
     const doc = sync.getDoc(noteDocName(id))
     if (!doc) continue
-    const md = excerpt(noteToMarkdown(doc, { attachmentText: true }), words, PER_NOTE)
+    // every date explained ("5/4/26 [Mon 4 May 2026, 156 days ago]"): small models can't count days
+    const md = annotateDates(excerpt(noteToMarkdown(doc, { attachmentText: true }), words, PER_NOTE), now, tz)
     if (!md.trim()) continue
     if (context.length + md.length > TOTAL) break
     const n = sources.length + 1
@@ -279,4 +283,75 @@ export function missingItems(answer: string, items: { n: number; text: string }[
     if (!ws.length) return false
     return ws.filter(has).length / ws.length < 0.5
   })
+}
+
+// --- what's due -------------------------------------------------------------------
+
+const OVERDUE = /\bover ?due\b|\bpast[- ]due\b|\blate\b|\bmissed\b|\bbehind\b/i
+const UPCOMING = /\bupcoming\b|\bcoming up\b|\bsoon\b|\bnext\b/i
+export const isDueQuestion = (q: string) => /\bdue\b|\bover ?due\b|\bdeadlines?\b|\bpast[- ]due\b|\bupcoming\b/i.test(q)
+
+/**
+ * The to-dos with dates – due dates set in the app, and unticked checklist
+ * items or "due / by …" lines with a date written in them – sorted into
+ * overdue, today and coming up, from today's date where you are.
+ */
+export function dueAnswer(
+  sync: SyncEngine,
+  meta: Map<string, { id: string; title: string; trashedAt: number | null; template: boolean; due: { date: string; text: string; done: boolean }[] }>,
+  allowed: (id: string) => boolean,
+  question: string,
+  now: number,
+  tz: number,
+): { answer: string; sources: AskSource[]; agent: string } {
+  const today = startOfToday(now, tz)
+  const items: { noteId: string; title: string; text: string; at: number }[] = []
+  for (const m of meta.values()) {
+    if (m.trashedAt || m.template || !allowed(m.id)) continue
+    const seen = new Set<string>()
+    for (const d of m.due) {
+      const at = findDates(d.date, now, tz)[0]?.at
+      if (d.done || at === undefined) continue
+      seen.add(d.text.trim().toLowerCase())
+      items.push({ noteId: m.id, title: m.title, text: d.text.trim() || 'Untitled to-do', at })
+    }
+    const doc = sync.getDoc(noteDocName(m.id))
+    if (!doc) continue
+    for (const line of noteToMarkdown(doc).split('\n')) {
+      const open = line.match(/^\s*[-*+]\s+\[ \]\s+(.+)$/)
+      const plain = !open && line.match(/^\s*(?:[-*+•]\s+)?(.*\b(?:due|by|deadline|until)\b.*)$/i)
+      const text = (open?.[1] ?? (plain ? plain[1] : '')).replace(/\s*!\d{4}-\d{2}-\d{2}/g, '').trim()
+      if (!text || seen.has(text.toLowerCase())) continue
+      const at = findDates(open?.[1] ?? text, now, tz)[0]?.at
+      if (at === undefined || /!\d{4}-\d{2}-\d{2}/.test(line)) continue
+      seen.add(text.toLowerCase())
+      items.push({ noteId: m.id, title: m.title, text, at })
+    }
+  }
+  const window = dueWindow(question, now, tz)
+  const onlyOverdue = OVERDUE.test(question)
+  const onlyUpcoming = !onlyOverdue && UPCOMING.test(question)
+  const pick = items.filter((i) => (window ? i.at >= window.from && i.at < window.to : onlyOverdue ? i.at < today : onlyUpcoming ? i.at >= today : true))
+  const sources: AskSource[] = []
+  const cite = (noteId: string, title: string) => {
+    let s = sources.find((x) => x.noteId === noteId)
+    if (!s) sources.push((s = { n: sources.length + 1, noteId, title: shortTitle(title) }))
+    return s.n
+  }
+  const line = (i: (typeof items)[number]) => `- [ ] ${i.text} — ${describeDate(i.at, now, tz)} [${cite(i.noteId, i.title)}]`
+  const overdue = pick.filter((i) => i.at < today).sort((a, b) => a.at - b.at)
+  const dueToday = pick.filter((i) => i.at >= today && i.at < today + 86_400_000)
+  const later = pick.filter((i) => i.at >= today + 86_400_000).sort((a, b) => a.at - b.at)
+  const parts: string[] = []
+  if (overdue.length) parts.push(`**Overdue**\n${overdue.map(line).join('\n')}`)
+  if (dueToday.length) parts.push(`**Due today**\n${dueToday.map(line).join('\n')}`)
+  if (later.length) parts.push(`**Coming up**\n${later.slice(0, 20).map(line).join('\n')}`)
+  let answer = parts.join('\n\n')
+  if (!answer) {
+    const next = items.filter((i) => i.at >= today).sort((a, b) => a.at - b.at)[0]
+    answer = `${window ? `Nothing is due ${window.label}.` : onlyOverdue ? 'Nothing is overdue.' : onlyUpcoming ? 'Nothing is coming up.' : 'None of your to-dos have a date.'}${
+      next && !onlyUpcoming ? `\n\nNext up: ${next.text} — ${describeDate(next.at, now, tz)} [${cite(next.noteId, next.title)}]` : ''
+    }`
+  }
+  return { answer: `Today is ${todayLabel(now, tz)}.\n\n${answer}`, sources, agent: 'Worked out from your notes' }
 }
