@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentRegistry } from './agents'
-import { spentThisMonth } from './agents'
+import { observeOllama, spentThisMonth } from './agents'
 import { wyomingDescribe } from './wyoming'
 import type { Jobs } from './jobs'
 
@@ -73,6 +73,7 @@ export async function aiHealth(agents: AgentRegistry, jobs: Jobs, fresh = false)
       const v = await timed(async () => ((await (await fetch(`${url}/api/version`, { signal: signal() })).json()) as { version?: string }).version ?? null)
       if (v.error !== undefined) return { url, ok: false, version: null, loaded: [] }
       const ps = await timed(async () => (await (await fetch(`${url}/api/ps`, { signal: signal() })).json()) as { models?: { name: string; size: number; size_vram: number; expires_at?: string }[] })
+      if (ps.value?.models) observeOllama(url, ps.value.models)
       const loaded = (ps.value?.models ?? []).map((m) => ({ name: m.name, vramMb: Math.round((m.size_vram ?? 0) / 1048576), sizeMb: Math.round((m.size ?? 0) / 1048576), until: m.expires_at ?? null }))
       return { url, ok: true, version: v.value ?? null, loaded }
     }),

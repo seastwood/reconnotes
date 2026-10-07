@@ -257,8 +257,6 @@ const THINK_ROOM = 6144
 const ranOutThinking = (r: OllamaReply) =>
   r.doneReason === 'length' && (Boolean(r.thinking.trim()) || (/<think>/i.test(r.content) && !/<\/think>/i.test(r.content)))
 
-/** Ollama servers seen running a model partly on the CPU: their GPU only fits one big model at a time */
-const tightGpu = new Set<string>()
 /** the context size each model was last loaded with (another size makes Ollama load it again) */
 const lastCtx = new Map<string, { ctx: number; at: number }>()
 
@@ -269,29 +267,95 @@ interface OllamaLoaded {
 }
 const spilled = (m: OllamaLoaded) => m.size > 0 && m.size_vram < m.size * 0.95
 const sameModel = (loaded: string, model: string) => loaded === model || loaded === `${model}:latest` || `${loaded}:latest` === model
+const MB = 1048576
+
+/**
+ * What's been learned about each Ollama server's GPU (kept across restarts):
+ * `tight` once a model was seen squeezed partly onto the CPU; `fitMb` the most
+ * that was seen loaded with everything on the GPU.
+ */
+type GpuInfo = { tight?: boolean; fitMb?: number }
+const GPU_KEY = 'ollama.gpu'
+function gpuInfo(base: string): GpuInfo {
+  return spendStore?.getSetting<Record<string, GpuInfo>>(GPU_KEY)?.[base] ?? {}
+}
+function saveGpuInfo(base: string, info: GpuInfo) {
+  if (!spendStore) return
+  const all = spendStore.getSetting<Record<string, GpuInfo>>(GPU_KEY) ?? {}
+  spendStore.setSetting(GPU_KEY, { ...all, [base]: info })
+}
+
+/** how big each model was when last seen loaded (MB, with its context) */
+const seenSize = new Map<string, number>()
+
+/** Learn from what's loaded now (also called by the health check). */
+export function observeOllama(baseUrl: string, models: OllamaLoaded[]) {
+  const base = trimSlash(baseUrl)
+  for (const m of models) if (m.size) seenSize.set(`${base}|${m.name}`, m.size / MB)
+  const cur = gpuInfo(base)
+  const big = models.filter((m) => !EMBED_MODEL.test(m.name))
+  const vram = models.reduce((a, m) => a + (m.size_vram || 0), 0) / MB
+  if (big.some(spilled)) {
+    if (!cur.tight) log.info(`Ollama at ${base}: a model was squeezed partly onto the CPU – from now on one model at a time on its GPU`)
+    if (!cur.tight || (cur.fitMb ?? Infinity) > vram) saveGpuInfo(base, { tight: true, fitMb: Math.round(Math.min(cur.fitMb ?? Infinity, vram)) })
+  } else if (models.length && vram > (cur.fitMb ?? 0) && !cur.tight) saveGpuInfo(base, { ...cur, fitMb: Math.round(vram) })
+}
+
+const loadedModels = async (base: string): Promise<OllamaLoaded[] | null> => {
+  try {
+    const res = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(3000) })
+    return ((await res.json()) as { models?: OllamaLoaded[] }).models ?? []
+  } catch {
+    return null
+  }
+}
+
+/** A model's size on disk (MB), about what it needs on the GPU. */
+const diskSizes = new Map<string, { at: number; sizes: Map<string, number> }>()
+async function diskSizeMb(base: string, model: string): Promise<number | null> {
+  let hit = diskSizes.get(base)
+  if (!hit || Date.now() - hit.at > 10 * 60_000) {
+    try {
+      const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(3000) })
+      const list = ((await res.json()) as { models?: { name: string; size: number }[] }).models ?? []
+      hit = { at: Date.now(), sizes: new Map(list.map((m) => [m.name, m.size / MB])) }
+      diskSizes.set(base, hit)
+    } catch {
+      return null
+    }
+  }
+  return hit.sizes.get(model) ?? hit.sizes.get(`${model}:latest`) ?? null
+}
 
 /**
  * Before a job: make sure its model will run on the GPU. On a small GPU
  * (8 GB) Ollama keeps the last model in memory and squeezes the next one in
- * beside it – mostly on the CPU, many times slower. Once that's been seen on a
- * server, other models are unloaded first, so each job gets the whole GPU.
- * (Small embedding models are left alone.)
+ * beside it – mostly on the CPU, many times slower. So before loading a model,
+ * the others are unloaded unless it's known they fit together (small
+ * embedding models are left alone), and a model already squeezed onto the CPU
+ * is loaded again with the whole GPU.
  */
 export async function makeRoomOnGpu(agent: AgentConfig): Promise<string[]> {
   const base = trimSlash(agent.baseUrl)
-  let models: OllamaLoaded[]
-  try {
-    const res = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(3000) })
-    models = (((await res.json()) as { models?: OllamaLoaded[] }).models ?? []).filter((m) => !EMBED_MODEL.test(m.name))
-  } catch {
-    return []
-  }
-  if (models.some(spilled)) tightGpu.add(base)
-  if (!tightGpu.has(base)) return []
+  const all = await loadedModels(base)
+  if (!all) return []
+  observeOllama(base, all)
+  const models = all.filter((m) => !EMBED_MODEL.test(m.name))
   const self = models.find((m) => sameModel(m.name, agent.model))
   if (self && !spilled(self)) return []
+  const others = models.filter((m) => m !== self)
+  if (!self && !others.length) return []
+  if (!self) {
+    // will it fit beside what's loaded? Only if that's been seen to work.
+    const info = gpuInfo(base)
+    const seen = seenSize.get(`${base}|${agent.model}`) ?? seenSize.get(`${base}|${agent.model}:latest`)
+    const disk = seen === undefined ? await diskSizeMb(base, agent.model) : null
+    const need = seen ?? (disk !== null ? disk * 1.25 + 500 : null)
+    const used = all.reduce((a, m) => a + (m.size_vram || 0), 0) / MB
+    if (need !== null && info.fitMb && used + need <= info.fitMb + 1) return []
+  }
   // everything else out – and this model too if it's half on the CPU, so it loads again fully on the GPU
-  const out = models.filter((m) => m !== self || spilled(m))
+  const out = self ? [...others, self] : others
   await Promise.all(
     out.map((m) =>
       fetch(`${base}/api/generate`, {
@@ -302,10 +366,14 @@ export async function makeRoomOnGpu(agent: AgentConfig): Promise<string[]> {
       }).catch(() => undefined),
     ),
   )
-  if (out.length) {
-    for (const m of out) lastCtx.delete(`${base}|${m.name}`)
-    log.info(`made room on the GPU for ${agent.model}: unloaded ${out.map((m) => m.name).join(', ')}`)
+  // wait until they've really left the GPU (Ollama unloads in the background)
+  for (let i = 0; i < 30; i++) {
+    const now = await loadedModels(base)
+    if (!now || !now.some((m) => out.some((o) => o.name === m.name))) break
+    await new Promise((r) => setTimeout(r, 500))
   }
+  for (const m of out) lastCtx.delete(`${base}|${m.name}`)
+  log.info(`made room on the GPU for ${agent.model}: unloaded ${out.map((m) => m.name).join(', ')}`)
   return out.map((m) => m.name)
 }
 
