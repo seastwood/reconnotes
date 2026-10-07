@@ -27,14 +27,14 @@ A wildcard (`*.yourdomain.com`) keeps "notes" out of the public certificate logs
 
 ## 3. The name, answered only inside your network
 
-In *Services › DNS Resolver › Host Overrides*, add host `notes`, domain `yourdomain.com`, IP = **pfSense's LAN address**. Create no record for it in Cloudflare.
+In *Services › DNS Resolver › Host Overrides*, add host `notes`, domain `yourdomain.com`, IP = **pfSense's LAN address** (where HAProxy listens, often `192.168.1.1`), **not** the ReconNotes server's address. Save and apply. Create no record for it in Cloudflare.
 
 If you do add the record at Cloudflare instead, make it **DNS only** (grey cloud), never proxied: the orange cloud routes traffic through Cloudflare, which needs the site public. pfSense's DNS rebinding protection also blocks public names that point to private addresses, so the host override is the simpler route.
 
 ## 4. HAProxy
 
 1. *Services › HAProxy › Backend*, add `reconnotes`:
-    - Server: address `<server address>`, port `8787`, no SSL.
+    - Server: address `<server address>`, port `8787`, Encrypt (SSL) off, and **no client certificate** (the certificate goes on the frontend).
     - Advanced settings, *Backend pass thru*: `timeout tunnel 1h` (keeps the sync connection open) and `http-request set-header X-Forwarded-Proto https` (correct links, such as the calendar feed's).
 2. *Frontend*, add one (or add to an existing one):
     - Listen on **LAN address** and the **WireGuard interface address**, port `443`, SSL offloading. **Never WAN.**
@@ -55,12 +55,21 @@ In **ReconNotes › Settings**, set the server address to `https://notes.yourdom
 
 ## Check it
 
+From a computer on your network:
+
+```bash
+nslookup notes.yourdomain.com                  # answers pfSense's LAN address
+curl -v https://notes.yourdomain.com/api/health  # {"ok":true…}
+```
+
 - On the VPN: `https://notes.yourdomain.com` opens ReconNotes with a padlock.
 - Off the VPN, on mobile data: the name doesn't resolve, or doesn't connect.
 
 | Problem | What to check |
 | --- | --- |
 | The name doesn't resolve on the VPN | The WireGuard client's DNS isn't pfSense, or the host override is missing. |
+| Connection refused or times out | The host override points at the ReconNotes server instead of pfSense, or pfSense's own web interface is still on port 443. |
+| 503 Service Unavailable | HAProxy can't reach the backend: check `<server address>:8787` and *Status › HAProxy Stats* (the backend should be UP). |
 | Certificate error | The HAProxy frontend isn't using the ACME certificate, or the certificate hasn't been issued yet. |
 | Notes don't sync, or sync drops every minute | `timeout tunnel 1h` is missing in the backend. |
 | Uploads of big recordings fail | HAProxy's max upload size (step 4.3). |
