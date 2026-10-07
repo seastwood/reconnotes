@@ -22,9 +22,16 @@ function numId(id: string): number {
 
 function wanted(ws: WorkspaceSnapshot) {
   const now = Date.now()
-  return ws.notes
+  // notes in locked folders still remind you – without saying what's in them
+  return ws.allNotes
     .filter((n) => !n.trashedAt && !n.template)
-    .flatMap((n) => n.due.filter((d) => !d.done).map((d) => ({ ...d, noteId: n.id, noteTitle: n.title || 'Untitled' })))
+    .flatMap((n) =>
+      n.due
+        .filter((d) => !d.done)
+        .map((d) =>
+          ws.lockedNoteIds.has(n.id) ? { ...d, text: 'A to-do in a locked folder', noteId: n.id, noteTitle: 'Locked folder' } : { ...d, noteId: n.id, noteTitle: n.title || 'Untitled' },
+        ),
+    )
     .map((d) => {
       const [y, m, day] = d.date.split('-').map(Number)
       return { ...d, at: new Date(y, m - 1, day, HOUR, 0, 0) }

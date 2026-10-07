@@ -12,13 +12,17 @@ export interface WorkspaceSnapshot {
   folders: FolderData[]
   /** the notes you can see: not those in password-protected folders that are locked */
   notes: NoteData[]
-  /** how many notes each locked folder hides */
+  /** how many notes locked folders hide */
   hiddenNotes: number
+  /** every note, locked or not – only for things that must keep working while locked (reminders) */
+  allNotes: NoteData[]
+  /** notes in a password-protected folder (locked or unlocked) */
+  lockedNoteIds: Set<string>
   rootSort: SortMode
   loaded: boolean
 }
 
-let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, rootSort: 'manual', loaded: false }
+let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, allNotes: [], lockedNoteIds: new Set(), rootSort: 'manual', loaded: false }
 const listeners = new Set<() => void>()
 const doc = sync.workspace.doc
 
@@ -36,6 +40,8 @@ function recompute() {
     folders,
     notes,
     hiddenNotes: all.length - notes.length,
+    allNotes: all,
+    lockedNoteIds: new Set(all.filter((n) => rules.get(effectiveFolderId(n, live) ?? '')?.lockedBy).map((n) => n.id)),
     rootSort: (getSettings(doc).get('rootSort') as SortMode) ?? 'manual',
     loaded: true,
   }
