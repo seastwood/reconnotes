@@ -4,6 +4,7 @@ import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib
 import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
 import { BackupsSection } from './BackupsSection'
+import { OffsiteSection } from './OffsiteSection'
 import { ExportImportSection } from './ExportImportSection'
 import { DevicesSection } from './DevicesSection'
 import { NotificationsSection } from './NotificationsSection'
@@ -138,6 +139,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <section>
             <h3>Backups</h3>
             <BackupsSection key={s.serverUrl + s.token} />
+            <OffsiteSection key={`offsite${s.serverUrl}${s.token}`} />
           </section>
         )}
 

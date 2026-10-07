@@ -26,6 +26,7 @@ import {
 } from './agents'
 import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
 import { listBackups, runBackup } from './backup'
+import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
 import type { Caller, Devices } from './devices'
 import { SHARE_HEADERS, Shares, drawingSvg, noteHas, sharePage, sharedNote } from './shares'
@@ -723,6 +724,57 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 201, { backup: path.basename(dir) })
   })
   const BACKUP = '(\\d{4}-\\d{2}-\\d{2}T[\\d-]+Z)'
+  // offsite copies of backups: where to (secrets never sent back), test, copy the latest now
+  const offsiteView = () => {
+    const s = offsiteSettings(store)
+    return {
+      ...s,
+      s3: { ...s.s3, secretAccessKey: '' },
+      passphrase: '',
+      hasSecret: Boolean(s.s3.secretAccessKey),
+      hasPassphrase: Boolean(s.passphrase),
+      status: store.getSetting<OffsiteStatus>('offsiteStatus'),
+    }
+  }
+  const offsiteFrom = (b: Partial<OffsiteSettings>): OffsiteSettings => {
+    const cur = offsiteSettings(store)
+    const str = (v: unknown, d: string) => (typeof v === 'string' ? v.trim() : d)
+    const s3 = (b.s3 ?? {}) as Partial<OffsiteSettings['s3']>
+    return {
+      kind: b.kind === 'folder' || b.kind === 's3' || b.kind === 'off' ? b.kind : cur.kind,
+      folder: str(b.folder, cur.folder),
+      s3: {
+        endpoint: str(s3.endpoint, cur.s3.endpoint),
+        region: str(s3.region, cur.s3.region) || 'us-east-1',
+        bucket: str(s3.bucket, cur.s3.bucket),
+        prefix: str(s3.prefix, cur.s3.prefix),
+        accessKeyId: str(s3.accessKeyId, cur.s3.accessKeyId),
+        // empty = keep the saved one
+        secretAccessKey: str(s3.secretAccessKey, '') || cur.s3.secretAccessKey,
+      },
+      passphrase: typeof b.passphrase === 'string' && b.passphrase ? b.passphrase : (b as { clearPassphrase?: boolean }).clearPassphrase ? '' : cur.passphrase,
+      keep: Number.isInteger(b.keep) && b.keep! >= 1 && b.keep! <= 365 ? b.keep! : cur.keep,
+    }
+  }
+  route('GET', '/api/offsite', (_req, res) => json(res, 200, offsiteView()))
+  route('PUT', '/api/offsite', async (req, res) => {
+    store.setSetting('offsite', offsiteFrom(await readJson<Partial<OffsiteSettings>>(req)))
+    json(res, 200, offsiteView())
+  })
+  route('POST', '/api/offsite/test', async (req, res) => {
+    try {
+      await testOffsite(offsiteFrom(await readJson<Partial<OffsiteSettings>>(req)))
+      json(res, 200, { ok: true })
+    } catch (err) {
+      json(res, 200, { ok: false, error: (err as Error).message })
+    }
+  })
+  route('POST', '/api/offsite/run', async (_req, res) => {
+    const latest = listBackups(config)[0]
+    if (!latest) throw new HttpError(400, 'There’s no backup yet – make one first.')
+    json(res, 200, await copyOffsite(store, path.join(config.backupDir, latest), store.blobDir))
+  })
+
   /** The notes in a backup, and whether each has changed since. */
   route('GET', `/api/backups/${BACKUP}/notes`, (_req, res, [name]) => {
     if (!listBackups(config).includes(name)) throw new HttpError(404, 'backup not found')

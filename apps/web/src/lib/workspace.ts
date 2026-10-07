@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import * as Y from 'yjs'
-import { effectiveFolderId, folderRules, getFolders, getNotes, getSettings, listFolders, listNotes, type FolderData, type NoteData, type SortMode } from '@reconnotes/core'
+import { effectiveFolderId, folderRules, getFolders, getNotes, getSettings, listFolders, readNote, type FolderData, type NoteData, type SortMode } from '@reconnotes/core'
 import { sync } from './sync'
 import { Store } from './store'
 
@@ -26,9 +26,25 @@ let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, allN
 const listeners = new Set<() => void>()
 const doc = sync.workspace.doc
 
+/**
+ * Each note's details, read once and kept until that note changes: with
+ * thousands of notes, an edit re-reads one note, not all of them (and the
+ * others keep the same object, so their rows don't redraw).
+ */
+const noteCache = new WeakMap<Y.Map<unknown>, NoteData>()
+function readNotes(): NoteData[] {
+  const out: NoteData[] = []
+  getNotes(doc).forEach((m) => {
+    let n = noteCache.get(m)
+    if (!n) noteCache.set(m, (n = readNote(m)))
+    out.push(n)
+  })
+  return out
+}
+
 function recompute() {
   const folders = listFolders(doc)
-  const all = listNotes(doc)
+  const all = readNotes()
   const rules = folderRules(folders)
   const live = new Set(rules.keys())
   const open = unlockedFolders.get().ids
@@ -58,7 +74,15 @@ const schedule = () => {
   })
 }
 getFolders(doc).observeDeep(schedule)
-getNotes(doc).observeDeep(schedule)
+getNotes(doc).observeDeep((events) => {
+  // forget the details of the notes that changed
+  // (a change inside a note's details: the path starts with that note's id)
+  for (const e of events) {
+    const m = e.path.length ? getNotes(doc).get(String(e.path[0])) : e.target !== getNotes(doc) ? (e.target as Y.Map<unknown>) : null
+    if (m) noteCache.delete(m as Y.Map<unknown>)
+  }
+  schedule()
+})
 getSettings(doc).observe(schedule)
 unlockedFolders.subscribe(schedule)
 void sync.workspace.loaded.then(recompute)

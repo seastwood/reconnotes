@@ -23,6 +23,7 @@ import { newNoteFromTemplate } from '../lib/templates'
 import { startMeeting } from '../lib/meeting'
 import { DueList } from './DueList'
 import { TasksList } from './TasksList'
+import { useProgressive } from '../lib/progressive'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
@@ -149,6 +150,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   }
 
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
+  // big folders: rows in pieces as you scroll (the open note always shown)
+  const shown = useProgressive(notes.length, JSON.stringify(view), notes.findIndex((n) => n.id === noteId))
   const canSelect = notes.length > 0 && view.kind !== 'due' && view.kind !== 'tasks'
   const ids = [...selected].filter((id) => notes.some((n) => n.id === id))
 
@@ -313,7 +316,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           </li>
         ))}
 
-        {notes.map((n, i) => (
+        {notes.slice(0, shown.limit).map((n, i) => (
           <NoteRow
             key={n.id}
             id={n.id}
@@ -373,6 +376,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             )}
           </NoteRow>
         ))}
+        {shown.limit < notes.length && <li ref={shown.sentinel} className="empty-hint">Loading more notes…</li>}
         {view.kind !== 'due' && view.kind !== 'tasks' && !notes.length && !trashedFolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
         )}

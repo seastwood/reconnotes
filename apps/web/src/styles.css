@@ -3934,3 +3934,25 @@ a.button {
   width: 100%;
   font-size: 13px;
 }
+
+/* Settings › Backups › Offsite copy */
+.offsite {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.offsite h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.offsite .row label {
+  flex: 1;
+  min-width: 0;
+}
+.offsite .hint svg,
+.offsite .error-text svg {
+  vertical-align: -2px;
+}

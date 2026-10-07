@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { loadConfig } from './config'
 import { createApp } from './app'
 import { runBackup } from './backup'
+import { decryptPath } from './offsite'
 import { VERSION } from './http'
 import { log } from './log'
 
@@ -11,7 +12,9 @@ Usage: reconnotes-server [command]
 
 Commands:
   serve       Run the sync server (default)
-  backup      Write a backup now and exit
+  backup      Write a backup now (and its offsite copy) and exit
+  decrypt     Decrypt an encrypted offsite backup: decrypt <file or folder>
+              (the passphrase from RECON_BACKUP_PASSPHRASE)
   reindex     Rebuild the search index and exit
   gen-token   Print a new random access token
 
@@ -23,11 +26,21 @@ async function main() {
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') return void console.log(HELP)
   if (cmd === 'gen-token') return void console.log(crypto.randomBytes(24).toString('base64url'))
 
+  if (cmd === 'decrypt') {
+    const target = process.argv[3]
+    const pass = process.env.RECON_BACKUP_PASSPHRASE
+    if (!target || !pass) {
+      console.error('Usage: RECON_BACKUP_PASSPHRASE=… reconnotes-server decrypt <file.enc or folder>')
+      process.exit(1)
+    }
+    return void console.log(`${decryptPath(target, pass)} file(s) decrypted`)
+  }
+
   const config = loadConfig()
   const app = createApp(config, { backups: cmd === 'serve' })
 
   if (cmd === 'backup') {
-    const dir = await runBackup(config, app.store, app.sync)
+    const dir = await runBackup(config, app.store, app.sync, { waitOffsite: true })
     console.log(dir)
     return app.close()
   }

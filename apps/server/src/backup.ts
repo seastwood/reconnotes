@@ -14,6 +14,7 @@ import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { log } from './log'
+import { copyOffsite } from './offsite'
 
 /**
  * Backups
@@ -29,7 +30,7 @@ import { log } from './log'
  * Attachments are immutable, so they are stored once in a shared `blobs/`
  * directory next to the backups and only new files are copied each time.
  */
-export async function runBackup(config: Config, store: Store, sync: SyncEngine): Promise<string> {
+export async function runBackup(config: Config, store: Store, sync: SyncEngine, opts: { waitOffsite?: boolean } = {}): Promise<string> {
   sync.hocuspocus.flushPendingStores()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const dir = path.join(config.backupDir, stamp)
@@ -48,6 +49,9 @@ export async function runBackup(config: Config, store: Store, sync: SyncEngine):
   )
   prune(config.backupDir, config.backupKeep)
   log.info(`backup written to ${dir} (${notes} notes, ${copied} new attachments)`)
+  // and a copy somewhere else, when set up (in the background: it can take a while)
+  const offsite = copyOffsite(store, dir, store.blobDir).catch((err) => log.warn(`offsite backup failed: ${(err as Error).message}`))
+  if (opts.waitOffsite) await offsite
   return dir
 }
 
