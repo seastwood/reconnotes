@@ -7,6 +7,18 @@ import { createPortal } from 'react-dom'
  * folder list. Positioned under its anchor button, flipped above it when
  * there isn't room below, and kept inside the viewport.
  */
+/** The safe-area insets (status bar / notch, home indicator) in pixels. */
+let probe: HTMLDivElement | null = null
+function safeInsets(): { top: number; bottom: number } {
+  if (!probe) {
+    probe = document.createElement('div')
+    probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)'
+    document.body.appendChild(probe)
+  }
+  const cs = getComputedStyle(probe)
+  return { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 }
+}
+
 export function Popover({
   anchorRef,
   onClose,
@@ -30,13 +42,18 @@ export function Popover({
       const m = ref.current
       if (!a || !m) return
       const margin = 8
+      // keep clear of the status bar / notch and the home indicator
+      const { top: insetTop, bottom: insetBottom } = safeInsets()
+      const minTop = insetTop + margin
+      const maxBottom = innerHeight - insetBottom - margin
       const w = m.offsetWidth
       const h = m.scrollHeight
-      const below = innerHeight - a.bottom - margin
-      const above = a.top - margin
+      const below = maxBottom - a.bottom - 4
+      const above = a.top - 4 - minTop
       const openUp = h > below && above > below
-      const maxHeight = Math.max(160, openUp ? above - 4 : below - 4)
-      const top = openUp ? Math.max(margin, a.top - 4 - Math.min(h, maxHeight)) : a.bottom + 4
+      // taller than the room there: it scrolls inside
+      const maxHeight = Math.max(120, openUp ? above : below)
+      const top = openUp ? Math.max(minTop, a.top - 4 - Math.min(h, maxHeight)) : a.bottom + 4
       let left = align === 'right' ? a.right - w : a.left
       left = Math.min(Math.max(margin, left), innerWidth - w - margin)
       setPos({ top, left, maxHeight })
