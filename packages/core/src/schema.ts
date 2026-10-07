@@ -47,6 +47,17 @@ export interface FolderData {
   /** how the folder's children are sorted */
   sort: SortMode
   trashedAt: number | null
+  /** a password is needed to open it (and its subfolders) – see folderRules */
+  lock: FolderLock | null
+  /** left out of search and "Ask your notes" (with its subfolders), unless searched on purpose */
+  noSearch: boolean
+}
+
+/** A folder password, stored only as a salted PBKDF2-SHA-256 hash (hex). */
+export interface FolderLock {
+  salt: string
+  hash: string
+  iter: number
 }
 
 export interface NoteData {
@@ -95,6 +106,8 @@ export function readFolder(m: FolderMap): FolderData {
     createdAt: (m.get('createdAt') as number) ?? 0,
     sort: (m.get('sort') as SortMode) ?? 'manual',
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
+    lock: (m.get('lock') as FolderLock | null | undefined) ?? null,
+    noSearch: Boolean(m.get('noSearch')),
   }
 }
 

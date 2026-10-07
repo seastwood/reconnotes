@@ -26,6 +26,7 @@ import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
 import type { AiTask } from './agents'
 import { guessedWords } from './vocabulary'
+import { scopeFromInput } from './access'
 import { markdownToNodes, type Ctx } from './importNotes'
 
 /**
@@ -258,7 +259,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const tzOffset = Number(job.input.tzOffset)
     const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning, {
       tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
-    })
+    }, scopeFromInput(job.input))
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 

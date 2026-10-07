@@ -55,7 +55,13 @@ function snippetFor(text: string, terms: string[]): string {
   return (start > 0 ? '…' : '') + s + (start + 180 < text.length ? '…' : '')
 }
 
-export async function searchNotes(query: string): Promise<SearchResult[]> {
+/** where to look: chosen folders (none = everywhere), and the locked folders unlocked here */
+export interface SearchWhere {
+  folders?: string[]
+  unlocked?: string[]
+}
+
+export async function searchNotes(query: string, where: SearchWhere = {}): Promise<SearchResult[]> {
   await ready
   const q = query.trim()
   if (!q) return []
@@ -72,7 +78,10 @@ export async function searchNotes(query: string): Promise<SearchResult[]> {
   try {
     const ctl = new AbortController()
     const t = setTimeout(() => ctl.abort(), 5000)
-    const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`), { headers: authHeaders(), signal: ctl.signal })
+    const params = new URLSearchParams({ q })
+    if (where.folders?.length) params.set('folders', where.folders.join(','))
+    if (where.unlocked?.length) params.set('unlocked', where.unlocked.join(','))
+    const res = await fetch(apiUrl(`/api/search?${params}`), { headers: authHeaders(), signal: ctl.signal })
     clearTimeout(t)
     if (!res.ok) return local
     const { hits } = (await res.json()) as { hits: { noteId: string; title: string; snippet: string; trashed: boolean; meaning?: boolean }[] }

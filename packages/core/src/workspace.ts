@@ -331,3 +331,29 @@ export function emptyTrash(doc: Y.Doc): string[] {
   })
   return removedNotes
 }
+
+export interface FolderRule {
+  /** the folder whose password guards this one (itself or a folder it's in), or null */
+  lockedBy: string | null
+  /** left out of search: set on it or a folder it's in */
+  noSearch: boolean
+}
+
+/** Locks and "leave out of search" apply to subfolders too. */
+export function folderRules(folders: FolderData[]): Map<string, FolderRule> {
+  const byId = new Map(folders.filter((f) => !f.trashedAt).map((f) => [f.id, f]))
+  const out = new Map<string, FolderRule>()
+  for (const f of byId.values()) {
+    let lockedBy: string | null = null
+    let noSearch = false
+    const seen = new Set<string>()
+    for (let cur: FolderData | undefined = f; cur && !seen.has(cur.id); cur = cur.parentId ? byId.get(cur.parentId) : undefined) {
+      seen.add(cur.id)
+      // the outermost lock wins: one password opens everything inside it
+      if (cur.lock) lockedBy = cur.id
+      if (cur.noSearch) noSearch = true
+    }
+    out.set(f.id, { lockedBy, noSearch })
+  }
+  return out
+}

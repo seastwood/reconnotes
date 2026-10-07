@@ -35,6 +35,7 @@ import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
 import { aiHealth } from './health'
+import { noteFilter, scopeFromQuery } from './access'
 import type { Samples } from './bench'
 
 export const VERSION = '0.1.0'
@@ -179,14 +180,17 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('GET', '/api/search', async (_req, res, _p, url) => {
     const q = url.searchParams.get('q') ?? ''
     const meta = sync.noteMeta()
-    const words = store.search(q).filter((h) => meta.has(h.noteId))
+    // not locked folders (unless unlocked on the asking device), not folders left out of search
+    const allowed = noteFilter(sync, scopeFromQuery(url.searchParams))
+    const words = store.search(q, 500).filter((h) => meta.has(h.noteId) && allowed(h.noteId)).slice(0, 50)
     // notes about the same thing in other words (when an embedding model is set up)
     const seen = new Set(words.map((h) => h.noteId))
-    const related = sync.meaning?.available && q.trim().length >= 3 ? await sync.meaning.search(q) : []
+    const related = sync.meaning?.available && q.trim().length >= 3 ? await sync.meaning.search(q, 200) : []
     const hits = [
       ...words,
       ...related
-        .filter((h) => meta.has(h.noteId) && !seen.has(h.noteId))
+        .filter((h) => meta.has(h.noteId) && !seen.has(h.noteId) && allowed(h.noteId))
+        .slice(0, 12)
         .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, snippet: h.passage.replace(/\s+/g, ' ').slice(0, 180), rank: -h.score, meaning: true })),
     ].map((h) => ({ ...h, trashed: Boolean(meta.get(h.noteId)!.trashedAt) }))
     json(res, 200, { hits })

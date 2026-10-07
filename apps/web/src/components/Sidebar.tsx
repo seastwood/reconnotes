@@ -20,6 +20,9 @@ import {
   Activity,
   Loader2,
   X,
+  Lock,
+  LockOpen,
+  SearchX,
 } from 'lucide-react'
 import {
   buildTree,
@@ -40,6 +43,9 @@ import { SyncBadge } from './SyncBadge'
 import { useJobs } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
+import { lockFolder, useFolderAccess } from '../lib/folderLock'
+import { setSearchFolders } from '../lib/searchScope'
+import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 
 export type View =
   | { kind: 'all' }
@@ -111,6 +117,9 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     el.style.height = `${el.scrollHeight}px`
   }, [search])
   const [renaming, setRenaming] = useState<string | null>(null)
+  const access = useFolderAccess()
+  /** asking for a folder's password */
+  const [pw, setPw] = useState<{ folderId: string; mode: PasswordMode; then?: () => void } | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const offlineFolders = useOffline((s) => s.folders)
   const offlineProgress = useOffline((s) => s.progress)
@@ -171,7 +180,10 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const renderNodes = (nodes: TreeNode[], depth: number) =>
     nodes.map((node) => {
       const f = node.folder
-      const open = !collapsed[f.id]
+      const locked = access.lockedFolder(f.id)
+      const owner = access.lockOwner(f.id)
+      // a locked folder shows no subfolders until it's unlocked
+      const open = !collapsed[f.id] && !locked
       const active = view.kind === 'folder' && view.folderId === f.id
       const hint = dropHint?.id === f.id ? dropHint.where : null
       return (
@@ -189,7 +201,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             }}
             onDragLeave={() => setDropHint(null)}
             onDrop={(e) => onDrop(e, node, hint ?? 'inside', nodes)}
-            onClick={() => onView({ kind: 'folder', folderId: f.id })}
+            onClick={() =>
+              locked && owner
+                ? setPw({ folderId: owner, mode: 'unlock', then: () => onView({ kind: 'folder', folderId: f.id }) })
+                : onView({ kind: 'folder', folderId: f.id })
+            }
           >
             <button
               className="twisty"
@@ -197,12 +213,20 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 e.stopPropagation()
                 toggle(f.id)
               }}
-              style={{ visibility: node.children.length ? 'visible' : 'hidden' }}
+              style={{ visibility: node.children.length && !locked ? 'visible' : 'hidden' }}
               aria-label={open ? 'Collapse' : 'Expand'}
             >
               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </button>
-            <Folder size={16} className="folder-icon" />
+            {f.lock ? (
+              locked ? (
+                <Lock size={16} className="folder-icon" aria-label="Locked" />
+              ) : (
+                <LockOpen size={16} className="folder-icon" aria-label="Unlocked" />
+              )
+            ) : (
+              <Folder size={16} className="folder-icon" />
+            )}
             {renaming === f.id ? (
               <input
                 className="rename"
@@ -229,7 +253,12 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 <CloudDownload size={13} />
               </span>
             )}
-            <span className="count">{counts[f.id] ?? ''}</span>
+            {f.noSearch && (
+              <span className="folder-flag" title="Left out of search">
+                <SearchX size={13} />
+              </span>
+            )}
+            <span className="count">{locked ? '' : (counts[f.id] ?? '')}</span>
             <button
               className="row-menu"
               aria-label="Folder actions"
@@ -242,6 +271,12 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             </button>
             {menuFor === f.id && (
               <Popover anchorRef={menuAnchor} align="right" onClose={() => setMenuFor(null)}>
+                {locked && owner ? (
+                  <button onClick={() => (setMenuFor(null), setPw({ folderId: owner, mode: 'unlock' }))}>
+                    <Lock size={14} /> Unlock…
+                  </button>
+                ) : (
+                  <>
                 <button onClick={() => newFolder(f.id)}>New subfolder</button>
                 <button onClick={() => setRenaming(f.id)}>Rename</button>
                 <button onClick={() => onMoveFolder(f.id)}>Move to…</button>
@@ -263,9 +298,43 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                     {SORT_LABELS[m]}
                   </button>
                 ))}
+                <div className="menu-sep" />
+                <button
+                  onClick={() => {
+                    setMenuFor(null)
+                    setSearchFolders([f.id])
+                    searchBox.current?.focus()
+                  }}
+                >
+                  Search in this folder…
+                </button>
+                <button
+                  className={f.noSearch ? 'checked' : ''}
+                  title="Its notes (and its subfolders’) don’t show up in search or “Ask your notes” – unless you search this folder on purpose"
+                  onClick={() => updateFolder(workspaceDoc, f.id, { noSearch: !f.noSearch })}
+                >
+                  Leave out of search
+                </button>
+                {f.lock ? (
+                  <>
+                    <button onClick={() => (setMenuFor(null), lockFolder(f.id))}>
+                      <Lock size={14} /> Lock now
+                    </button>
+                    <button onClick={() => (setMenuFor(null), setPw({ folderId: f.id, mode: 'change' }))}>Change password…</button>
+                    <button onClick={() => (setMenuFor(null), setPw({ folderId: f.id, mode: 'remove' }))}>Remove password…</button>
+                  </>
+                ) : (
+                  !owner && (
+                    <button onClick={() => (setMenuFor(null), setPw({ folderId: f.id, mode: 'set' }))}>
+                      <Lock size={14} /> Lock with password…
+                    </button>
+                  )
+                )}
                 <button className="danger" onClick={() => trashFolder(workspaceDoc, f.id)}>
                   Delete folder
                 </button>
+                  </>
+                )}
               </Popover>
             )}
           </div>
@@ -420,6 +489,15 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           <span className="count">{trashCount || ''}</span>
         </div>
       </nav>
+      )}
+      {pw && (
+        <PasswordDialog
+          folderId={pw.folderId}
+          folderName={ws.folders.find((x) => x.id === pw.folderId)?.name ?? 'Folder'}
+          mode={pw.mode}
+          onClose={() => setPw(null)}
+          onDone={pw.then}
+        />
       )}
     </aside>
   )

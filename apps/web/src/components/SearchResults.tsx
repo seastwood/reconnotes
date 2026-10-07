@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUpDown, Folder, ListFilter, Sparkles, X } from 'lucide-react'
+import { ArrowUpDown, Folder, ListFilter, Lock, Sparkles, X } from 'lucide-react'
 import { buildTree, effectiveFolderId, type TreeNode } from '@reconnotes/core'
 import { searchNotes, type SearchResult } from '../lib/search'
+import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
+import { useFolderAccess } from '../lib/folderLock'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { useWorkspace } from '../lib/workspace'
 import { AskPanel } from './AskPanel'
@@ -31,21 +33,23 @@ const EDITED_MS: Record<Edited, number> = { any: 0, day: 0, week: 7 * 864e5, mon
 
 interface Options {
   sort: SortBy
-  /** a folder and its subfolders; '' = everywhere, 'none' = notes in no folder */
-  folder: string
   edited: Edited
   tag: string
   /** also show notes found by meaning (related) */
   related: boolean
 }
-const DEFAULTS: Options = { sort: 'best', folder: '', edited: 'any', tag: '', related: true }
+const DEFAULTS: Options = { sort: 'best', edited: 'any', tag: '', related: true }
 const KEY = 'reconnotes.searchOptions'
 
 /** Notes matching the search text (and "Ask your notes" for it), updated as you type. */
 export function SearchResults({ query, activeNoteId, onOpen }: { query: string; activeNoteId: string | null; onOpen: (noteId: string) => void }) {
   const ws = useWorkspace()
   const q = query.trim()
-  const [found, setFound] = useState<SearchResult[] | null>(() => cache.get(q)?.results ?? null)
+  const scope = useSearchScope()
+  const access = useFolderAccess()
+  // results depend on where you search, and which locked folders are open here
+  const key = `${q}|${scope.join(',')}|${access.unlockedIds.join(',')}`
+  const [found, setFound] = useState<SearchResult[] | null>(() => cache.get(key)?.results ?? null)
   const [asked, setAsked] = useState(() => askedFor.has(q))
   const [opts, setOptsState] = useState<Options>(() => ({ ...DEFAULTS, ...safeLocalGet<Partial<Options>>(KEY, {}) }))
   const setOpts = (patch: Partial<Options>) => {
@@ -60,15 +64,15 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
   useEffect(() => {
     setAsked(askedFor.has(q))
     if (!q) return setFound(null)
-    const hit = cache.get(q)
+    const hit = cache.get(key)
     setFound(hit?.results ?? null)
     if (hit && Date.now() - hit.at < FRESH_MS) return
     let alive = true
     const t = setTimeout(
       () =>
-        void searchNotes(q).then((r) => {
-          cache.delete(q) // most recent last, for trimming
-          cache.set(q, { results: r, at: Date.now() })
+        void searchNotes(q, { folders: scope, unlocked: access.unlockedIds }).then((r) => {
+          cache.delete(key) // most recent last, for trimming
+          cache.set(key, { results: r, at: Date.now() })
           while (cache.size > 30) cache.delete(cache.keys().next().value!)
           if (alive) setFound(r)
         }),
@@ -78,26 +82,27 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
       alive = false
       clearTimeout(t)
     }
-  }, [q])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
-  /** the chosen folder and everything inside it */
+  /** the chosen folders and everything inside them ('none': notes in no folder) */
   const inFolder = useMemo(() => {
-    if (!opts.folder || opts.folder === 'none') return null
-    const ids = new Set<string>([opts.folder])
+    if (!scope.length) return null
+    const ids = new Set<string>(scope)
     const walk = (nodes: TreeNode[], inside: boolean) => {
       for (const n of nodes) {
-        const here = inside || n.folder.id === opts.folder
+        const here = inside || scope.includes(n.folder.id)
         if (here) ids.add(n.folder.id)
         walk(n.children, here)
       }
     }
     walk(tree, false)
     return ids
-  }, [opts.folder, tree])
+  }, [scope, tree])
   const tags = useMemo(() => [...new Set(ws.notes.filter((n) => !n.trashedAt).flatMap((n) => n.tags))].sort(), [ws.notes])
-  const folderName = opts.folder === 'none' ? 'No folder' : ws.folders.find((f) => f.id === opts.folder)?.name
+  const folderName = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
 
   const results = useMemo(() => {
     if (!found) return null
@@ -111,8 +116,9 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
       if (since && n.updatedAt < since) return false
       if (opts.tag && !n.tags.includes(opts.tag)) return false
       const f = effectiveFolderId(n, liveFolders)
-      if (opts.folder === 'none' ? f !== null : inFolder && !(f && inFolder.has(f))) return false
-      return true
+      // searching chosen folders: only those; otherwise not the folders left out of search
+      if (inFolder) return inFolder.has(f ?? 'none')
+      return !(f && access.rules.get(f)?.noSearch)
     })
     const by = (f: (n: NonNullable<ReturnType<typeof notes.get>>) => number | string, desc: boolean) =>
       list.sort((a, b) => {
@@ -126,9 +132,9 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     else if (opts.sort === 'created') by((n) => n.createdAt, true)
     else if (opts.sort === 'title') by((n) => n.title || 'Untitled', false)
     return list
-  }, [found, ws.notes, opts, liveFolders, inFolder])
+  }, [found, ws.notes, opts, liveFolders, inFolder, access])
 
-  const filtered = Boolean(opts.folder || opts.edited !== 'any' || opts.tag || !opts.related)
+  const filtered = Boolean(scope.length || opts.edited !== 'any' || opts.tag || !opts.related)
   const pick = (patch: Partial<Options>) => {
     setOpts(patch)
     setMenu(null)
@@ -166,12 +172,12 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
             </button>
           ))}
           <div className="menu-sep" />
-          <div className="menu-label">In folder</div>
-          <button className={!opts.folder ? 'checked' : ''} onClick={() => pick({ folder: '' })}>
+          <div className="menu-label">Search in (pick one or more)</div>
+          <button className={!scope.length ? 'checked' : ''} onClick={() => (setSearchFolders([]), setMenu(null))}>
             Everywhere
           </button>
-          <FolderChoices nodes={tree} depth={0} chosen={opts.folder} onPick={(id) => pick({ folder: id })} />
-          <button className={opts.folder === 'none' ? 'checked' : ''} onClick={() => pick({ folder: 'none' })}>
+          <FolderChoices nodes={tree} depth={0} chosen={scope} locked={access.lockedFolder} onPick={toggleSearchFolder} />
+          <button className={scope.includes('none') ? 'checked' : ''} onClick={() => toggleSearchFolder('none')}>
             Not in a folder
           </button>
           {tags.length > 0 && (
@@ -197,16 +203,17 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
       {filtered && q && (
         <div className="search-chips">
           {opts.edited !== 'any' && <Chip label={`Edited: ${EDITED[opts.edited].toLowerCase()}`} onClear={() => setOpts({ edited: 'any' })} />}
-          {opts.folder && (
+          {scope.map((id) => (
             <Chip
+              key={id}
               label={
                 <>
-                  <Folder size={12} /> {folderName ?? 'Folder'}
+                  <Folder size={12} /> {folderName(id)}
                 </>
               }
-              onClear={() => setOpts({ folder: '' })}
+              onClear={() => toggleSearchFolder(id)}
             />
-          )}
+          ))}
           {opts.tag && <Chip label={`#${opts.tag}`} onClear={() => setOpts({ tag: '' })} />}
           {!opts.related && <Chip label="Exact matches only" onClear={() => setOpts({ related: true })} />}
         </div>
@@ -226,7 +233,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
             <div className="note-snippet">“{q}” – an answer from your notes, with sources</div>
           </li>
         )}
-        {asked && <AskPanel question={q} onOpen={onOpen} />}
+        {asked && <AskPanel question={q} where={{ folders: scope, unlocked: access.unlockedIds }} onOpen={onOpen} />}
         {results?.map((r) => (
           <li key={r.noteId} className={`note-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
             <div className="note-title">
@@ -245,7 +252,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
             {found?.length ? (
               <>
                 No matches with these filters.{' '}
-                <button className="text" onClick={() => setOpts({ folder: '', edited: 'any', tag: '', related: true })}>
+                <button className="text" onClick={() => (setSearchFolders([]), setOpts({ edited: 'any', tag: '', related: true }))}>
                   Clear filters
                 </button>
               </>
@@ -259,15 +266,21 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
   )
 }
 
-function FolderChoices({ nodes, depth, chosen, onPick }: { nodes: TreeNode[]; depth: number; chosen: string; onPick: (id: string) => void }) {
+function FolderChoices({ nodes, depth, chosen, locked, onPick }: { nodes: TreeNode[]; depth: number; chosen: string[]; locked: (id: string) => boolean; onPick: (id: string) => void }) {
   return (
     <>
       {nodes.map((n) => (
         <Fragment key={n.folder.id}>
-          <button className={chosen === n.folder.id ? 'checked' : ''} style={{ paddingLeft: 10 + depth * 14 }} onClick={() => onPick(n.folder.id)}>
-            <Folder size={14} /> {n.folder.name}
+          <button
+            className={chosen.includes(n.folder.id) ? 'checked' : ''}
+            style={{ paddingLeft: 10 + depth * 14 }}
+            disabled={locked(n.folder.id)}
+            title={locked(n.folder.id) ? 'Locked – unlock it to search it' : undefined}
+            onClick={() => onPick(n.folder.id)}
+          >
+            {locked(n.folder.id) ? <Lock size={14} /> : <Folder size={14} />} {n.folder.name}
           </button>
-          {n.children.length > 0 && <FolderChoices nodes={n.children} depth={depth + 1} chosen={chosen} onPick={onPick} />}
+          {n.children.length > 0 && <FolderChoices nodes={n.children} depth={depth + 1} chosen={chosen} locked={locked} onPick={onPick} />}
         </Fragment>
       ))}
     </>

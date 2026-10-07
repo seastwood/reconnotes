@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
+import { LockedScreen } from './LockedScreen'
+import { useFolderAccess } from '../lib/folderLock'
 import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash } from 'lucide-react'
 import {
   createNote,
@@ -72,6 +74,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
   const folder = view.kind === 'folder' ? ws.folders.find((f) => f.id === view.folderId) : undefined
+  const access = useFolderAccess()
+  const lockedBy = view.kind === 'folder' && access.lockedFolder(view.folderId) ? access.lockOwner(view.folderId) : null
   const allSort = (getSettings(workspaceDoc).get('allSort') as SortMode) ?? 'updated'
   const sort: SortMode = folder ? folder.sort : view.kind === 'all' ? allSort : 'updated'
 
@@ -284,7 +288,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
         )}
       </header>
 
-      <ul className="notes">
+      {lockedBy && <LockedScreen folderId={lockedBy} what="folder" />}
+      <ul className="notes" hidden={Boolean(lockedBy)}>
         {view.kind === 'due' && <DueList activeNoteId={noteId} onOpen={onOpen} />}
 
         {trashedFolders.map((f) => (

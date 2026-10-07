@@ -1,24 +1,41 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import * as Y from 'yjs'
-import { getFolders, getNotes, getSettings, listFolders, listNotes, type FolderData, type NoteData, type SortMode } from '@reconnotes/core'
+import { effectiveFolderId, folderRules, getFolders, getNotes, getSettings, listFolders, listNotes, type FolderData, type NoteData, type SortMode } from '@reconnotes/core'
 import { sync } from './sync'
+import { Store } from './store'
+
+/** folders whose password was given on this device (see folderLock.ts) */
+export const unlockedFolders = new Store<{ ids: Set<string> }>({ ids: new Set() })
 
 /** Snapshot of the workspace for rendering; recomputed on every change. */
 export interface WorkspaceSnapshot {
   folders: FolderData[]
+  /** the notes you can see: not those in password-protected folders that are locked */
   notes: NoteData[]
+  /** how many notes each locked folder hides */
+  hiddenNotes: number
   rootSort: SortMode
   loaded: boolean
 }
 
-let snapshot: WorkspaceSnapshot = { folders: [], notes: [], rootSort: 'manual', loaded: false }
+let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, rootSort: 'manual', loaded: false }
 const listeners = new Set<() => void>()
 const doc = sync.workspace.doc
 
 function recompute() {
+  const folders = listFolders(doc)
+  const all = listNotes(doc)
+  const rules = folderRules(folders)
+  const live = new Set(rules.keys())
+  const open = unlockedFolders.get().ids
+  const notes = all.filter((n) => {
+    const by = rules.get(effectiveFolderId(n, live) ?? '')?.lockedBy
+    return !by || open.has(by)
+  })
   snapshot = {
-    folders: listFolders(doc),
-    notes: listNotes(doc),
+    folders,
+    notes,
+    hiddenNotes: all.length - notes.length,
     rootSort: (getSettings(doc).get('rootSort') as SortMode) ?? 'manual',
     loaded: true,
   }
@@ -37,6 +54,7 @@ const schedule = () => {
 getFolders(doc).observeDeep(schedule)
 getNotes(doc).observeDeep(schedule)
 getSettings(doc).observe(schedule)
+unlockedFolders.subscribe(schedule)
 void sync.workspace.loaded.then(recompute)
 
 export function useWorkspace(): WorkspaceSnapshot {

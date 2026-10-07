@@ -3704,3 +3704,54 @@ a.button {
     opacity: 0.35;
   }
 }
+
+/* password-protected folders */
+.locked-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.locked-screen p {
+  margin: 0;
+  max-width: 320px;
+}
+.locked-screen button {
+  padding: 9px 22px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #1c1c1e;
+  font-weight: 600;
+}
+.password-dialog {
+  width: min(420px, 100%);
+}
+.password-dialog .password-icon {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+  color: var(--accent-text);
+}
+.password-dialog h2 {
+  text-align: center;
+  font-size: 18px;
+}
+.password-dialog .row {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.password-dialog .row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.folder-flag {
+  display: inline-flex;
+  color: var(--muted);
+  margin-left: 2px;
+}

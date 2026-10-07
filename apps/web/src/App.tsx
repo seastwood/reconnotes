@@ -16,6 +16,8 @@ import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
+import { LockedScreen } from './components/LockedScreen'
+import { useFolderAccess } from './lib/folderLock'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
@@ -198,7 +200,10 @@ export function App() {
   }
   useEffect(() => startAppLinks((a) => onLink.current(a)), [])
 
-  const noteDoc = useNoteDoc(note && !note.trashedAt ? nav.noteId : null)
+  // a note in a locked folder (opened from a link, a reminder…) asks for the password first
+  const access = useFolderAccess()
+  const noteLockedBy = note && access.noteHidden(note) ? access.lockOwner(note.folderId!) : null
+  const noteDoc = useNoteDoc(note && !note.trashedAt && !noteLockedBy ? nav.noteId : null)
 
   /** a note opened from search results opens with the find bar on the search text */
   const [findOnOpen, setFindOnOpen] = useState<{ noteId: string; query: string; n: number } | null>(null)
@@ -454,7 +459,9 @@ export function App() {
       </Panel>
       <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">
         <main className="editor-col">
-          {noteDoc?.ready && nav.noteId ? (
+          {noteLockedBy ? (
+            <LockedScreen folderId={noteLockedBy} what="note" />
+          ) : noteDoc?.ready && nav.noteId ? (
             <NoteEditor
               key={nav.noteId}
               noteId={nav.noteId}

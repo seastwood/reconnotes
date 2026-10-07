@@ -16,9 +16,18 @@ export interface AskResult {
 }
 
 /** the newest "Ask your notes" job for this question (still useful: not failed or cancelled) */
-function jobFor(jobs: Job[], question: string): Job | undefined {
+const sameFolders = (a: unknown, b: string[]) => JSON.stringify([...((a as string[] | undefined) ?? [])].sort()) === JSON.stringify([...b].sort())
+
+function jobFor(jobs: Job[], question: string, folders: string[]): Job | undefined {
   return jobs
-    .filter((j) => j.kind === 'ask' && j.input.question === question && j.status !== 'cancelled' && !(j.status === 'done' && !j.result?.answer))
+    .filter(
+      (j) =>
+        j.kind === 'ask' &&
+        j.input.question === question &&
+        sameFolders(j.input.folders, folders) &&
+        j.status !== 'cancelled' &&
+        !(j.status === 'done' && !j.result?.answer),
+    )
     .sort((a, b) => b.createdAt - a.createdAt)[0]
 }
 
@@ -28,10 +37,12 @@ function jobFor(jobs: Job[], question: string): Job | undefined {
  * you can leave the search and it keeps going (see Jobs), and coming back to
  * the same question shows the answer instead of asking again.
  */
-export function AskPanel({ question, onOpen }: { question: string; onOpen: (noteId: string) => void }) {
+export function AskPanel({ question, where = {}, onOpen }: { question: string; where?: { folders?: string[]; unlocked?: string[] }; onOpen: (noteId: string) => void }) {
+  const folders = where.folders ?? []
+  const input = { question, tzOffset: new Date().getTimezoneOffset(), folders, unlocked: where.unlocked ?? [] }
   const jobs = useJobs((s) => s.jobs)
   const loaded = useJobs((s) => s.loaded)
-  const job = jobFor(jobs, question)
+  const job = jobFor(jobs, question, folders)
   const [error, setError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState<string | null>(null)
 
@@ -39,13 +50,14 @@ export function AskPanel({ question, onOpen }: { question: string; onOpen: (note
     setError(null)
     if (!isSyncConfigured()) return setError('Asking your notes uses the AI agents on your ReconNotes server – connect one in Settings.')
     // wait for the job list, so an earlier ask of the same question is found
-    if (!loaded || job || submitted === question) return
-    setSubmitted(question)
-    submitJob({ kind: 'ask', title: question, input: { question, tzOffset: new Date().getTimezoneOffset() } })
+    const asking = `${question}|${folders.join(',')}`
+    if (!loaded || job || submitted === asking) return
+    setSubmitted(asking)
+    submitJob({ kind: 'ask', title: question, input })
       .then((j) => watchingJob(j.id, true))
       .catch((e) => setError((e as Error).message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [question, loaded, Boolean(job)])
+  }, [question, folders.join(','), loaded, Boolean(job)])
 
   // while it's on screen, no "finished" toast for it
   useEffect(() => {
@@ -74,7 +86,7 @@ export function AskPanel({ question, onOpen }: { question: string; onOpen: (note
         <button
           className="text"
           onClick={() =>
-            void submitJob({ kind: 'ask', title: question, input: { question, tzOffset: new Date().getTimezoneOffset() } })
+            void submitJob({ kind: 'ask', title: question, input })
               .then((j) => watchingJob(j.id, true))
               .catch((e) => setError((e as Error).message))
           }

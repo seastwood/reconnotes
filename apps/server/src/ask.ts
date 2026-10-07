@@ -4,6 +4,7 @@ import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { shortDate, timeRange, todayLabel } from './timeRange'
+import { noteFilter, type Scope } from './access'
 
 /**
  * Ask your notes
@@ -79,14 +80,17 @@ export async function askNotes(
   meaning?: MeaningIndex | null,
   /** the asker's clock: their time zone (Date#getTimezoneOffset) and now */
   when: { tzOffset?: number; now?: number } = {},
+  /** which folders: locked ones only if unlocked on the asking device; a chosen set of folders */
+  scope: Scope = {},
 ): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
   const meta = sync.noteMeta()
+  const allowed = noteFilter(sync, scope)
   const now = when.now ?? Date.now()
   const tz = when.tzOffset ?? 0
   const range = timeRange(question, now, tz)
   const usable = (id: string) => {
     const m = meta.get(id)
-    return m && !m.trashedAt && !m.template
+    return Boolean(m && !m.trashedAt && !m.template && allowed(id))
   }
   const words = question
     .toLowerCase()
@@ -94,8 +98,8 @@ export async function askNotes(
     .filter((w) => w.length >= 3 && !STOP.has(w))
   // notes that share words with the question, and notes about the same thing in
   // other words (search by meaning), merged by rank
-  const byWords = store.searchAny(words, 20).map((h) => h.noteId)
-  const byMeaning = meaning?.available ? (await meaning.search(question, 20)).map((h) => h.noteId) : []
+  const byWords = store.searchAny(words, 200).map((h) => h.noteId).filter(usable).slice(0, 20)
+  const byMeaning = meaning?.available ? (await meaning.search(question, 200)).map((h) => h.noteId).filter(usable).slice(0, 20) : []
   const score = new Map<string, number>()
   for (const list of [byWords, byMeaning]) list.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (10 + i)))
   let ids = [...score.entries()]
