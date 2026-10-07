@@ -119,5 +119,15 @@ export function translateStroke(s: Stroke, dx: number, dy: number, id: string): 
   return { ...s, id, pts }
 }
 
+/** Make a stroke bigger or smaller (k = 2 is twice the size) around the point ox, oy; its line scales too. */
+export function scaleStroke(s: Stroke, ox: number, oy: number, k: number, id: string): Stroke {
+  const pts = s.pts.slice()
+  for (let i = 0; i < pts.length; i += 3) {
+    pts[i] = round1(ox + (pts[i] - ox) * k)
+    pts[i + 1] = round1(oy + (pts[i + 1] - oy) * k)
+  }
+  return { ...s, id, pts, size: Math.max(0.5, Math.round(s.size * k * 10) / 10) }
+}
+
 export const round1 = (n: number) => Math.round(n * 10) / 10
 export const round2 = (n: number) => Math.round(n * 100) / 100

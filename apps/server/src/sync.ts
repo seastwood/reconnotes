@@ -242,15 +242,25 @@ export class SyncEngine {
   }
 
   /** Recognise handwriting in a drawing and store it as the drawing's transcript. */
-  async recogniseDrawing(noteId: string, drawingId: string, opts: { requireText?: boolean } = {}): Promise<{ text: string; agent: string | null; raw?: string }> {
+  async recogniseDrawing(
+    noteId: string,
+    drawingId: string,
+    opts: { requireText?: boolean; strokeIds?: string[] } = {},
+  ): Promise<{ text: string; agent: string | null; raw?: string }> {
     const doc = this.getDoc(noteDocName(noteId))
     if (!doc) throw new Error('note not found')
-    const strokes = getStrokes(doc, drawingId).toArray()
+    const only = opts.strokeIds?.length ? new Set(opts.strokeIds) : null
+    const strokes = getStrokes(doc, drawingId)
+      .toArray()
+      .filter((s) => !only || only.has(s.id))
+    if (only && !strokes.length) throw new Error('The selected writing has changed – select it again.')
     const hash = strokesHash(strokes)
     if (!renderDrawingPng(strokes) && opts.requireText) throw new EmptyDrawingError()
     // An explicit "Convert to text" also gets the clean-up pass; background
     // recognition (for search) doesn't need it.
     const { text, agent, raw } = await this.ai.transcribeDrawing(strokes, { requireText: opts.requireText, format: opts.requireText })
+    // part of a drawing (a lasso selection): not the drawing's transcript
+    if (only) return { text, agent, raw }
     this.store.setDrawingHash(noteId, drawingId, hash)
     await this.change(noteDocName(noteId), (d) => {
       const tr = getTranscripts(d)

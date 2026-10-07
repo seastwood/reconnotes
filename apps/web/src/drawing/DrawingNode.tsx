@@ -126,6 +126,22 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     return () => tr.unobserve(update)
   }, [ctx, drawingId])
 
+  // the lasso's "Convert to text": just the selected writing, its text below the drawing
+  useEffect(() => {
+    if (!ctx || !drawingId) return
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ drawingId: string; strokeIds: string[] }>).detail
+      if (d.drawingId !== drawingId) return
+      setBusy(true)
+      setError(null)
+      convertHandwriting(editor, ctx.noteId, drawingId, d.strokeIds)
+        .catch((err) => setError(errorText(err)))
+        .finally(() => setBusy(false))
+    }
+    window.addEventListener('reconnotes:convert-ink', on)
+    return () => window.removeEventListener('reconnotes:convert-ink', on)
+  }, [ctx, drawingId, editor])
+
   if (!ctx || !drawingId) return <NodeViewWrapper className="drawing-block">Drawing unavailable</NodeViewWrapper>
 
   const convert = async () => {

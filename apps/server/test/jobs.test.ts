@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { WORKSPACE_DOC, createNote, getContent, getNotes, getStrokes, noteDocName, readNote } from '@reconnotes/core'
+import { WORKSPACE_DOC, createNote, getContent, getNotes, getStrokes, getTranscripts, noteDocName, readNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 import type { Job } from '../src/jobs'
@@ -283,5 +283,17 @@ describe('jobs', () => {
     expect(jobs.some((j) => j.kind === 'clean' && j.status === 'done')).toBe(true)
     await api('POST', '/api/jobs/clear-finished')
     expect((await api('GET', '/api/jobs')).body.jobs).toEqual([])
+  })
+})
+
+describe('converting part of a drawing (lasso selection)', () => {
+  it('reads only the selected strokes, and not as the drawing’s transcript', async () => {
+    const before = getTranscripts(app.sync.getDoc(noteDocName(NOTE))!).get(DRAWING)
+    const gone = await waitFor((await api('POST', '/api/jobs', { kind: 'convert-drawing', noteId: NOTE, input: { drawingId: DRAWING, strokeIds: ['missing'] } })).body.job.id)
+    expect(gone.status).toBe('failed')
+    expect(gone.error).toMatch(/select it again/)
+    const part = await waitFor((await api('POST', '/api/jobs', { kind: 'convert-drawing', noteId: NOTE, input: { drawingId: DRAWING, strokeIds: ['s1'] } })).body.job.id)
+    expect(part.status).toBe('done')
+    expect(getTranscripts(app.sync.getDoc(noteDocName(NOTE))!).get(DRAWING)).toBe(before)
   })
 })

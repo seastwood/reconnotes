@@ -165,9 +165,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   }
 
   jobs.register('convert-drawing', async (job) => {
-    const { noteId, drawingId } = job.input as { noteId: string; drawingId: string }
+    const { noteId, drawingId, strokeIds } = job.input as { noteId: string; drawingId: string; strokeIds?: string[] }
     noteDoc(noteId)
-    const { text, agent, raw } = await sync.recogniseDrawing(noteId, drawingId, { requireText: true })
+    const { text, agent, raw } = await sync.recogniseDrawing(noteId, drawingId, { requireText: true, strokeIds: Array.isArray(strokeIds) ? strokeIds.map(String) : undefined })
     if (!text.trim()) throw new Error('No handwriting was recognised in this drawing.')
     await writeResult(sync, noteId, job.id, markGuesses(text, raw), { after: (el) => el.nodeName === 'drawing' && el.getAttribute('drawingId') === drawingId }, replaced(job))
     return { result: { noteId, text: preview(text) }, agent }

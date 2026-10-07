@@ -10,6 +10,7 @@ import {
   recognizeShape,
   round1,
   round2,
+  scaleStroke,
   strokeHit,
   strokeInLasso,
   strokeOpacity,
@@ -21,7 +22,8 @@ import {
   type Tool,
 } from '@reconnotes/core'
 import { DRAW_ORIGIN } from '../editor/undo'
-import { inkUi, toolState, useInkUi, useTools } from './toolState'
+import { inkUi, selectTool, toolState, useInkUi, useTools } from './toolState'
+import { inkClipboard } from './inkClipboard'
 import { settings } from '../lib/settings'
 import { WordHighlights } from '../editor/findHighlights'
 import { inRecording, playFrom, replay, strokeAt, useReplay } from '../lib/replay'
@@ -49,6 +51,8 @@ interface Props {
 
 const ERASER_RADIUS = 10
 const GROW_MARGIN = 80
+/** the selection's resize handle, in screen pixels */
+const HANDLE = 14
 const GROW_BY = 300
 const MAX_HEIGHT = 20000
 
@@ -71,7 +75,8 @@ function displayColor(c: string, dark: boolean) {
  *    instead (palm rejection) unless "draw with finger" is on.
  *  - Pressure, tilt-independent width and 240 Hz coalesced pencil samples are
  *    used for smooth, natural strokes.
- *  - Eraser (whole stroke or pixel), lasso select/move, and an undo history
+ *  - Eraser (whole stroke or pixel), lasso select / move / resize / copy /
+ *    paste / convert to text, and an undo history
  *    shared with the typed text.
  */
 export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, overlay, highlights }: Props) {
@@ -205,6 +210,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     | { kind: 'erase' }
     | { kind: 'lasso'; poly: number[] }
     | { kind: 'move'; startX: number; startY: number; dx: number; dy: number }
+    /** dragging the selection's corner: k = how much bigger (uniform, around its top-left) */
+    | { kind: 'scale'; k: number }
 
   const gesture = useRef<Gesture | null>(null)
   const activePointer = useRef<number | null>(null)
@@ -332,10 +339,14 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     if (sel) {
       const dx = g?.kind === 'move' ? g.dx : 0
       const dy = g?.kind === 'move' ? g.dy : 0
+      const k = g?.kind === 'scale' ? g.k : 1
+      const { x: bx, y: by } = sel.bounds
       for (const s of strokes.toArray()) {
         if (sel.ids.has(s.id)) {
           ctx.save()
-          ctx.translate(dx, dy)
+          ctx.translate(dx + bx, dy + by)
+          ctx.scale(k, k)
+          ctx.translate(-bx, -by)
           paintStroke(ctx, s, dark)
           ctx.restore()
         }
@@ -344,7 +355,19 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
       ctx.setLineDash([6, 6])
       ctx.lineWidth = 1.5 / scale
       ctx.strokeStyle = '#0a84ff'
-      ctx.strokeRect(sel.bounds.x + dx, sel.bounds.y + dy, sel.bounds.w, sel.bounds.h)
+      const w = sel.bounds.w * k
+      const h = sel.bounds.h * k
+      ctx.strokeRect(bx + dx, by + dy, w, h)
+      // the corner handle: drag it to make the selection bigger or smaller
+      if (editable) {
+        const r = HANDLE / scale
+        ctx.setLineDash([])
+        ctx.fillStyle = '#ffffff'
+        ctx.beginPath()
+        ctx.arc(bx + dx + w, by + dy + h, r / 2, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+      }
     }
     ctx.setLineDash([])
     ctx.globalAlpha = 1
@@ -388,7 +411,12 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
       eraseAt(x, y)
     } else if (t.tool === 'lasso') {
       const sel = selectionRef.current
-      if (sel && x >= sel.bounds.x && x <= sel.bounds.x + sel.bounds.w && y >= sel.bounds.y && y <= sel.bounds.y + sel.bounds.h) {
+      const grab = (HANDLE * 1.5) / scale
+      if (sel && Math.hypot(x - (sel.bounds.x + sel.bounds.w), y - (sel.bounds.y + sel.bounds.h)) <= grab) {
+        gesture.current = { kind: 'scale', k: 1 }
+        hiddenIds.current = new Set(sel.ids)
+        renderBase()
+      } else if (sel && x >= sel.bounds.x && x <= sel.bounds.x + sel.bounds.w && y >= sel.bounds.y && y <= sel.bounds.y + sel.bounds.h) {
         gesture.current = { kind: 'move', startX: x, startY: y, dx: 0, dy: 0 }
         hiddenIds.current = new Set(sel.ids)
         renderBase()
@@ -464,6 +492,9 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
       } else if (g.kind === 'move') {
         g.dx = x - g.startX
         g.dy = y - g.startY
+      } else if (g.kind === 'scale') {
+        const b = selectionRef.current?.bounds
+        if (b) g.k = Math.min(6, Math.max(0.15, ((x - b.x) / Math.max(b.w, 1) + (y - b.y) / Math.max(b.h, 1)) / 2))
       }
     }
     drawLive()
@@ -508,8 +539,62 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         setSelection({ ids: new Set(moved.map((s) => s.id)), bounds })
         growIfNeeded(bounds.y + bounds.h)
       } else renderBase()
+    } else if (g.kind === 'scale') {
+      const sel = selectionRef.current
+      hiddenIds.current = new Set()
+      if (sel && Math.abs(g.k - 1) > 0.01) {
+        const arr = strokes.toArray()
+        const out: Stroke[] = []
+        undoManager?.stopCapturing()
+        doc.transact(() => {
+          for (let i = arr.length - 1; i >= 0; i--) {
+            if (!sel.ids.has(arr[i].id)) continue
+            const s = scaleStroke(arr[i], sel.bounds.x, sel.bounds.y, g.k, newId())
+            out.push(s)
+            strokes.delete(i, 1)
+            strokes.insert(i, [s])
+          }
+        }, DRAW_ORIGIN)
+        const bounds = unionBounds(out)!
+        setSelection({ ids: new Set(out.map((s) => s.id)), bounds })
+        growIfNeeded(bounds.y + bounds.h)
+      } else renderBase()
     }
     drawLive()
+  }
+
+  const selectedStrokes = () => {
+    const sel = selectionRef.current
+    return sel ? strokes.toArray().filter((s) => sel.ids.has(s.id)) : []
+  }
+  const copySelection = () => {
+    const chosen = selectedStrokes()
+    if (chosen.length) inkClipboard.set({ strokes: chosen, from: drawingId })
+  }
+  /** Add strokes (a copy, offset by dx, dy) and select them. */
+  const addCopies = (from: Stroke[], dx: number, dy: number) => {
+    if (!from.length) return
+    const copies = from.map((s) => translateStroke(s, dx, dy, newId()))
+    undoManager?.stopCapturing()
+    doc.transact(() => strokes.push(copies), DRAW_ORIGIN)
+    const bounds = unionBounds(copies)!
+    if (toolState.get().tool !== 'lasso') selectTool('lasso')
+    setSelection({ ids: new Set(copies.map((s) => s.id)), bounds })
+    growIfNeeded(bounds.y + bounds.h)
+  }
+  const pasteInk = () => {
+    const { strokes: clip, from } = inkClipboard.get()
+    if (!clip.length) return
+    // into the drawing it came from: a little lower and to the right, so it's seen
+    const b = unionBounds(clip)!
+    const off = from === drawingId && strokes.toArray().some((s) => s.id === clip[0].id) ? 24 : 0
+    // keep it inside this drawing
+    const dx = Math.min(off, DRAWING_WIDTH - b.x - b.w)
+    addCopies(clip, Math.max(dx, -b.x), off)
+  }
+  const convertSelection = () => {
+    const sel = selectionRef.current
+    if (sel) window.dispatchEvent(new CustomEvent('reconnotes:convert-ink', { detail: { drawingId, strokeIds: [...sel.ids] } }))
   }
 
   const deleteSelection = () => {
@@ -547,9 +632,36 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
       if (id !== drawingId) return
       if (action === 'delete-selection') deleteSelection()
       if (action === 'recolor-selection') recolorSelection(color)
+      if (action === 'copy-selection') copySelection()
+      if (action === 'cut-selection') (copySelection(), deleteSelection())
+      if (action === 'duplicate-selection') addCopies(selectedStrokes(), 24, 24)
+      if (action === 'paste') pasteInk()
+      if (action === 'convert-selection') convertSelection()
     }
     window.addEventListener('reconnotes:ink-action', onAction)
     return () => window.removeEventListener('reconnotes:ink-action', onAction)
+  })
+
+  // keyboard (iPad keyboard, Mac): ⌘C ⌘X ⌘V ⌘D, Delete – while this drawing is open and nothing typed has focus
+  useEffect(() => {
+    if (!open || !editable) return
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement | null)?.closest?.('input, textarea')
+      if (typing) return
+      const cmd = e.metaKey || e.ctrlKey
+      const sel = selectionRef.current
+      const k = e.key.toLowerCase()
+      if (sel && cmd && k === 'c') copySelection()
+      else if (sel && cmd && k === 'x') (copySelection(), deleteSelection())
+      else if (sel && cmd && k === 'd') addCopies(selectedStrokes(), 24, 24)
+      else if (sel && !cmd && (e.key === 'Backspace' || e.key === 'Delete')) deleteSelection()
+      else if (cmd && k === 'v' && toolState.get().tool === 'lasso' && inkClipboard.get().strokes.length) pasteInk()
+      else return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   })
 
   useEffect(() => {

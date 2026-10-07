@@ -5,6 +5,7 @@ import {
   createFolder,
   createNote,
   eraseFromStroke,
+  scaleStroke,
   extractNote,
   getContent,
   getStrokes,
@@ -295,5 +296,16 @@ describe('shape snapping', () => {
     expect(recognizeShape(wobble([[0, 100], [300, 100], [270, 80], [300, 100], [270, 120]], 1))?.kind).toBe('arrow')
     // handwriting is left alone
     expect(recognizeShape(wobble([[0, 0], [20, 40], [40, 0], [60, 40], [80, 0], [100, 40], [120, 0], [140, 40], [160, 0]], 1))).toBe(null)
+  })
+})
+
+describe('scaleStroke', () => {
+  it('scales points around the anchor, and the line with them', () => {
+    const s = { id: 'a', tool: 'pen' as const, color: '#000', size: 3, pts: [10, 10, 0.5, 30, 20, 0.5] }
+    const big = scaleStroke(s, 10, 10, 2, 'b')
+    expect(big.pts).toEqual([10, 10, 0.5, 50, 30, 0.5])
+    expect(big.size).toBe(6)
+    expect(big.id).toBe('b')
+    expect(s.pts[3]).toBe(30)
   })
 })

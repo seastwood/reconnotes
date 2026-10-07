@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Eraser, Highlighter, Lasso, PenLine, Pencil, Redo2, Trash2, Undo2, X, Brush } from 'lucide-react'
+import { Eraser, Highlighter, Lasso, PenLine, Pencil, Redo2, Trash2, Undo2, X, Brush, Copy, Scissors, ClipboardPaste, CopyPlus, Type } from 'lucide-react'
+import { useInkClipboard } from './inkClipboard'
 import type { Tool } from '@reconnotes/core'
 import {
   HIGHLIGHT_PALETTE,
@@ -112,6 +113,8 @@ export function InkToolbar() {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [selCount, setSelCount] = useState(0)
+  const clipCount = useInkClipboard()
+  const lasso = useTools((s) => s.tool === 'lasso')
 
   useEffect(() => {
     const on = (e: Event) => {
@@ -145,12 +148,29 @@ export function InkToolbar() {
               <button key={c} className="swatch" style={{ background: c }} onClick={() => action('recolor-selection', { color: c })} />
             ))}
           </div>
+          <button onClick={() => action('copy-selection')} aria-label="Copy selection" title="Copy (⌘C) – paste it in this or another drawing">
+            <Copy size={19} />
+          </button>
+          <button onClick={() => action('cut-selection')} aria-label="Cut selection" title="Cut (⌘X)">
+            <Scissors size={19} />
+          </button>
+          <button onClick={() => action('duplicate-selection')} aria-label="Duplicate selection" title="Duplicate (⌘D)">
+            <CopyPlus size={19} />
+          </button>
+          <button onClick={() => action('convert-selection')} aria-label="Convert selection to text" title="Convert just this writing to text">
+            <Type size={19} />
+          </button>
           <button onClick={() => action('delete-selection')} aria-label="Delete selection" className="danger">
             <Trash2 size={20} />
           </button>
         </>
       ) : (
         <>
+          {lasso && clipCount > 0 && (
+            <button onClick={() => action('paste')} aria-label="Paste handwriting" title="Paste handwriting (⌘V)">
+              <ClipboardPaste size={19} />
+            </button>
+          )}
           <ColorRow />
           <SizeRow />
         </>

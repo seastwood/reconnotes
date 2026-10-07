@@ -78,21 +78,23 @@ const APPLE_TEXT = 'Apple text recognition (on this device)'
  * the server, which writes the text into the note itself – so it finishes
  * even if you leave the note. Either way it shows in the Jobs list.
  */
-export async function convertHandwriting(editor: Editor, noteId: string, drawingId: string) {
+export async function convertHandwriting(editor: Editor, noteId: string, drawingId: string, strokeIds?: string[]) {
+  // only some of the writing (lasso selection): the input says which strokes
+  const input = strokeIds?.length ? { drawingId, strokeIds } : { drawingId }
   const startedAt = Date.now()
   // your server's model first when you chose that; Apple's recognizer if it can't (offline, failed)
   let serverError: Error | null = null
   if (useDeviceOcr() && preferServerOcr()) {
     try {
       await flushNote(noteId)
-      await runJob({ kind: 'convert-drawing', noteId, input: { drawingId } })
+      await runJob({ kind: 'convert-drawing', noteId, input })
       return
     } catch (e) {
       if (e instanceof JobCancelled) throw e
       serverError = e as Error
     }
   }
-  const text = useDeviceOcr() ? await recognizeDrawingLocally(noteId, drawingId) : ''
+  const text = useDeviceOcr() ? await recognizeDrawingLocally(noteId, drawingId, { strokeIds }) : ''
   if (text) {
     let at: number | null = null
     editor.state.doc.descendants((node, pos) => {
@@ -105,14 +107,14 @@ export async function convertHandwriting(editor: Editor, noteId: string, drawing
     if (at === null) throw new Error('Drawing no longer exists')
     const id = localJobId()
     insertConverted(editor, at, text, id)
-    recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input: { drawingId }, result: { noteId, text: text.slice(0, 1500) }, agent: serverError ? `${APPLE_TEXT} – the server couldn’t: ${serverError.message.slice(0, 120)}` : APPLE_TEXT, startedAt })
+    recordJob({ id, kind: 'convert-drawing', title: noteTitle(noteId), noteId, input, result: { noteId, text: text.slice(0, 1500) }, agent: serverError ? `${APPLE_TEXT} – the server couldn’t: ${serverError.message.slice(0, 120)}` : APPLE_TEXT, startedAt })
     return
   }
   if (serverError) throw serverError
   // web app, Apple recognition switched off, or it found nothing: the server's agents
   if (useDeviceOcr() && !isSyncConfigured()) throw new Error('No handwriting was recognised in this drawing.')
   await flushNote(noteId)
-  await runJob({ kind: 'convert-drawing', noteId, input: { drawingId } })
+  await runJob({ kind: 'convert-drawing', noteId, input })
 }
 
 /** Apple's recognizer only (the fallback when the server couldn't read a drawing). */
@@ -181,16 +183,21 @@ export async function convertAllHandwriting(editor: Editor, noteId: string): Pro
  * result is also stored as the drawing's transcript (synced, searchable) and
  * marked so the server doesn't redo it. Returns '' if nothing was found.
  */
-export async function recognizeDrawingLocally(noteId: string, drawingId: string, opts: { cleanup?: boolean } = {}): Promise<string> {
+export async function recognizeDrawingLocally(noteId: string, drawingId: string, opts: { cleanup?: boolean; strokeIds?: string[] } = {}): Promise<string> {
   const { handle, close } = sync.open(noteDocName(noteId))
   try {
     await handle.loaded
-    const strokes = getStrokes(handle.doc, drawingId).toArray()
+    const only = opts.strokeIds?.length ? new Set(opts.strokeIds) : null
+    const strokes = getStrokes(handle.doc, drawingId)
+      .toArray()
+      .filter((s) => !only || only.has(s.id))
     let text = (await recognizeDrawingOnDevice(strokes)).trim()
     if (!text) return ''
     if ((opts.cleanup ?? true) && settings.get().deviceOcrCleanup && isSyncConfigured()) {
       text = await tidyOnServer(text, renderStrokesForRecognition(strokes), 'image/png')
     }
+    // part of the drawing: not the drawing's transcript (search keeps reading all of it)
+    if (only) return text
     handle.doc.transact(() => {
       const tr = getTranscripts(handle.doc)
       tr.set(drawingId, text)
