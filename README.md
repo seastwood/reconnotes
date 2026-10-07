@@ -29,8 +29,16 @@ It's built for one person's daily notes, and anyone can run it.
   undo history.
 - **Search everything.** One search covers typed text, handwriting (recognised automatically),
   text in images, screenshots and charts, PDFs, and audio transcripts. Search works offline too.
-- **AI.** *Convert to text* turns a drawing into clean typed text. *Compile* turns a whole note,
-  handwriting and typing, into a tidy new document.
+- **AI.** *Convert to text* turns a drawing (or just the writing you lasso) into clean typed text.
+  *Compile* turns a whole note, handwriting and typing, into a tidy new document. *Ask your notes*
+  (or *Ask about this note* in the ⋯ menu) answers from your own notes as it's written, with
+  sources and follow-up questions. Under each note, *Related notes* are found by meaning.
+- **Meetings.** *New meeting* (the people icon above the note list) makes a meeting note and starts
+  recording; when you stop, you get a summary, decisions and action items with due dates.
+- **Every day and week.** *Today* opens your daily note, with yesterday's unfinished to-dos carried
+  over. *Tasks* lists every checklist item in every note. Your dated to-dos can appear in Apple or
+  Google Calendar (*Settings › Calendar & weekly digest*), and a weekly digest note sums up the
+  week.
 - **Jobs.** Every AI request and processing step is a job in one queue on the server (one at a
   time, so a local GPU isn't overloaded). *Jobs* in the sidebar shows what's running and for how
   long, which model is working on it, what's waiting and what finished – with links to the
@@ -44,7 +52,9 @@ It's built for one person's daily notes, and anyone can run it.
   webhook. Tapping one opens the note (or the answer, for *Ask your notes*).
 - **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
   *Settings › Backups* shows what changed since each backup and restores one note or everything;
-  each note's current state goes into its version history first.
+  each note's current state goes into its version history first. An *offsite copy* of each backup
+  can go to another disk or S3-compatible storage (Backblaze B2, Wasabi, R2…), encrypted if you
+  like.
 - **Never locked in.** *Settings › Export & import*: every note as Markdown in its folders, with
   pictures, files and drawings, in one zip. It imports Markdown or zips back, including from
   Obsidian, Bear and Notion, with folders, checklists, tables and `[[links]]`.
@@ -53,7 +63,8 @@ It's built for one person's daily notes, and anyone can run it.
 - **Quick and versatile.** ⌘K runs any command or opens any note. You can select several notes, or
   swipe a note for Move, Pin or Delete, and Undo is offered after each. Notes can have tables,
   repeating due dates (`!every monday`) and a calendar. Folders can be *kept offline*, and a single
-  note can be shared as a **read-only link**.
+  note can be shared as a **read-only link**. Saved searches can be pinned to the sidebar as
+  smart folders, and folders can have a password (opened with Face ID in the app).
 - **iPhone and iPad extras.** Scan documents with the camera, and add notes from the Home Screen or
   Lock Screen widget or from Siri and Shortcuts. Tap your handwriting to hear what was being said
   while you wrote it.
@@ -142,7 +153,8 @@ On your home LAN, plain `http://192.168.x.x:8787` also works.
 
 ```bash
 node apps/server/dist/index.js serve      # default
-node apps/server/dist/index.js backup     # write a backup now
+node apps/server/dist/index.js backup     # write a backup now (and its offsite copy)
+RECON_BACKUP_PASSPHRASE=… node apps/server/dist/index.js decrypt <folder>  # open an encrypted offsite copy
 node apps/server/dist/index.js reindex    # rebuild the search index
 node apps/server/dist/index.js gen-token  # print a random token
 ```
