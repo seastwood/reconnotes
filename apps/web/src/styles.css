@@ -3827,8 +3827,9 @@ a.button {
   color: var(--accent-text);
 }
 .note-snippet mark {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-  color: inherit;
-  border-radius: 3px;
-  padding: 0 1px;
+  /* coloured text, not a background: a preview cut off with "…" mid-word
+     would otherwise highlight the "…" too */
+  background: none;
+  color: var(--accent-text);
+  font-weight: 600;
 }
