@@ -3833,3 +3833,70 @@ a.button {
   color: var(--accent-text);
   font-weight: 600;
 }
+
+/* where a search matched (handwriting, picture, recording, file) */
+.note-where {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.where-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--accent-text);
+  transform: translateY(1px);
+}
+
+/* saved & recent searches under the empty search box */
+.search-suggestions {
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.search-suggestions .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.search-suggestions .section-label .text {
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.suggestion:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+.suggestion-icon {
+  flex: none;
+  color: var(--accent-text);
+}
+.suggestion-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-tips {
+  margin: 8px 4px 2px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.search-tips code {
+  font-size: 11px;
+  padding: 1px 5px;
+  margin-right: 2px;
+  border-radius: 5px;
+  background: rgba(127, 127, 127, 0.14);
+  white-space: nowrap;
+}

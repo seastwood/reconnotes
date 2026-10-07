@@ -426,8 +426,9 @@ export function App() {
           search={search}
           onSearch={setSearch}
           activeNoteId={nav.noteId}
-          onOpenResult={(id) => {
-            openNote(id, search)
+          onOpenResult={(id, findText) => {
+            // the note opens with its find bar on the match
+            openNote(id, findText ?? search)
             if (overlay && !sidebarInline) setOverlay(false)
           }}
         />

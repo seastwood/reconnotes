@@ -43,6 +43,14 @@ export interface SearchResult {
   meaning?: boolean
   /** in a folder the search names ("FRC wiring" → the FRC folder) */
   inFolder?: boolean
+  /** where it matched: typed text, handwriting, a picture, a recording, a file – and the line */
+  where?: { kind: 'text' | 'handwriting' | 'picture' | 'recording' | 'file'; line: string }
+}
+
+/** A note's searchable text on this device (typed text, handwriting, transcripts…), if indexed here. */
+export function localText(noteId: string): string | null {
+  const doc = index.getStoredFields(noteId) as { title?: string; text?: string } | undefined
+  return doc ? `${doc.title ?? ''}\n${doc.text ?? ''}` : null
 }
 
 function snippetFor(text: string, terms: string[]): string {
@@ -61,14 +69,17 @@ function snippetFor(text: string, terms: string[]): string {
 export interface SearchWhere {
   folders?: string[]
   unlocked?: string[]
+  /** has:handwriting / picture / … – the server knows what's in each note */
+  has?: string[]
 }
 
 export async function searchNotes(query: string, where: SearchWhere = {}): Promise<SearchResult[]> {
   await ready
   const q = query.trim()
-  if (!q) return []
+  const has = where.has ?? []
+  if (!q && !has.length) return []
   // all the words; if nothing has them all, any of them
-  let found = index.search(q)
+  let found = q ? index.search(q) : []
   if (!found.length && q.includes(' ')) found = index.search(q, { combineWith: 'OR' })
   const local: SearchResult[] = found.map((r) => ({
     noteId: r.id as string,
@@ -76,6 +87,7 @@ export async function searchNotes(query: string, where: SearchWhere = {}): Promi
     snippet: snippetFor(r.text as string, r.terms),
   }))
   if (!isSyncConfigured() || !navigator.onLine) return local
+  let all = local
 
   try {
     const ctl = new AbortController()
@@ -83,18 +95,25 @@ export async function searchNotes(query: string, where: SearchWhere = {}): Promi
     const params = new URLSearchParams({ q })
     if (where.folders?.length) params.set('folders', where.folders.join(','))
     if (where.unlocked?.length) params.set('unlocked', where.unlocked.join(','))
+    if (has.length) params.set('has', has.join(','))
     const res = await fetch(apiUrl(`/api/search?${params}`), { headers: authHeaders(), signal: ctl.signal })
     clearTimeout(t)
     if (!res.ok) return local
-    const { hits } = (await res.json()) as { hits: { noteId: string; title: string; snippet: string; trashed: boolean; meaning?: boolean }[] }
-    const seen = new Set(local.map((r) => r.noteId))
+    const { hits } = (await res.json()) as { hits: { noteId: string; title: string; snippet: string; trashed: boolean; meaning?: boolean; where?: SearchResult['where'] }[] }
+    const server = new Map(hits.map((h) => [h.noteId, h]))
+    // has: only the server knows what's in each note
+    if (has.length) all = local.filter((r) => server.has(r.noteId))
+    const seen = new Set(all.map((r) => r.noteId))
+    // the server says where each matched
+    for (const r of all) if (server.get(r.noteId)?.where) r.where = server.get(r.noteId)!.where
     for (const h of hits) {
       if (!seen.has(h.noteId) && !h.trashed) {
-        local.push({ noteId: h.noteId, title: h.title, snippet: h.snippet.replace(/\[\[|\]\]/g, ''), meaning: h.meaning })
+        all.push({ noteId: h.noteId, title: h.title, snippet: h.snippet.replace(/\[\[|\]\]/g, ''), meaning: h.meaning, where: h.where })
       }
     }
     // word matches first, then notes related by meaning
-    local.sort((a, b) => Number(Boolean(a.meaning)) - Number(Boolean(b.meaning)))
+    all.sort((a, b) => Number(Boolean(a.meaning)) - Number(Boolean(b.meaning)))
+    return all
   } catch {
     /* offline or slow – local results are enough */
   }

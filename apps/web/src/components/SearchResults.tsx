@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUpDown, Folder, ListFilter, Lock, Sparkles, X } from 'lucide-react'
+import { ArrowUpDown, History, Star, AudioLines, File as FileIcon, Folder, Image as ImageIcon, ListFilter, Lock, PenLine, Sparkles, X } from 'lucide-react'
 import { buildTree, effectiveFolderId, folderPaths, foldersNamedIn, type FolderData, type NoteData, type TreeNode } from '@reconnotes/core'
-import { searchNotes, type SearchResult } from '../lib/search'
+import { localText, searchNotes, type SearchResult } from '../lib/search'
+import { parseQuery, textPasses, type ParsedQuery } from '../lib/searchQuery'
+import { addRecentSearch, clearRecentSearches, findSaved, removeSavedSearch, saveSearch, useRecentSearches, useSavedSearches } from '../lib/searchHistory'
 import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useFolderAccess } from '../lib/folderLock'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
@@ -42,13 +44,17 @@ const DEFAULTS: Options = { sort: 'best', edited: 'any', tag: '', related: true 
 const KEY = 'reconnotes.searchOptions'
 
 /** Notes matching the search text (and "Ask your notes" for it), updated as you type. */
-export function SearchResults({ query, activeNoteId, onOpen }: { query: string; activeNoteId: string | null; onOpen: (noteId: string) => void }) {
+export function SearchResults({ query, activeNoteId, onOpen }: { query: string; activeNoteId: string | null; onOpen: (noteId: string, findText?: string) => void }) {
   const ws = useWorkspace()
   const q = query.trim()
   const scope = useSearchScope()
   const access = useFolderAccess()
   // results depend on where you search, and which locked folders are open here
   const key = `${q}|${scope.join(',')}|${access.unlockedIds.join(',')}`
+  // "quoted phrases", -words, #tags, folder:, before:/after:, has:
+  const parsed = useMemo(() => parseQuery(q), [q])
+  useSavedSearches() // re-render when saved searches change
+  const saved = q ? findSaved(q, scope) : undefined
   const [found, setFound] = useState<SearchResult[] | null>(() => cache.get(key)?.results ?? null)
   const [asked, setAsked] = useState(() => askedFor.has(q))
   const [opts, setOptsState] = useState<Options>(() => ({ ...DEFAULTS, ...safeLocalGet<Partial<Options>>(KEY, {}) }))
@@ -72,7 +78,17 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     let alive = true
     const t = setTimeout(
       () =>
-        void folderAwareSearch(q, { folders: scope, unlocked: access.unlockedIds }, wsRef.current.folders, wsRef.current.notes).then((r) => {
+        void (
+          parsed.text || parsed.has.length
+            ? folderAwareSearch(parsed.text, { folders: scope, unlocked: access.unlockedIds, has: parsed.has }, wsRef.current.folders, wsRef.current.notes)
+            : // only filters (#tag, folder:, after:…): every note, the filters pick
+              Promise.resolve(
+                wsRef.current.notes
+                  .filter((n) => !n.trashedAt && !n.template)
+                  .sort((a, b) => b.updatedAt - a.updatedAt)
+                  .map((n): SearchResult => ({ noteId: n.id, title: n.title, snippet: n.snippet })),
+              )
+        ).then((r) => {
           cache.delete(key) // most recent last, for trimming
           cache.set(key, { results: r, at: Date.now() })
           while (cache.size > 30) cache.delete(cache.keys().next().value!)
@@ -89,7 +105,14 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
   const paths = useMemo(() => folderPaths(ws.folders), [ws.folders])
-  const marks = useMemo(() => highlightWords(q), [q])
+  const marks = useMemo(() => highlightWords(parsed.text), [parsed.text])
+  /** folder: / in: in the search – the folders it names, with their subfolders */
+  const syntaxFolders = useMemo(() => {
+    if (!parsed.folders.length) return null
+    const ids = new Set<string>()
+    for (const name of parsed.folders) for (const id of foldersNamedIn(name, ws.folders).ids) ids.add(id)
+    return ids
+  }, [parsed.folders, ws.folders])
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   /** the chosen folders and everything inside them ('none': notes in no folder) */
   const inFolder = useMemo(() => {
@@ -119,7 +142,13 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
       if (!opts.related && r.meaning) return false
       if (since && n.updatedAt < since) return false
       if (opts.tag && !n.tags.includes(opts.tag)) return false
+      // the search's own filters
+      if (parsed.tags.length && !parsed.tags.every((t) => n.tags.includes(t))) return false
+      if (parsed.after !== null && n.updatedAt < parsed.after) return false
+      if (parsed.before !== null && n.updatedAt >= parsed.before) return false
+      if ((parsed.phrases.length || parsed.exclude.length) && !textPasses(localText(n.id) ?? `${n.title}\n${r.snippet}\n${r.where?.line ?? ''}`, parsed)) return false
       const f = effectiveFolderId(n, liveFolders)
+      if (syntaxFolders) return Boolean(f && syntaxFolders.has(f) && (!inFolder || inFolder.has(f)))
       // searching chosen folders: only those; otherwise not the folders left out of search
       if (inFolder) return inFolder.has(f ?? 'none')
       return !(f && access.rules.get(f)?.noSearch)
@@ -136,7 +165,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     else if (opts.sort === 'created') by((n) => n.createdAt, true)
     else if (opts.sort === 'title') by((n) => n.title || 'Untitled', false)
     return list
-  }, [found, ws.notes, opts, liveFolders, inFolder, access])
+  }, [found, ws.notes, opts, liveFolders, inFolder, access, parsed, syntaxFolders])
 
   const filtered = Boolean(scope.length || opts.edited !== 'any' || opts.tag || !opts.related)
   const pick = (patch: Partial<Options>) => {
@@ -149,6 +178,14 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
       {q && (
         <div className="search-tools">
           <span className="search-count">{results ? `${results.length} ${results.length === 1 ? 'note' : 'notes'}` : 'Searching…'}</span>
+          <button
+            className={`text${saved ? ' on' : ''}`}
+            onClick={() => (saved ? removeSavedSearch(saved.id) : saveSearch(q, scope))}
+            title={saved ? 'Saved – tap to remove' : 'Save this search (shows under the search box on all your devices)'}
+            aria-label={saved ? 'Remove saved search' : 'Save search'}
+          >
+            <Star size={14} fill={saved ? 'currentColor' : 'none'} />
+          </button>
           <button ref={sortBtn} className={`text${opts.sort !== 'best' ? ' on' : ''}`} onClick={() => setMenu(menu === 'sort' ? null : 'sort')}>
             <ArrowUpDown size={14} /> {SORTS[opts.sort]}
           </button>
@@ -223,11 +260,12 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
         </div>
       )}
       <ul className="notes search-results">
-        {q.length > 2 && !asked && (
+        {parsed.text.length > 2 && !asked && (
           <li
             className="note-row ask-row"
             onClick={() => {
               askedFor.add(q)
+              addRecentSearch(q)
               setAsked(true)
             }}
           >
@@ -239,7 +277,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
         )}
         {asked && <AskPanel question={q} where={{ folders: scope, unlocked: access.unlockedIds }} onOpen={onOpen} />}
         {results?.map((r) => (
-          <li key={r.noteId} className={`note-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
+          <li key={r.noteId} className={`note-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => (addRecentSearch(q), onOpen(r.noteId, findTermFor(r, parsed)))}>
             <div className="note-title">
               {r.title || 'Untitled'}
               {r.meaning && (
@@ -257,9 +295,15 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
                 </div>
               ) : null
             })()}
-            <div className="note-snippet">
-              <Highlighted text={r.snippet} words={marks} />
-            </div>
+            {r.where && r.where.kind !== 'text' ? (
+              <div className="note-snippet note-where">
+                <WhereIcon kind={r.where.kind} /> <Highlighted text={r.where.line} words={marks} />
+              </div>
+            ) : (
+              <div className="note-snippet">
+                <Highlighted text={r.where?.line ?? r.snippet} words={marks} />
+              </div>
+            )}
           </li>
         ))}
         {results && !results.length && (
@@ -364,4 +408,88 @@ async function folderAwareSearch(q: string, where: Parameters<typeof searchNotes
   for (const r of rest) if (inNamed(r.noteId)) add({ ...r, inFolder: true })
   for (const r of main) add(r)
   return out
+}
+
+const WHERE_LABEL = { handwriting: 'In handwriting', picture: 'In a picture', recording: 'In a recording', file: 'In a file', text: 'In the text' }
+function WhereIcon({ kind }: { kind: NonNullable<SearchResult['where']>['kind'] }) {
+  const Icon = kind === 'handwriting' ? PenLine : kind === 'picture' ? ImageIcon : kind === 'recording' ? AudioLines : FileIcon
+  return (
+    <span className="where-icon" title={WHERE_LABEL[kind]} aria-label={WHERE_LABEL[kind]}>
+      <Icon size={12} />
+    </span>
+  )
+}
+
+/**
+ * What the note's find bar should look for when a result is opened: a phrase
+ * from the search, else the whole search if the note has it, else its
+ * longest word the note has – so it lands on the match.
+ */
+function findTermFor(r: SearchResult, p: ParsedQuery): string | undefined {
+  if (p.phrases.length) return p.phrases[0]
+  const text = (localText(r.noteId) ?? `${r.title}\n${r.snippet}\n${r.where?.line ?? ''}`).toLowerCase()
+  const free = p.text.trim()
+  if (!free) return undefined
+  if (text.includes(free.toLowerCase())) return free
+  const words = (free.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).filter((w) => w.length >= 3).sort((a, b) => b.length - a.length)
+  // whole words first, then the start of a word ("wiring" for "wir")
+  return words.find((w) => text.includes(w.toLowerCase())) ?? words[0]
+}
+
+/** Under the empty search box: saved and recent searches, and what you can type. */
+export function SearchSuggestions({ onPick }: { onPick: (query: string, folders?: string[]) => void }) {
+  const recent = useRecentSearches()
+  const savedList = useSavedSearches()
+  const ws = useWorkspace()
+  const name = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
+  // tapping shouldn't blur the search box first
+  const keep = (e: React.PointerEvent) => e.preventDefault()
+  return (
+    <div className="search-suggestions" onPointerDown={keep}>
+      {savedList.length > 0 && (
+        <>
+          <div className="section-label">Saved searches</div>
+          {savedList.map((s) => (
+            <div key={s.id} className="suggestion" onClick={() => onPick(s.query, s.folders)}>
+              <Star size={14} fill="currentColor" className="suggestion-icon" />
+              <span className="suggestion-text">
+                {s.query}
+                {s.folders.length > 0 && <span className="muted"> · in {s.folders.map(name).join(', ')}</span>}
+              </span>
+              <button
+                className="icon"
+                aria-label={`Remove saved search ${s.query}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeSavedSearch(s.id)
+                }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+      {recent.length > 0 && (
+        <>
+          <div className="section-label">
+            Recent
+            <button className="text" onClick={clearRecentSearches}>
+              Clear
+            </button>
+          </div>
+          {recent.map((q) => (
+            <div key={q} className="suggestion" onClick={() => onPick(q)}>
+              <History size={14} className="suggestion-icon" />
+              <span className="suggestion-text">{q}</span>
+            </div>
+          ))}
+        </>
+      )}
+      <p className="search-tips">
+        Try <code>"exact words"</code> <code>-leave out</code> <code>#tag</code> <code>folder:FRC</code> <code>after:10/1</code> <code>before:today</code>{' '}
+        <code>has:handwriting</code> <code>has:picture</code> <code>has:recording</code> <code>has:checklist</code>
+      </p>
+    </div>
+  )
 }

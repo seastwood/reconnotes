@@ -36,6 +36,7 @@ import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup
 import { log } from './log'
 import { aiHealth } from './health'
 import { noteFilter, scopeFromQuery } from './access'
+import { notePieces, whereMatched } from './notePieces'
 import type { Samples } from './bench'
 
 export const VERSION = '0.1.0'
@@ -91,6 +92,8 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 }
 
 const ID = '([a-z0-9]{8,64})'
+const HAS_LABELS = { handwriting: 1, picture: 1, recording: 1, file: 1, checklist: 1, link: 1, table: 1 }
+const HAS_KINDS = new Set(Object.keys(HAS_LABELS))
 
 export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs, notifier: Notifier, samples?: Samples) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
@@ -182,18 +185,51 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const meta = sync.noteMeta()
     // not locked folders (unless unlocked on the asking device), not folders left out of search
     const allowed = noteFilter(sync, scopeFromQuery(url.searchParams))
-    const words = store.search(q, 500).filter((h) => meta.has(h.noteId) && allowed(h.noteId)).slice(0, 50)
-    // notes about the same thing in other words (when an embedding model is set up)
-    const seen = new Set(words.map((h) => h.noteId))
-    const related = sync.meaning?.available && q.trim().length >= 3 ? await sync.meaning.search(q, 200) : []
-    const hits = [
-      ...words,
-      ...related
-        .filter((h) => meta.has(h.noteId) && !seen.has(h.noteId) && allowed(h.noteId))
-        .slice(0, 12)
-        .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, snippet: h.passage.replace(/\s+/g, ' ').slice(0, 180), rank: -h.score, meaning: true })),
-    ].map((h) => ({ ...h, trashed: Boolean(meta.get(h.noteId)!.trashedAt) }))
-    json(res, 200, { hits })
+    // has:handwriting / picture / recording / file / checklist / link / table
+    const has = (url.searchParams.get('has') ?? '').split(',').filter((k) => HAS_KINDS.has(k)) as (keyof typeof HAS_LABELS)[]
+    const pieces = new Map<string, ReturnType<typeof notePieces> | null>()
+    const piecesOf = (id: string) => {
+      if (!pieces.has(id)) {
+        const doc = sync.getDoc(noteDocName(id))
+        pieces.set(id, doc ? notePieces(doc, store) : null)
+      }
+      return pieces.get(id)!
+    }
+    const hasAll = (id: string) => !has.length || has.every((k) => piecesOf(id)?.has.has(k))
+    type Hit = { noteId: string; title: string; snippet: string; rank: number; meaning?: boolean; where?: { kind: string; line: string } }
+    let hits: Hit[]
+    if (!q.trim() && has.length) {
+      // only has: – every note that has it, newest first
+      hits = [...meta.values()]
+        .filter((m) => !m.trashedAt && !m.template && allowed(m.id) && hasAll(m.id))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 100)
+        .map((m) => ({ noteId: m.id, title: m.title, snippet: m.snippet, rank: 0 }))
+    } else {
+      const words: Hit[] = store
+        .search(q, 500)
+        .filter((h) => meta.has(h.noteId) && allowed(h.noteId) && hasAll(h.noteId))
+        .slice(0, 50)
+      // notes about the same thing in other words (when an embedding model is set up)
+      const seen = new Set(words.map((h) => h.noteId))
+      const related = sync.meaning?.available && q.trim().length >= 3 ? await sync.meaning.search(q, 200) : []
+      hits = [
+        ...words,
+        ...related
+          .filter((h) => meta.has(h.noteId) && !seen.has(h.noteId) && allowed(h.noteId) && hasAll(h.noteId))
+          .slice(0, 12)
+          .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, snippet: h.passage.replace(/\s+/g, ' ').slice(0, 180), rank: -h.score, meaning: true })),
+      ]
+      // where each matched: typed text, handwriting, a picture, a recording, a file
+      const terms = q.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []
+      for (const h of hits.slice(0, 50)) {
+        if (h.meaning) continue
+        const p = piecesOf(h.noteId)
+        const w = p && whereMatched(p.pieces, terms)
+        if (w) h.where = w
+      }
+    }
+    json(res, 200, { hits: hits.map((h) => ({ ...h, trashed: Boolean(meta.get(h.noteId)!.trashedAt) })) })
   })
 
   // --- AI -----------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
-import { SearchResults } from './SearchResults'
+import { SearchResults, SearchSuggestions } from './SearchResults'
 import {
   ChevronDown,
   ChevronRight,
@@ -71,7 +71,7 @@ interface Props {
   search: string
   onSearch: (query: string) => void
   /** a search result was tapped */
-  onOpenResult: (noteId: string) => void
+  onOpenResult: (noteId: string, findText?: string) => void
   activeNoteId: string | null
 }
 
@@ -109,6 +109,8 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
   const searchBox = useRef<HTMLTextAreaElement>(null)
+  /** the search box has the cursor: show saved and recent searches under it */
+  const [searchFocus, setSearchFocus] = useState(false)
   // the box grows with a long search (a question), up to a few lines
   useLayoutEffect(() => {
     const el = searchBox.current
@@ -376,6 +378,8 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             value={search}
             autoCapitalize="off"
             onChange={(e) => onSearch(e.target.value.replace(/\n/g, ' '))}
+            onFocus={() => setSearchFocus(true)}
+            onBlur={() => setSearchFocus(false)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') (onSearch(''), searchBox.current?.blur())
               // Return searches (puts the keyboard away) instead of adding a line
@@ -400,6 +404,14 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           </button>
         )}
       </div>
+      {!search.trim() && searchFocus && (
+        <SearchSuggestions
+          onPick={(q, folders) => {
+            if (folders) setSearchFolders(folders)
+            onSearch(q)
+          }}
+        />
+      )}
       {search.trim() ? (
         <div className="folders sidebar-results">
           <SearchResults query={search} activeNoteId={activeNoteId} onOpen={onOpenResult} />
