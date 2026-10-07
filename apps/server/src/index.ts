@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { loadConfig } from './config'
@@ -42,7 +43,8 @@ async function main() {
   }
 
   if (cmd === 'https-setup') {
-    const config = loadConfig()
+    // the server's own data folder, so the certificate lands where the server looks (no variable to type)
+    const config = loadConfig({ ...process.env, RECON_DATA_DIR: process.env.RECON_DATA_DIR || serviceDataDir() })
     const r = setupHttps(config, process.argv.length > 3 ? process.argv.slice(3) : defaultNames())
     const ip = suggestedAddress(r.names)
     console.log(`Certificate made for: ${r.names.join(', ')} (valid 825 days)
@@ -97,6 +99,19 @@ ${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+}
+
+/** RECON_DATA_DIR as the installed service sets it (systemd unit or env file), else /var/lib/reconnotes when it exists. */
+function serviceDataDir(): string | undefined {
+  for (const f of ['/etc/systemd/system/reconnotes.service', '/etc/reconnotes.env']) {
+    try {
+      const m = /^\s*(?:Environment=)?["']?RECON_DATA_DIR=([^\s"']+)/m.exec(fs.readFileSync(f, 'utf8'))
+      if (m) return m[1]
+    } catch {
+      /* not installed that way */
+    }
+  }
+  return fs.existsSync('/var/lib/reconnotes') ? '/var/lib/reconnotes' : undefined
 }
 
 main().catch((err) => {

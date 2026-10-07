@@ -156,7 +156,7 @@ so the server can make its own: a private certificate authority (CA) that only y
 
 ```bash
 cd /opt/reconnotes/apps/server
-sudo RECON_DATA_DIR=/var/lib/reconnotes node dist/index.js https-setup   # every address of this machine, WireGuard's first
+sudo node dist/index.js https-setup   # finds the server's data folder; every address of this machine, WireGuard's first
 #   or name them:  … https-setup 10.8.0.1 notes.home
 sudo systemctl restart reconnotes      # now also https on port 8443
 ```
