@@ -29,7 +29,7 @@ beforeAll(async () => {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'vision'] }))
     if (req.url === '/api/version') return res.end(JSON.stringify({ version: '0.9.0' }))
-    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [{ name: 'reader:latest', size: 6 * 1048576 * 1000, size_vram: 5 * 1048576 * 1000 }] }))
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [{ name: 'reader:latest', size: 5 * 1048576 * 1000, size_vram: 5 * 1048576 * 1000 }] }))
     // "reader" misreads, "good" reads it right
     const content = json.model === 'good' ? 'Order safety glasses' : 'Order safty glases'
     res.end(JSON.stringify({ message: { role: 'assistant', content }, done_reason: 'stop', eval_count: 5 }))
