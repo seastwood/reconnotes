@@ -164,8 +164,8 @@ sudo systemctl restart reconnotes      # now also https on port 8443
 Then, once per device:
 
 1. Open `http://<address>:8787/ca.crt` in Safari and allow the download.
-2. *Settings › Profile Downloaded › Install*, then *Settings › General › About › Certificate
-   Trust Settings* › turn on **ReconNotes private CA**. (Mac: open it in Keychain Access ›
+2. *Settings › General › VPN & Device Management ›* **ReconNotes private CA** *› Install*, then
+   *Settings › General › About › Certificate Trust Settings* › turn on **ReconNotes private CA**. (Mac: open it in Keychain Access ›
    Trust › Always Trust.)
 3. In ReconNotes › Settings, change the server address to `https://<address>:8443`.
 

@@ -54,8 +54,9 @@ ${r.newCa ? 'A new private certificate authority was made' : 'Signed by your exi
 Next:
 1. Restart the server (sudo systemctl restart reconnotes). It serves https on port ${config.httpsPort}.
 2. On each device, install the authority once – open http://${ip}:${config.port}/ca.crt
-   iPhone / iPad: Allow → Settings › Profile Downloaded › Install, then
-   Settings › General › About › Certificate Trust Settings › turn on “ReconNotes private CA”.
+   iPhone / iPad: Allow → Settings › General › VPN & Device Management ›
+   ReconNotes private CA › Install, then Settings › General › About ›
+   Certificate Trust Settings › turn on “ReconNotes private CA”.
    Mac: open it in Keychain Access, double-click it › Trust › Always Trust.
 3. In ReconNotes › Settings, change the server address to https://${ip}:${config.httpsPort}
 ${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}`)
