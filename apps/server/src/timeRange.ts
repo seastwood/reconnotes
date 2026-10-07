@@ -198,3 +198,34 @@ export function dueWindow(question: string, now = Date.now(), tzOffset = 0): { f
 export function startOfToday(now = Date.now(), tzOffset = 0): number {
   return localTools(now, tzOffset).today
 }
+
+/**
+ * The day a to-do is due by, from how it was said: "by Friday", "tomorrow",
+ * "next week", "end of the month", "10/22", "Oct 22" – as YYYY-MM-DD, or null.
+ */
+export function dueDateIn(text: string, now = Date.now(), tzOffset = 0): string | null {
+  const q = text.toLowerCase()
+  const { today, weekday, local, dateAt } = localTools(now, tzOffset)
+  const iso = (t: number) => {
+    const d = new Date(t - tzOffset * 60_000)
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  }
+  const written = findDates(text, now, tzOffset)[0]
+  if (written) return iso(written.at)
+  if (/\btoday\b|\btonight\b|\bend of (the )?day\b|\beod\b/.test(q)) return iso(today)
+  if (/\btomorrow\b/.test(q)) return iso(today + DAY)
+  const wd = q.match(/\b(?:by|on|this|next|before|until)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/)
+  if (wd) {
+    const target = WEEKDAYS.indexOf(wd[1])
+    let ahead = (target - weekday + 7) % 7 || 7
+    if (/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/.test(q) && ahead < 7) ahead += 7
+    return iso(today + ahead * DAY)
+  }
+  if (/\b(by |before )?(the )?end of (the )?week\b/.test(q)) return iso(today + ((5 - weekday + 7) % 7) * DAY)
+  if (/\bnext week\b/.test(q)) return iso(today + ((8 - weekday) % 7 || 7) * DAY)
+  if (/\b(by |before )?(the )?end of (the )?month\b/.test(q)) {
+    const d = local(now)
+    return iso(dateAt(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - DAY)
+  }
+  return null
+}

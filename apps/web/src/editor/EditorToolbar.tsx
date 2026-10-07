@@ -486,6 +486,7 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
   useEffect(() => {
     const t = setTimeout(() => {
       if (takeQuickAction(noteId, 'record')) void startRef.current()
+      else if (takeQuickAction(noteId, 'meeting')) void startRecording(noteId, { meeting: true }).catch((e) => onError((e as Error).message))
     }, 400)
     return () => clearTimeout(t)
   }, [noteId])

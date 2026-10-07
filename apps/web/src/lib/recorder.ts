@@ -33,6 +33,8 @@ const native = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable
 export interface Recording {
   noteId: string
   startedAt: number
+  /** meeting mode: meeting notes are written when it stops */
+  meeting?: boolean
 }
 export const recorder = new Store<{ active: Recording | null; saving: boolean }>({ active: null, saving: false })
 export const useRecording = () => useStore(recorder, (s) => s.active)
@@ -58,12 +60,12 @@ export class RecordingError extends Error {
   }
 }
 
-export async function startRecording(noteId: string): Promise<void> {
+export async function startRecording(noteId: string, opts: { meeting?: boolean } = {}): Promise<void> {
   if (recorder.get().active) return
   if (native()) {
     try {
       const { startedAt } = await Native.start()
-      recorder.set({ active: { noteId, startedAt } })
+      recorder.set({ active: { noteId, startedAt, meeting: opts.meeting } })
     } catch (e) {
       const err = e as Error & { code?: string }
       throw new RecordingError(err.message, err.code === 'denied' ? 'denied' : 'other')
@@ -100,7 +102,7 @@ export async function startRecording(noteId: string): Promise<void> {
     /* no wake lock: the screen may lock (then it's saved) */
   }
   web = { r, stream, chunks, wake }
-  recorder.set({ active: { noteId, startedAt: Date.now() } })
+  recorder.set({ active: { noteId, startedAt: Date.now(), meeting: opts.meeting } })
 }
 
 /** Stop and add the recording to its note. `cutOff`: the device stopped it, not you. */
@@ -139,7 +141,8 @@ export async function stopRecording(cutOff = false): Promise<void> {
     if (insert) insert(attrs)
     else await appendToNote(active.noteId, attrs)
     const mins = Math.max(1, Math.round((endedAt - startedAt) / 60_000))
-    if (cutOff) showToast(`Recording stopped when the microphone was cut off – the first ${mins} min ${mins === 1 ? 'is' : 'are'} saved`)
+    if (active.meeting) void import('./meeting').then((m) => m.writeMeetingNotes(active.noteId, attachmentId, blob))
+    else if (cutOff) showToast(`Recording stopped when the microphone was cut off – the first ${mins} min ${mins === 1 ? 'is' : 'are'} saved`)
     else if (!insert) showToast('Recording saved in its note')
   } catch (e) {
     showToast(`The recording couldn’t be saved: ${(e as Error).message}`)

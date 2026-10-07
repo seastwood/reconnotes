@@ -22,6 +22,7 @@ beforeAll(async () => {
     let body = ''
     for await (const c of req) body += c
     res.writeHead(200, { 'Content-Type': 'application/json' })
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }))
     if (req.url === '/api/tags') return res.end(JSON.stringify({ models: [{ name: 'strike-ocr:latest' }, { name: 'qwen3:8b' }] }))
     if (req.url === '/api/show') {
       const { model } = JSON.parse(body)

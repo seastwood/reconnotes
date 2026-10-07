@@ -77,9 +77,9 @@ export function parseLink(raw: string): LinkAction | 'connected' | null {
 }
 
 /** Something to do in a note once it's open (record / scan), set by a link. */
-export const quickAction = new Store<{ noteId: string | null; action: 'record' | 'scan' | null }>({ noteId: null, action: null })
+export const quickAction = new Store<{ noteId: string | null; action: 'record' | 'scan' | 'meeting' | null }>({ noteId: null, action: null })
 
-export function takeQuickAction(noteId: string, action: 'record' | 'scan'): boolean {
+export function takeQuickAction(noteId: string, action: 'record' | 'scan' | 'meeting'): boolean {
   const q = quickAction.get()
   if (q.noteId !== noteId || q.action !== action) return false
   quickAction.set({ noteId: null, action: null })

@@ -240,6 +240,39 @@ export class Ai {
     return { text: /^NONE\.?$/i.test(result) ? '' : result, agent: agent.name }
   }
 
+  /**
+   * Meeting notes from a recording's transcript and what was written during
+   * the meeting: a summary, decisions, and the action items as a checklist.
+   */
+  async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string }> {
+    const prompt = `Write meeting notes from the transcript of a meeting and the notes taken during it. Today is ${today}.
+
+Use exactly this Markdown layout, and only what was said or written (no invented names, dates or tasks):
+
+## Summary
+- 2 to 6 short bullet points: what was discussed and concluded
+
+## Decisions
+- each decision made (leave this section out if there were none)
+
+## Action items
+- [ ] who – what to do (by when, in the words used: "by Friday", "next week", "10/22")
+
+If nobody is named for a task, leave out "who –". If there are no action items, write "- [ ] No action items" under that heading.
+
+Notes taken during the meeting:
+${notes.slice(0, 8000) || '(none)'}
+
+Transcript of the recording:
+${transcript.slice(0, 16000) || '(no speech recognised)'}`
+    const { result, agent } = await this.agents.run('compile', async (backend) => {
+      const raw = await backend.generate([{ text: withExtra(prompt) }], 1500)
+      return collapseRepeats(unwrapModelOutput(raw)).trim()
+    })
+    log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript → ${result.length})`)
+    return { text: result, agent: agent.name }
+  }
+
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
   async ask(prompt: string): Promise<{ text: string; agent: string }> {
     const { result, agent } = await this.agents.run('compile', async (backend) => {

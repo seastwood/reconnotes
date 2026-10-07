@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -20,6 +20,7 @@ import {
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate } from '../lib/templates'
+import { startMeeting } from '../lib/meeting'
 import { DueList } from './DueList'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
@@ -280,6 +281,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                   }}
                 />
               </>
+            )}
+            {view.kind !== 'templates' && (
+              <button className="icon" onClick={() => void startMeeting(view.kind === 'folder' ? view.folderId : null).then(onOpen)} aria-label="New meeting" title="New meeting – records, then writes a summary, decisions and action items">
+                <Users size={19} />
+              </button>
             )}
             <button className="icon primary" onClick={newNote} aria-label={view.kind === 'templates' ? 'New template' : 'New note'} title={view.kind === 'templates' ? 'New template' : 'New note'}>
               <SquarePen size={20} />

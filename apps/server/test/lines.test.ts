@@ -34,6 +34,7 @@ beforeAll(async () => {
   ollama = http.createServer(async (req, res) => {
     let body = ''
     for await (const c of req) body += c
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }))
     const j = JSON.parse(body)
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'vision'] }))
     const m = j.messages?.[0] ?? { content: j.prompt, images: j.images }

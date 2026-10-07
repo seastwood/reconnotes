@@ -21,6 +21,7 @@ beforeAll(async () => {
   ollama = http.createServer(async (req, res) => {
     let body = ''
     for await (const c of req) body += c
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }))
     const json = JSON.parse(body)
     requests.push(json)
     res.writeHead(200, { 'Content-Type': 'application/json' })

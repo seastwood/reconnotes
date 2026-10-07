@@ -17,7 +17,7 @@ import { deviceCanDecode, speechToParagraphs, transcribeOnDevice, useDeviceSpeec
  */
 
 /** Make sure the server has our latest edits to this note before asking about it. */
-async function flushNote(noteId: string) {
+export async function flushNote(noteId: string) {
   const { handle, close } = sync.open(noteDocName(noteId))
   try {
     const start = Date.now()

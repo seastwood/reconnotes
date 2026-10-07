@@ -26,6 +26,7 @@ import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
 import type { AiTask } from './agents'
 import { guessedWords } from './vocabulary'
+import { dueDateIn, todayLabel } from './timeRange'
 import { scopeFromInput } from './access'
 import type { AskTurn } from './ask'
 import { markdownToNodes, type Ctx } from './importNotes'
@@ -51,6 +52,7 @@ export const JOB_KINDS: Record<string, string> = {
   'extract-text': 'Read file for search',
   embed: 'Index for search by meaning',
   benchmark: 'Test models on your handwriting',
+  meeting: 'Meeting notes',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -136,6 +138,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   tidy: 'format',
   embed: 'embed',
   benchmark: 'handwriting',
+  meeting: 'audio',
 }
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
@@ -362,6 +365,47 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const results = await runBench(ai, samples, reportProgress)
     const best = results[0]
     return { result: { results, text: best ? `Best: ${best.name} (${best.model}) – ${best.accuracy}% right, ${best.avgSeconds}s each` : '' } }
+  })
+
+  /**
+   * After a meeting recording: its transcript (made on the device, or here)
+   * and the notes written meanwhile become a summary, decisions and action
+   * items – a checklist with due dates where a day was said.
+   */
+  jobs.register('meeting', async (job) => {
+    const { noteId, attachmentId } = job.input as { noteId: string; attachmentId: string }
+    const doc = noteDoc(noteId)
+    const att = store.getAttachment(String(attachmentId))
+    let transcript = String(job.input.transcript ?? '').trim()
+    let agent: string | null = null
+    if (!transcript && att?.text_status === 'done' && att.text?.trim()) transcript = att.text
+    if (!transcript) {
+      if (!att || !store.hasBlob(att.id)) throw new Error("The recording hasn't reached the server yet – try again once it has synced.")
+      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
+      transcript = r.text
+      agent = r.agent
+    }
+    // the recording becomes searchable by what was said
+    if (att && transcript && !(att.text_status === 'done' && att.text?.trim())) {
+      store.setAttachmentText(att.id, transcript, 'done')
+      sync.reindexNotesFor(att.id)
+    }
+    const tzOffset = Number(job.input.tzOffset) || 0
+    const notes = noteToMarkdown(doc).replace(/^#+ Meeting.*$/m, '').trim()
+    if (!transcript.trim() && !notes.replace(/\W/g, '')) throw new Error('No speech was recognised in this recording, and nothing was written.')
+    const r = await ai.meetingNotes(notes, transcript, todayLabel(Date.now(), tzOffset))
+    // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
+    const md = r.text
+      .split('\n')
+      .map((l) => {
+        const m = l.match(/^(\s*[-*]\s+\[ \]\s+)(.*)$/)
+        if (!m || /!\d{4}-\d{2}-\d{2}/.test(m[2]) || /no action items/i.test(m[2])) return l
+        const due = dueDateIn(m[2], Date.now(), tzOffset)
+        return due ? `${m[1]}${m[2]} !${due}` : l
+      })
+      .join('\n')
+    await writeResult(sync, noteId, job.id, md, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
+    return { result: { noteId, text: preview(md) }, agent: agent ? `${agent} + ${r.agent}` : r.agent }
   })
 
   jobs.register('extract-text', async (job) => {
