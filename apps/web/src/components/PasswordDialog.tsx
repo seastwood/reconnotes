@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Loader2, Lock, ScanFace } from 'lucide-react'
 import { removeFolderPassword, setFolderPassword, unlockFolder } from '../lib/folderLock'
 import { biometricName, forgetBiometricPassword, hasBiometricPassword, readBiometricPassword, saveBiometricPassword } from '../lib/biometric'
@@ -21,6 +22,7 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
   const [useBio, setUseBio] = useState(true)
   const saved = hasBiometricPassword(folderId)
   const tried = useRef(false)
+  const liftedAt = useRef(0)
   useEffect(() => {
     void biometricName().then(setBio)
   }, [])
@@ -70,7 +72,8 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
     }
   }
 
-  return (
+  // over the whole app (not inside the sidebar it's opened from, where it can be covered or clipped)
+  return createPortal(
     <div className="dialog-backdrop" onClick={onClose}>
       <form
         className="dialog password-dialog"
@@ -96,7 +99,7 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
         {needsCurrent && (
           <label>
             {mode === 'change' ? 'Current password' : 'Password'}
-            <input type="password" autoFocus value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+            <input type="password" autoFocus enterKeyHint="go" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
           </label>
         )}
         {needsNew && (
@@ -107,7 +110,7 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
             </label>
             <label>
               Again
-              <input type="password" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
+              <input type="password" enterKeyHint="go" value={again} onChange={(e) => setAgain(e.target.value)} autoComplete="new-password" />
             </label>
           </>
         )}
@@ -126,11 +129,26 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={busy}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy}
+            // iOS sometimes drops the tap that also puts the keyboard away: act when the finger lifts
+            onPointerUp={(e) => {
+              if (e.pointerType === 'mouse' || busy) return
+              e.preventDefault()
+              liftedAt.current = Date.now()
+              void submit()
+            }}
+            onClick={(e) => {
+              if (Date.now() - liftedAt.current < 800) e.preventDefault()
+            }}
+          >
             {busy && <Loader2 size={15} className="spin" />} {mode === 'unlock' ? 'Unlock' : mode === 'remove' ? 'Remove password' : mode === 'set' ? 'Lock folder' : 'Change'}
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   )
 }

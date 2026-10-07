@@ -1342,12 +1342,27 @@ button.link {
 /* --------------------------------------------------------------- dialogs */
 .dialog-backdrop {
   position: fixed;
-  inset: 0;
+  /* the visible area: with the keyboard open, above it (not centred behind it) */
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100%);
   background: rgba(0, 0, 0, 0.35);
   display: grid;
   place-items: center;
   z-index: 100;
   padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.keyboard-open .dialog-backdrop {
+  /* little room: from the top, so the field and its buttons are both in view */
+  place-items: start center;
+  padding-bottom: 8px;
+}
+.keyboard-open .dialog-backdrop .dialog {
+  max-height: calc(var(--app-height, 100vh) - 32px);
 }
 .dialog {
   background: var(--paper);
