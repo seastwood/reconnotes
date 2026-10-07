@@ -142,6 +142,22 @@ function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: s
       </>
     )
   if (result) return <AskAnswer result={result} onOpen={onOpen} />
+  // being written: show it as it grows (with only the sources cited so far)
+  const partial = job?.status === 'running' ? (job.partial as unknown as AskResult | null | undefined) : null
+  if (partial?.answer) {
+    const cited = new Set([...partial.answer.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))
+    return (
+      <div className="ask-writing">
+        <AskAnswer result={{ answer: partial.answer, sources: partial.sources.filter((s) => cited.has(s.n)) }} onOpen={onOpen} />
+        <p className="hint">
+          <Loader2 size={14} className="spin" /> Writing…{' '}
+          <button className="text" onClick={() => void cancelJob(job!.id)}>
+            <XCircle size={13} /> Stop
+          </button>
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="ask-wait">
       <p className="hint">

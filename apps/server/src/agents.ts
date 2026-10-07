@@ -6,6 +6,7 @@ import { log } from './log'
 import { jobSignal, reportAgent, timeoutSignal } from './jobs'
 import { parseWyomingUri, toPcm, wyomingDescribe, wyomingTranscribe } from './wyoming'
 import { spawn } from 'node:child_process'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 /**
  * AI agents
@@ -117,6 +118,15 @@ export interface AiSettings {
   autoAudio: boolean
 }
 
+/**
+ * Set while a caller wants the reply as it's written (e.g. "Ask your notes"):
+ * the backends that can stream call it with the answer so far.
+ */
+const streamTo = new AsyncLocalStorage<(soFar: string) => void>()
+export function streaming<T>(onText: (soFar: string) => void, run: () => Promise<T>): Promise<T> {
+  return streamTo.run(onText, run)
+}
+
 export type Part = { text: string } | { image: Buffer; mime: string } | { pdf: Buffer }
 
 export interface Backend {
@@ -180,6 +190,11 @@ class AnthropicBackend implements Backend {
       ...(ADAPTIVE.test(model) ? { thinking: { type: 'adaptive' as const }, output_config: { effort: this.agent.effort } } : {}),
       ...(FALLBACK_OK.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
     }, { signal: jobSignal() })
+    const onText = streamTo.getStore()
+    if (onText) {
+      let soFar = ''
+      stream.on('text', (t) => onText((soFar += t)))
+    }
     const msg = await stream.finalMessage()
     recordSpend(this.agent.id, claudeCost(msg.model || model, msg.usage))
     if (msg.stop_reason === 'refusal') throw new Error('the model declined to process this content')
@@ -504,14 +519,52 @@ class OllamaBackend implements Backend {
   }
 
   private async chat(text: string, images: string[], maxTokens: number, numCtx: number, think?: boolean): Promise<OllamaReply> {
-    const body = await this.post('/api/chat', {
+    const req = {
       ...(think === undefined ? {} : { think }),
       options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
       keep_alive: KEEP_ALIVE,
       messages: [{ role: 'user', content: text, ...(images.length ? { images } : {}) }],
-    })
+    }
+    const onText = streamTo.getStore()
+    if (onText) return this.streamChat(req, onText)
+    const body = await this.post('/api/chat', req)
     const m = (body.message ?? {}) as { content?: string; thinking?: string }
     return { content: m.content ?? '', thinking: m.thinking ?? '', doneReason: String(body.done_reason ?? ''), evalCount: Number(body.eval_count ?? 0) }
+  }
+
+  /** /api/chat, a line of JSON per few words; the answer so far goes to `onText` (without any reasoning). */
+  private async streamChat(req: object, onText: (soFar: string) => void): Promise<OllamaReply> {
+    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: timeoutSignal(this.agent.timeoutSec * 1000),
+      body: JSON.stringify({ model: this.agent.model, stream: true, ...req }),
+    })
+    if (!res.ok || !res.body) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    const out: OllamaReply = { content: '', thinking: '', doneReason: '', evalCount: 0 }
+    const decoder = new TextDecoder()
+    let buf = ''
+    const line = (l: string) => {
+      if (!l.trim()) return
+      const j = JSON.parse(l) as { message?: { content?: string; thinking?: string }; done_reason?: string; eval_count?: number; error?: string }
+      if (j.error) throw new Error(`Ollama: ${j.error}`)
+      if (j.message?.content) {
+        out.content += j.message.content
+        const answer = answerOf(out.content)
+        if (answer) onText(answer)
+      }
+      if (j.message?.thinking) out.thinking += j.message.thinking
+      if (j.done_reason) out.doneReason = j.done_reason
+      if (j.eval_count) out.evalCount = j.eval_count
+    }
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      buf += decoder.decode(chunk, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      lines.forEach(line)
+    }
+    line(buf)
+    return out
   }
 
   private async plainGenerate(text: string, images: string[], maxTokens: number, numCtx: number): Promise<OllamaReply> {

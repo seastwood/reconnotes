@@ -43,6 +43,8 @@ export interface Job {
   agent: string | null
   /** what it's doing right now, e.g. "Trying Ollama (qwen2.5vl)" */
   progress: string | null
+  /** the result so far, while it's being written (e.g. an answer appearing word by word) */
+  partial: Record<string, unknown> | null
   /** extra instructions for the AI, given when redoing a job */
   prompt: string | null
   /** the job this one redoes */
@@ -83,6 +85,7 @@ interface JobContext {
   signal: AbortSignal
   setAgent(name: string): void
   setProgress(text: string): void
+  setPartial(value: Record<string, unknown>): void
 }
 const context = new AsyncLocalStorage<JobContext>()
 
@@ -119,6 +122,11 @@ export function isRedo(): boolean {
 /** Tell the job list which AI agent is being tried. */
 export function reportAgent(name: string) {
   context.getStore()?.setAgent(name)
+}
+
+/** Show the result so far while it's being written (the app shows it as it grows). */
+export function reportPartial(value: Record<string, unknown>) {
+  context.getStore()?.setPartial(value)
 }
 
 /** Say how far the running job has got ("sample 2 of 5"). */
@@ -171,6 +179,8 @@ export class Jobs {
   private running: { id: string; controller: AbortController } | null = null
   private progress = new Map<string, string>()
   private liveAgent = new Map<string, string>()
+  private partial = new Map<string, Record<string, unknown>>()
+  private partialTimer: NodeJS.Timeout | null = null
   private waiters: (() => void)[] = []
   private pumping = false
   /**
@@ -558,6 +568,14 @@ export class Jobs {
         this.progress.set(job.id, text)
         this.changed()
       },
+      setPartial: (value) => {
+        this.partial.set(job.id, value)
+        // every app following the jobs fetches them again on a change: at most a few times a second
+        this.partialTimer ??= setTimeout(() => {
+          this.partialTimer = null
+          this.changed()
+        }, 400)
+      },
     }
     // cancelling stops waiting at once, even if the AI call can't be interrupted
     const aborted = new Promise<never>((_, reject) => {
@@ -610,6 +628,7 @@ export class Jobs {
 
   private cleanupRun(id: string) {
     this.progress.delete(id)
+    this.partial.delete(id)
     this.liveAgent.delete(id)
   }
 
@@ -681,6 +700,7 @@ export class Jobs {
       error: r.error,
       agent: r.status === 'running' ? (this.liveAgent.get(r.id) ?? r.agent) : r.agent,
       progress: r.status === 'running' ? (this.progress.get(r.id) ?? null) : null,
+      partial: r.status === 'running' ? (this.partial.get(r.id) ?? null) : null,
       prompt: r.prompt,
       parentId: r.parent_id,
       replacedBy: r.replaced_by,

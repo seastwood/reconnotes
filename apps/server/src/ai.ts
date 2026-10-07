@@ -4,7 +4,7 @@ import type { Store } from './store'
 import { Vocabulary } from './vocabulary'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, NoTextError, readingMode, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, readingMode, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
@@ -274,9 +274,10 @@ ${transcript.slice(0, 16000) || '(no speech recognised)'}`
   }
 
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
-  async ask(prompt: string): Promise<{ text: string; agent: string }> {
+  async ask(prompt: string, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
     const { result, agent } = await this.agents.run('compile', async (backend) => {
-      const raw = await backend.generate([{ text: withExtra(prompt) }], 1000)
+      const gen = () => backend.generate([{ text: withExtra(prompt) }], 1000)
+      const raw = await (onText ? streaming(onText, gen) : gen())
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
     log.info(`answered a question via "${agent.name}" (${prompt.length} chars of notes → ${result.length})`)

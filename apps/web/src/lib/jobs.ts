@@ -31,6 +31,8 @@ export interface Job {
   error: string | null
   agent: string | null
   progress: string | null
+  /** the result so far, while it's being written (an answer appearing as the AI writes it) */
+  partial?: Record<string, unknown> | null
   prompt: string | null
   parentId: string | null
   replacedBy: string | null

@@ -5,6 +5,7 @@ import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { noteFilter, type Scope } from './access'
+import { reportPartial } from './jobs'
 
 /**
  * Ask your notes
@@ -213,7 +214,8 @@ ${
 
 Notes:${context}`
 
-  const { text: raw, agent } = await ai.ask(prompt)
+  // the answer as it's written: the app shows it growing, with its citations linked
+  const { text: raw, agent } = await ai.ask(prompt, (soFar) => reportPartial({ answer: listify(soFar), sources }))
   let text = listify(raw)
   // the list items of the note sections the question is about, that the answer left out
   const missing = missingItems(text, sectionItems(texts, ownWords))
