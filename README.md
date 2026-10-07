@@ -149,6 +149,32 @@ Use HTTPS anywhere outside your home network. The easiest options:
 
 On your home LAN, plain `http://192.168.x.x:8787` also works.
 
+#### HTTPS over WireGuard (or any private address)
+
+Public certificate authorities won't issue certificates for private addresses like `10.8.0.1`,
+so the server can make its own: a private certificate authority (CA) that only your devices trust.
+
+```bash
+cd /opt/reconnotes/apps/server
+sudo RECON_DATA_DIR=/var/lib/reconnotes node dist/index.js https-setup   # every address of this machine, WireGuard's first
+#   or name them:  … https-setup 10.8.0.1 notes.home
+sudo systemctl restart reconnotes      # now also https on port 8443
+```
+
+Then, once per device:
+
+1. Open `http://<address>:8787/ca.crt` in Safari and allow the download.
+2. *Settings › Profile Downloaded › Install*, then *Settings › General › About › Certificate
+   Trust Settings* › turn on **ReconNotes private CA**. (Mac: open it in Keychain Access ›
+   Trust › Always Trust.)
+3. In ReconNotes › Settings, change the server address to `https://<address>:8443`.
+
+The certificate lasts 825 days (Apple's limit). Run `https-setup` again to renew it or add an
+address; devices keep trusting the same CA. Keep `/var/lib/reconnotes/tls/ca.key` private: whoever
+has it can make certificates your devices trust. Have a domain of your own? Point a name at the
+WireGuard address and get a Let's Encrypt certificate by DNS challenge (e.g. Caddy with a DNS
+plugin), then set `RECON_TLS_CERT` / `RECON_TLS_KEY` – nothing to install on devices.
+
 ### Server commands
 
 ```bash
@@ -157,6 +183,7 @@ node apps/server/dist/index.js backup     # write a backup now (and its offsite 
 RECON_BACKUP_PASSPHRASE=… node apps/server/dist/index.js decrypt <folder>  # open an encrypted offsite copy
 node apps/server/dist/index.js reindex    # rebuild the search index
 node apps/server/dist/index.js gen-token  # print a random token
+node apps/server/dist/index.js https-setup [address …]  # https for a private / WireGuard address
 ```
 
 ## AI agents

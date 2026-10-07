@@ -28,6 +28,6 @@ RUN npm pkg delete devDependencies "dependencies.@reconnotes/core" scripts \
 COPY --from=build /src/apps/server/dist ./dist
 COPY --from=build /src/apps/web/dist ./web
 VOLUME /data
-EXPOSE 8787
+EXPOSE 8787 8443
 USER node
 CMD ["node", "dist/index.js", "serve"]

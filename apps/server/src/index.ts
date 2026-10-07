@@ -1,8 +1,10 @@
 import crypto from 'node:crypto'
+import path from 'node:path'
 import { loadConfig } from './config'
 import { createApp } from './app'
 import { runBackup } from './backup'
 import { decryptPath } from './offsite'
+import { defaultNames, loadTls, setupHttps, suggestedAddress } from './tls'
 import { VERSION } from './http'
 import { log } from './log'
 
@@ -17,6 +19,9 @@ Commands:
               (the passphrase from RECON_BACKUP_PASSPHRASE)
   reindex     Rebuild the search index and exit
   gen-token   Print a new random access token
+  https-setup Make a certificate so devices can use https:// (also on a
+              WireGuard / private address): https-setup [address or name …]
+              (by default every address of this machine)
 
 Configuration is read from environment variables; see .env.example.
 `
@@ -34,6 +39,25 @@ async function main() {
       process.exit(1)
     }
     return void console.log(`${decryptPath(target, pass)} file(s) decrypted`)
+  }
+
+  if (cmd === 'https-setup') {
+    const config = loadConfig()
+    const r = setupHttps(config, process.argv.length > 3 ? process.argv.slice(3) : defaultNames())
+    const ip = suggestedAddress(r.names)
+    console.log(`Certificate made for: ${r.names.join(', ')} (valid 825 days)
+Saved in ${path.dirname(r.cert)}
+${r.newCa ? 'A new private certificate authority was made' : 'Signed by your existing private certificate authority'}: ${r.ca}
+
+Next:
+1. Restart the server (sudo systemctl restart reconnotes). It serves https on port ${config.httpsPort}.
+2. On each device, install the authority once – open http://${ip}:${config.port}/ca.crt
+   iPhone / iPad: Allow → Settings › Profile Downloaded › Install, then
+   Settings › General › About › Certificate Trust Settings › turn on “ReconNotes private CA”.
+   Mac: open it in Keychain Access, double-click it › Trust › Always Trust.
+3. In ReconNotes › Settings, change the server address to https://${ip}:${config.httpsPort}
+${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}`)
+    return
   }
 
   const config = loadConfig()
@@ -54,6 +78,10 @@ async function main() {
     process.exit(1)
   }
 
+  if (app.secure) {
+    app.secure.listen(config.httpsPort, config.host, () => log.info(`HTTPS on https://${config.host}:${config.httpsPort} (certificate: ${loadTls(config)?.file})`))
+    app.secure.on('error', (err) => log.error(`HTTPS couldn't start on port ${config.httpsPort}: ${err.message}`))
+  }
   app.server.listen(config.port, config.host, () => {
     log.info(`ReconNotes server ${VERSION} listening on http://${config.host}:${config.port}`)
     log.info(`data: ${config.dataDir}  backups: ${config.backupDir}`)

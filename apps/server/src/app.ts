@@ -1,4 +1,5 @@
 import type http from 'node:http'
+import type https from 'node:https'
 import type { Config } from './config'
 import { Store } from './store'
 import { SyncEngine } from './sync'
@@ -24,6 +25,8 @@ export interface App {
   devices: Devices
   jobs: Jobs
   server: http.Server
+  /** HTTPS, when there's a certificate */
+  secure: https.Server | null
   close(): Promise<void>
 }
 
@@ -42,7 +45,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   registerJobHandlers(config, store, sync, ai, jobs, samples)
   const notifier = new Notifier(store, new Apns(store))
   jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
-  const { server, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
+  const { server, secure, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   sync.embedMissing()
@@ -56,11 +59,13 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     devices,
     jobs,
     server,
+    secure,
     async close() {
       stopBackups()
       stopDigest()
       await sync.destroy()
       const closed = new Promise<void>((resolve) => server.close(() => resolve()))
+      secure?.close()
       closeSockets()
       await closed
       store.close()

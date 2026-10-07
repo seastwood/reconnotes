@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
+import https from 'node:https'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
 import { noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
@@ -39,6 +40,7 @@ import { log } from './log'
 import { aiHealth } from './health'
 import { noteFilter, scopeFromQuery } from './access'
 import { Tasks } from './tasks'
+import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
 import { notePieces, whereMatched } from './notePieces'
 import type { Samples } from './bench'
@@ -985,7 +987,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     fs.createReadStream(file).pipe(res)
   }
 
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     // The web app may be served from a different origin (dev server, iOS app).
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -997,6 +999,13 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     }
     try {
       if (url.pathname.startsWith('/s/') && (req.method === 'GET' || req.method === 'HEAD') && servePublic(res, url)) return
+      // the private CA's certificate, to install on a device so it trusts this server's HTTPS (public: it's a certificate, not a secret)
+      if (url.pathname === '/ca.crt' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const ca = caCertificate(config)
+        if (!ca) throw new HttpError(404, 'No private CA yet – run: reconnotes-server https-setup')
+        res.writeHead(200, { 'Content-Type': 'application/x-x509-ca-cert', 'Content-Disposition': 'attachment; filename="ReconNotes-CA.crt"' })
+        return res.end(req.method === 'HEAD' ? undefined : ca)
+      }
       // the calendar feed: calendar apps can't send a key, so the address itself is the secret
       const feed = /^\/calendar\/([A-Za-z0-9_-]{16,64})\.ics$/.exec(url.pathname)
       if (feed && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -1032,11 +1041,15 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       if (!res.headersSent) json(res, status, { error: (err as Error).message })
       else res.end()
     }
-  })
+  }
+  const server = http.createServer(handle)
+  // HTTPS too, when there's a certificate (`reconnotes-server https-setup`, see tls.ts)
+  const tls = loadTls(config)
+  const secure = tls ? https.createServer({ cert: tls.cert, key: tls.key }, handle) : null
 
   // --- WebSocket sync -------------------------------------------------------
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 })
-  server.on('upgrade', (req, socket, head) => {
+  const onUpgrade = (req: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname !== '/sync') return socket.destroy()
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -1048,14 +1061,17 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       ws.on('close', (code, reason) => client.handleClose({ code, reason: reason.toString() } as CloseEvent))
       ws.on('error', (err) => log.warn('websocket error', err.message))
     })
-  })
+  }
+  server.on('upgrade', onUpgrade)
+  secure?.on('upgrade', onUpgrade)
 
   /** Drop every connection so shutdown is immediate; devices reconnect later. */
   const closeSockets = () => {
     for (const ws of wss.clients) ws.terminate()
     wss.close()
     server.closeAllConnections()
+    secure?.closeAllConnections()
   }
 
-  return { server, closeSockets }
+  return { server, secure, closeSockets }
 }

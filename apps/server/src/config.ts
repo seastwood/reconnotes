@@ -7,6 +7,11 @@ export type AiProvider = 'anthropic' | 'ollama' | 'none'
 
 export interface Config {
   port: number
+  /** HTTPS port, served when there's a certificate (see tls.ts) */
+  httpsPort: number
+  /** your own certificate and key (PEM files); otherwise <data>/tls/server.crt from `https-setup` */
+  tlsCert: string | null
+  tlsKey: string | null
   host: string
   dataDir: string
   /** shared secret every device must present */
@@ -60,6 +65,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const aiOn = (p: AiProvider) => (p === 'anthropic' && Boolean(anthropicApiKey)) || (p === 'ollama' && Boolean(ollamaUrl))
   return {
     port: Number(env.RECON_PORT ?? env.PORT ?? 8787),
+    httpsPort: Number(env.RECON_HTTPS_PORT ?? 8443),
+    tlsCert: env.RECON_TLS_CERT ? path.resolve(env.RECON_TLS_CERT) : null,
+    tlsKey: env.RECON_TLS_KEY ? path.resolve(env.RECON_TLS_KEY) : null,
     host: env.RECON_HOST ?? '0.0.0.0',
     dataDir,
     token,
