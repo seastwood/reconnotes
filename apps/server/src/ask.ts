@@ -42,8 +42,22 @@ export function excerpt(md: string, words: string[], limit: number): string {
     return words.some((w) => low.includes(w))
   }
   const keep = new Set<number>([0, 1, 2])
+  const heading = (l: string) => /^#{1,6}\s/.test(l)
   lines.forEach((l, i) => {
-    if (hits(l)) for (const j of [i - 1, i, i + 1]) if (j >= 0 && j < lines.length) keep.add(j)
+    if (!hits(l)) return
+    if (i > 0) keep.add(i - 1)
+    keep.add(i)
+    // and the section it starts or sits in: the lines after it, up to a gap or the next heading
+    let blanks = 0
+    for (let j = i + 1; j < lines.length && j <= i + 25; j++) {
+      if (!lines[j].trim()) {
+        if (++blanks > 1) break
+        continue
+      }
+      if (heading(lines[j])) break
+      blanks = 0
+      keep.add(j)
+    }
   })
   let out = ''
   let last = -1
@@ -124,7 +138,7 @@ export async function askNotes(
   const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
 - Be brief and direct. Start with the answer, not a restatement of the question.
-- When the answer is several things, write a Markdown list, one item per line starting with "- ".
+- When the answer is several things, write a Markdown list, one item per line starting with "- ". Include every item the notes give – don't leave any out or merge them.
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
 - After each fact or item, cite the note it came from like [1] or [2][3].

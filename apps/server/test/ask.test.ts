@@ -77,6 +77,27 @@ describe('questions about a time', () => {
 })
 
 describe('excerpts', () => {
+  it('keeps the whole list under a matching line', async () => {
+    const { excerpt } = await import('../src/ask')
+    const md = [
+      '# 10/5/26',
+      ...Array.from({ length: 120 }, (_, i) => `filler ${i} nothing to see here at all`),
+      'Leadership Meeting',
+      '',
+      '- Thursday focus on power tool training',
+      '- Ensure students are returning safety glasses & grabbing their assigned ones.',
+      '- Verify all build is on github',
+      '',
+      '',
+      ...Array.from({ length: 120 }, (_, i) => `more filler ${i} nothing here`),
+    ].join('\n')
+    const out = excerpt(md, ['leadership', 'meeting'], 1500)
+    expect(out).toContain('Thursday focus on power tool training')
+    expect(out).toContain('Ensure students')
+    expect(out).toContain('Verify all build')
+    expect(out).not.toContain('more filler 5 ')
+  })
+
   it('keeps the start of a long note and the lines about the question', async () => {
     const { excerpt } = await import('../src/ask')
     const lines = ['# Leadership meeting', 'Attendees: all', ...Array.from({ length: 300 }, (_, i) => `filler line ${i} about nothing in particular`)]
