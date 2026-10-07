@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { Loader2, Lock } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2, Lock, ScanFace } from 'lucide-react'
 import { removeFolderPassword, setFolderPassword, unlockFolder } from '../lib/folderLock'
+import { biometricName, forgetBiometricPassword, hasBiometricPassword, readBiometricPassword, saveBiometricPassword } from '../lib/biometric'
 
 export type PasswordMode = 'set' | 'unlock' | 'change' | 'remove'
 
@@ -15,6 +16,33 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const needsCurrent = mode !== 'set'
+  // Face ID / Touch ID (iPhone / iPad app): open with it, or offer to keep the password for it
+  const [bio, setBio] = useState<string | null>(null)
+  const [useBio, setUseBio] = useState(true)
+  const saved = hasBiometricPassword(folderId)
+  const tried = useRef(false)
+  useEffect(() => {
+    void biometricName().then(setBio)
+  }, [])
+
+  const finish = () => {
+    onDone?.()
+    onClose()
+  }
+  const tryBiometric = async () => {
+    const secret = await readBiometricPassword(folderId, folderName)
+    if (secret === null) return
+    if (await unlockFolder(folderId, secret)) return finish()
+    // the password was changed on another device
+    forgetBiometricPassword(folderId)
+    setError(`The password has changed – type it once more to use ${bio ?? 'Face ID'} again.`)
+  }
+  useEffect(() => {
+    if (mode !== 'unlock' || !saved || tried.current) return
+    tried.current = true
+    void tryBiometric()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const needsNew = mode === 'set' || mode === 'change'
   const title = mode === 'set' ? `Lock “${folderName}”` : mode === 'unlock' ? `“${folderName}” is locked` : mode === 'change' ? `Change the password for “${folderName}”` : `Remove the password from “${folderName}”`
 
@@ -31,8 +59,12 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
         if (!(await unlockFolder(folderId, current))) return setError('The current password isn’t right.')
         await setFolderPassword(folderId, pw)
       } else if (!(await removeFolderPassword(folderId, current))) return setError('That’s not the password.')
-      onDone?.()
-      onClose()
+      if (mode === 'remove') forgetBiometricPassword(folderId)
+      else if (bio && (saved || useBio)) {
+        const keep = mode === 'unlock' ? current : pw
+        await saveBiometricPassword(folderId, keep).catch(() => forgetBiometricPassword(folderId))
+      } else if (mode === 'change') forgetBiometricPassword(folderId)
+      finish()
     } finally {
       setBusy(false)
     }
@@ -79,8 +111,18 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
             </label>
           </>
         )}
+        {bio && mode !== 'remove' && !saved && (
+          <label className="check">
+            <input type="checkbox" checked={useBio} onChange={(e) => setUseBio(e.target.checked)} /> Open it with {bio} on this device
+          </label>
+        )}
         {error && <p className="error-text">{error}</p>}
         <div className="row">
+          {bio && mode === 'unlock' && saved && (
+            <button type="button" onClick={() => void tryBiometric()}>
+              <ScanFace size={15} /> {bio}
+            </button>
+          )}
           <button type="button" onClick={onClose}>
             Cancel
           </button>

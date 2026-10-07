@@ -79,6 +79,8 @@
 	<string>Take photos and scan documents into your notes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record audio notes.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Open locked folders with Face ID instead of typing their password.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

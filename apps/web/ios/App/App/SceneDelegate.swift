@@ -8,6 +8,8 @@ import VisionKit
 import AppIntents
 import AVFoundation
 import Capacitor
+import LocalAuthentication
+import Security
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -83,6 +85,8 @@ class ReconBridgeViewController: CAPBridgeViewController, UIPencilInteractionDel
         bridge?.registerPluginInstance(AppLinksPlugin())
         // Recordings that keep going with the screen locked (see AudioRecorderPlugin below).
         bridge?.registerPluginInstance(AudioRecorderPlugin())
+        // Face ID / Touch ID for locked folders (see BiometricPlugin below).
+        bridge?.registerPluginInstance(BiometricPlugin())
         Self.current = self
         guard let webView = webView else { return }
         installScribbleBlocker(in: webView)
@@ -986,5 +990,93 @@ public class AudioRecorderPlugin: CAPPlugin, CAPBridgedPlugin, AVAudioRecorderDe
         if self.recorder === recorder {
             notifyListeners("interrupted", data: ["successfully": flag])
         }
+    }
+}
+
+
+// MARK: - Face ID / Touch ID
+
+/// Keeps a locked folder's password in the Keychain, readable only after Face
+/// ID / Touch ID, so the folder opens with a glance instead of typing it.
+/// The item stays on this device (not synced to iCloud) and is dropped if the
+/// enrolled faces / fingers change. Works with a free (Personal Team) signing.
+///
+///     Biometric.available() → { available, kind: 'faceID' | 'touchID' | 'opticID' | 'none' }
+///     Biometric.save({ key, secret })
+///     Biometric.read({ key, reason }) → { secret }   (rejects 'cancelled' / 'not-found')
+///     Biometric.remove({ key })
+@objc(BiometricPlugin)
+public class BiometricPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "BiometricPlugin"
+    public let jsName = "Biometric"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "available", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "save", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "read", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise)
+    ]
+    private static let service = "com.reconnotes.folder-lock"
+
+    private func query(_ key: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: key]
+    }
+
+    @objc func available(_ call: CAPPluginCall) {
+        let ctx = LAContext()
+        var err: NSError?
+        let ok = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err)
+        var kind = "none"
+        switch ctx.biometryType {
+        case .faceID: kind = "faceID"
+        case .touchID: kind = "touchID"
+        default:
+            if #available(iOS 17.0, *), ctx.biometryType == .opticID { kind = "opticID" }
+        }
+        call.resolve(["available": ok, "kind": ok ? kind : "none"])
+    }
+
+    @objc func save(_ call: CAPPluginCall) {
+        guard let key = call.getString("key"), let secret = call.getString("secret") else { return call.reject("key and secret are needed") }
+        var cfErr: Unmanaged<CFError>?
+        guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, &cfErr) else {
+            return call.reject("Face ID isn’t set up on this device.", "unavailable")
+        }
+        SecItemDelete(query(key) as CFDictionary)
+        var item = query(key)
+        item[kSecValueData as String] = Data(secret.utf8)
+        item[kSecAttrAccessControl as String] = access
+        let status = SecItemAdd(item as CFDictionary, nil)
+        if status == errSecSuccess { call.resolve() } else { call.reject("Couldn’t save to the Keychain (\(status)).") }
+    }
+
+    @objc func read(_ call: CAPPluginCall) {
+        guard let key = call.getString("key") else { return call.reject("key is needed") }
+        let reason = call.getString("reason") ?? "Unlock the folder"
+        // a Keychain read with a Face ID prompt blocks: keep it off the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ctx = LAContext()
+            ctx.localizedFallbackTitle = ""
+            ctx.localizedReason = reason
+            var q = self.query(key)
+            q[kSecReturnData as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitOne
+            q[kSecUseAuthenticationContext as String] = ctx
+            var out: CFTypeRef?
+            let status = SecItemCopyMatching(q as CFDictionary, &out)
+            if status == errSecSuccess, let data = out as? Data, let secret = String(data: data, encoding: .utf8) {
+                call.resolve(["secret": secret])
+            } else if status == errSecUserCanceled || status == errSecAuthFailed {
+                call.reject("Cancelled", "cancelled")
+            } else if status == errSecItemNotFound {
+                call.reject("Not saved", "not-found")
+            } else {
+                call.reject("Keychain error \(status)")
+            }
+        }
+    }
+
+    @objc func remove(_ call: CAPPluginCall) {
+        if let key = call.getString("key") { SecItemDelete(query(key) as CFDictionary) }
+        call.resolve()
     }
 }
