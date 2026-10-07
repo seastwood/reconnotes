@@ -29,6 +29,7 @@ import { guessedWords } from './vocabulary'
 import { dueDateIn, todayLabel } from './timeRange'
 import { scopeFromInput } from './access'
 import type { AskTurn } from './ask'
+import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 
 /**
@@ -53,6 +54,7 @@ export const JOB_KINDS: Record<string, string> = {
   embed: 'Index for search by meaning',
   benchmark: 'Test models on your handwriting',
   meeting: 'Meeting notes',
+  digest: 'Weekly digest',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -139,6 +141,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   embed: 'embed',
   benchmark: 'handwriting',
   meeting: 'audio',
+  digest: 'compile',
 }
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
@@ -372,6 +375,16 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
    * and the notes written meanwhile become a summary, decisions and action
    * items – a checklist with due dates where a day was said.
    */
+  // the weekly digest: a new note about the week (see digest.ts)
+  jobs.register('digest', async (job) => {
+    const tz = Number(job.input.tzOffset) || 0
+    const d = await buildDigest(store, sync, ai, job.createdAt, tz)
+    let noteId = ''
+    await sync.change(WORKSPACE_DOC, (ws) => void (noteId = createNote(ws, { title: d.title, folderId: digestFolder(sync) })))
+    await writeResult(sync, noteId, job.id, `# ${d.title}\n\n${d.markdown}`, 'end', null, { noteFor: d.noteFor })
+    return { result: { noteId, text: preview(d.markdown) }, agent: d.agent ?? undefined }
+  })
+
   jobs.register('meeting', async (job) => {
     const { noteId, attachmentId } = job.input as { noteId: string; attachmentId: string }
     const doc = noteDoc(noteId)

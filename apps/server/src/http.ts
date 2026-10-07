@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -36,6 +37,8 @@ import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup
 import { log } from './log'
 import { aiHealth } from './health'
 import { noteFilter, scopeFromQuery } from './access'
+import { Tasks } from './tasks'
+import { digestSettings, type DigestSettings } from './digest'
 import { notePieces, whereMatched } from './notePieces'
 import type { Samples } from './bench'
 
@@ -98,6 +101,9 @@ const HAS_KINDS = new Set(Object.keys(HAS_LABELS))
 export function createHttpServer(config: Config, store: Store, sync: SyncEngine, ai: Ai, devices: Devices, jobs: Jobs, notifier: Notifier, samples?: Samples) {
   const callers = new WeakMap<http.IncomingMessage, Caller>()
   const shares = new Shares(store)
+  const tasks = new Tasks(store, sync)
+  /** the address people reach this server at (for links in the calendar feed) */
+  const origin = (req: http.IncomingMessage) => `${(req.headers['x-forwarded-proto'] as string | undefined) ?? 'http'}://${req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost'}`
   const routes: [string, RegExp, Handler][] = []
   const route = (method: string, pattern: string, handler: Handler) =>
     routes.push([method, new RegExp(`^${pattern}$`), handler])
@@ -762,6 +768,47 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- Version history ------------------------------------------------------
+  // every checklist item in every note: ?state=open|done|all, scoped like search
+  route('GET', '/api/tasks', (_req, res, _p, url) => {
+    const state = url.searchParams.get('state') ?? 'open'
+    const list = tasks.list(noteFilter(sync, { ...scopeFromQuery(url.searchParams), folders: null }), state === 'all' ? {} : { done: state === 'done' })
+    json(res, 200, { tasks: list })
+  })
+  route('POST', '/api/tasks/done', async (req, res) => {
+    const b = await readJson<{ noteId?: string; i?: number; text?: string; done?: boolean }>(req)
+    if (!b.noteId || !/^[a-z0-9]{8,64}$/.test(b.noteId) || typeof b.i !== 'number' || typeof b.text !== 'string') throw new HttpError(400, 'noteId, i and text are needed')
+    const ok = await tasks.setDone(b.noteId, b.i, b.text, b.done !== false)
+    if (!ok) throw new HttpError(409, 'That to-do has changed – refresh and try again.')
+    json(res, 200, { ok })
+  })
+
+  // weekly digest: when (day, hour, time zone), on or off, or one now
+  route('GET', '/api/digest', (_req, res) => json(res, 200, digestSettings(store)))
+  route('PUT', '/api/digest', async (req, res) => {
+    const b = await readJson<Partial<DigestSettings>>(req)
+    const cur = digestSettings(store)
+    const next: DigestSettings = {
+      ...cur,
+      enabled: typeof b.enabled === 'boolean' ? b.enabled : cur.enabled,
+      day: Number.isInteger(b.day) && b.day! >= 0 && b.day! <= 6 ? b.day! : cur.day,
+      hour: Number.isInteger(b.hour) && b.hour! >= 0 && b.hour! <= 23 ? b.hour! : cur.hour,
+      tzOffset: typeof b.tzOffset === 'number' && Math.abs(b.tzOffset) <= 840 ? b.tzOffset : cur.tzOffset,
+    }
+    // turning it on (or moving it) doesn't send one for a time already past
+    if (next.enabled && (!cur.enabled || next.day !== cur.day || next.hour !== cur.hour || next.tzOffset !== cur.tzOffset)) next.lastRun = Date.now()
+    store.setSetting('weeklyDigest', next)
+    json(res, 200, next)
+  })
+  route('POST', '/api/digest/run', async (req, res) => {
+    const b = await readJson<{ tzOffset?: number }>(req).catch(() => ({}) as { tzOffset?: number })
+    const job = jobs.submit({ kind: 'digest', title: 'Weekly digest', input: { tzOffset: typeof b.tzOffset === 'number' ? b.tzOffset : digestSettings(store).tzOffset }, device: deviceName(req) })
+    json(res, 201, { job })
+  })
+
+  // calendar feed of due dates: its (secret) address, or a new one
+  route('GET', '/api/calendar', (req, res) => json(res, 200, { url: `${origin(req)}/calendar/${tasks.feedToken()}.ics` }))
+  route('POST', '/api/calendar/reset', (req, res) => json(res, 200, { url: `${origin(req)}/calendar/${tasks.feedToken(true)}.ics` }))
+
   // notes about the same things (by meaning; needs an embedding model)
   route('GET', `/api/notes/${ID}/related`, (_req, res, [id], url) => {
     const meta = sync.noteMeta()
@@ -898,6 +945,15 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     }
     try {
       if (url.pathname.startsWith('/s/') && (req.method === 'GET' || req.method === 'HEAD') && servePublic(res, url)) return
+      // the calendar feed: calendar apps can't send a key, so the address itself is the secret
+      const feed = /^\/calendar\/([A-Za-z0-9_-]{16,64})\.ics$/.exec(url.pathname)
+      if (feed && (req.method === 'GET' || req.method === 'HEAD')) {
+        const want = Buffer.from(tasks.feedToken())
+        const got = Buffer.from(feed[1])
+        if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) throw new HttpError(404, 'not found')
+        res.writeHead(200, { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache' })
+        return res.end(req.method === 'HEAD' ? undefined : tasks.ics(noteFilter(sync), origin(req)))
+      }
       if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url)
       for (const [method, re, handler] of routes) {
         const m = re.exec(url.pathname)

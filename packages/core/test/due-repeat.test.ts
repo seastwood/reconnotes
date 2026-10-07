@@ -1,6 +1,6 @@
 import * as Y from 'yjs'
 import { describe, expect, it } from 'vitest'
-import { completeDue, extractDue, getContent, nextDue, occurrences, parseRepeat } from '../src'
+import { completeDue, extractDue, extractTasks, setTaskDone, getContent, nextDue, occurrences, parseRepeat } from '../src'
 
 const NOW = new Date(2026, 9, 7) // Wed Oct 7 2026
 
@@ -46,5 +46,34 @@ describe('repeating due dates', () => {
     expect(extractDue(doc)[0]).toMatchObject({ date: '2026-10-07', repeat: 'weekly', done: false })
     expect(completeDue(doc, 'd1', NOW)).toBe('2026-10-14')
     expect(extractDue(doc)[0]).toMatchObject({ date: '2026-10-14', done: false })
+  })
+})
+
+describe('checklist items', () => {
+  it('lists every item (nested too) and ticks one only if it is unchanged', () => {
+    const doc = new Y.Doc()
+    const item = (text: string, checked: boolean, children: Y.XmlElement[] = []) => {
+      const li = new Y.XmlElement('taskItem')
+      li.setAttribute('checked', checked as unknown as string)
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText(text)])
+      li.insert(0, [p, ...children])
+      return li
+    }
+    const list = (items: Y.XmlElement[]) => {
+      const l = new Y.XmlElement('taskList')
+      l.insert(0, items)
+      return l
+    }
+    getContent(doc).insert(0, [list([item('Buy milk', false, [list([item('Oat milk', false)])]), item('Call Bob', true)])])
+    expect(extractTasks(doc).map((t) => [t.i, t.text, t.done])).toEqual([
+      [0, 'Buy milk', false],
+      [1, 'Oat milk', false],
+      [2, 'Call Bob', true],
+    ])
+    expect(setTaskDone(doc, 1, 'Something else', true)).toBe(false)
+    expect(setTaskDone(doc, 1, 'Oat milk', true)).toBe(true)
+    expect(extractTasks(doc)[1].done).toBe(true)
+    expect(extractTasks(doc)[0].done).toBe(false)
   })
 })

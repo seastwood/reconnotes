@@ -22,6 +22,7 @@ import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate } from '../lib/templates'
 import { startMeeting } from '../lib/meeting'
 import { DueList } from './DueList'
+import { TasksList } from './TasksList'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
@@ -104,6 +105,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
               ? 'Templates'
               : view.kind === 'due'
                 ? 'Due'
+              : view.kind === 'tasks'
+                ? 'Tasks'
               : (folder?.name ?? 'Folder')
 
   const setSort = (m: SortMode) => {
@@ -146,7 +149,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   }
 
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
-  const canSelect = notes.length > 0 && view.kind !== 'due'
+  const canSelect = notes.length > 0 && view.kind !== 'due' && view.kind !== 'tasks'
   const ids = [...selected].filter((id) => notes.some((n) => n.id === id))
 
   const clickRow = (e: React.MouseEvent, n: NoteData) => {
@@ -220,7 +223,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             <CircleCheck size={19} />
           </button>
         )}
-        {view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && (
+        {view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && view.kind !== 'tasks' && (
           <div className="menu-anchor">
             <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
               <ArrowUpDown size={18} />
@@ -297,6 +300,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
       {lockedBy && <LockedScreen folderId={lockedBy} what="folder" />}
       <ul className="notes" hidden={Boolean(lockedBy)}>
         {view.kind === 'due' && <DueList activeNoteId={noteId} onOpen={onOpen} />}
+        {view.kind === 'tasks' && <TasksList activeNoteId={noteId} onOpen={onOpen} />}
 
         {trashedFolders.map((f) => (
           <li key={f.id} className="note-row trashed-folder">
@@ -369,7 +373,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             )}
           </NoteRow>
         ))}
-        {view.kind !== 'due' && !notes.length && !trashedFolders.length && (
+        {view.kind !== 'due' && view.kind !== 'tasks' && !notes.length && !trashedFolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
         )}
         {view.kind === 'folder' && notes.length > 0 && (

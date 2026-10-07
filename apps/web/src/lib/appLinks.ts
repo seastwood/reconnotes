@@ -15,7 +15,7 @@ import { applyConnectData } from './connectLink'
  *
  * They come from the Home Screen / Lock Screen widget and Siri / Shortcuts
  * in the iOS app, and as #new, #record, #scan from the web app's own
- * home-screen shortcuts.
+ * home-screen shortcuts (and #note=ID from calendar events).
  */
 
 export type LinkAction =
@@ -32,7 +32,7 @@ const AppLinks = registerPlugin<AppLinksPlugin>('AppLinks')
 /** Links that may be opened from a note (never javascript: and the like). */
 export function openableUrl(href: string): string | null {
   const h = href.trim()
-  if (/^(https?|mailto|tel|sms|maps|facetime):/i.test(h)) return h
+  if (/^(https?|mailto|tel|sms|maps|facetime|webcal):/i.test(h)) return h
   if (/^www\./i.test(h)) return `https://${h}`
   return null
 }
@@ -92,12 +92,13 @@ export function startAppLinks(handle: (a: LinkAction) => void) {
     const a = parseLink(raw)
     if (a && a !== 'connected') handle(a)
   }
-  // web app: home-screen shortcuts open /#new, /#record, /#scan
+  // web app: home-screen shortcuts open /#new, /#record, /#scan; calendar events link to /#note=ID
   const fromHash = () => {
     const m = /^#(new|record|scan)$/.exec(location.hash)
-    if (!m) return
+    const note = /^#note=([a-z0-9]{8,64})$/.exec(location.hash)
+    if (!m && !note) return
     history.replaceState(null, '', location.pathname + location.search)
-    run(`reconnotes://${m[1]}`)
+    run(note ? `reconnotes://open?note=${note[1]}` : `reconnotes://${m![1]}`)
   }
   fromHash()
   window.addEventListener('hashchange', fromHash)

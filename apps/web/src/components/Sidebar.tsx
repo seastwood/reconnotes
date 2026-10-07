@@ -16,6 +16,7 @@ import {
   LayoutTemplate,
   CalendarDays,
   CalendarCheck,
+  ListChecks,
   SearchCheck,
   CloudDownload,
   Command as CommandIcon,
@@ -58,6 +59,7 @@ export type View =
   | { kind: 'tag'; tag: string }
   | { kind: 'templates' }
   | { kind: 'due' }
+  | { kind: 'tasks' }
   | { kind: 'jobs' }
 
 interface Props {
@@ -439,6 +441,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         <div className="folder-row special" onClick={() => void openDailyNote().then((id) => onOpenResult(id))} title="Today’s daily note – made for you the first time, with yesterday’s unfinished to-dos">
           <CalendarCheck size={16} /> <span className="folder-name">Today</span>
         </div>
+        {isSyncConfigured() && (
+          <div className={`folder-row special${view.kind === 'tasks' ? ' active' : ''}`} onClick={() => onView({ kind: 'tasks' })} title="Every checklist item in every note">
+            <ListChecks size={16} /> <span className="folder-name">Tasks</span>
+          </div>
+        )}
         {isSyncConfigured() && <JobsRow active={view.kind === 'jobs'} onClick={() => onView({ kind: 'jobs' })} />}
         {smart.length > 0 && (
           <>

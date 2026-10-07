@@ -262,3 +262,73 @@ export function completeDue(doc: Y.Doc, dueId: string, now = new Date()): string
   })
   return next
 }
+
+/** A checklist item anywhere in a note. */
+export interface TaskItem {
+  /** its place among the note's checklist items (0 = first) – with `text`, finds it again */
+  i: number
+  text: string
+  done: boolean
+  /** its due date, if it has one */
+  due?: string
+  repeat?: Repeat | null
+}
+
+/** Every checklist item in a note, in order (nested ones too). */
+export function extractTasks(doc: Y.Doc): TaskItem[] {
+  const out: TaskItem[] = []
+  const own = (el: Y.XmlElement): { text: string; due?: string; repeat?: Repeat | null } => {
+    let text = ''
+    let due: string | undefined
+    let repeat: Repeat | null | undefined
+    const walk = (e: Y.XmlElement | Y.XmlFragment) => {
+      for (const c of e.toArray()) {
+        if (c instanceof Y.XmlText) text += c.toString().replace(/<[^>]+>/g, '')
+        else if (c instanceof Y.XmlElement) {
+          if (c.nodeName === 'taskList' || c.nodeName === 'bulletList' || c.nodeName === 'orderedList') continue
+          if (c.nodeName === 'dueDate') {
+            due ??= (c.getAttribute('date') as string | undefined) ?? undefined
+            repeat ??= (c.getAttribute('repeat') as Repeat | undefined) ?? null
+          } else walk(c)
+        }
+      }
+    }
+    walk(el)
+    return { text: text.replace(/\s+/g, ' ').trim(), due, repeat }
+  }
+  const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+    for (const c of el.toArray()) {
+      if (!(c instanceof Y.XmlElement)) continue
+      if (c.nodeName === 'taskItem') {
+        const checked = c.getAttribute('checked') as unknown
+        const o = own(c)
+        out.push({ i: out.length, text: o.text, done: checked === true || checked === 'true', ...(o.due ? { due: o.due } : {}), ...(o.repeat ? { repeat: o.repeat } : {}) })
+      }
+      walk(c)
+    }
+  }
+  walk(getContent(doc))
+  return out
+}
+
+/**
+ * Tick (or untick) checklist item `i` – only if its text is still `text`
+ * (the note may have changed since). Returns whether it was found.
+ */
+export function setTaskDone(doc: Y.Doc, i: number, text: string, done: boolean): boolean {
+  const t = extractTasks(doc)[i]
+  if (!t || t.text !== text) return false
+  let n = -1
+  let hit: Y.XmlElement | null = null
+  const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+    for (const c of el.toArray()) {
+      if (hit || !(c instanceof Y.XmlElement)) continue
+      if (c.nodeName === 'taskItem' && ++n === i) return void (hit = c)
+      walk(c)
+    }
+  }
+  walk(getContent(doc))
+  if (!hit) return false
+  doc.transact(() => (hit as Y.XmlElement).setAttribute('checked', done as unknown as string))
+  return true
+}

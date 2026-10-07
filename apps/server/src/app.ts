@@ -7,6 +7,7 @@ import { AgentRegistry } from './agents'
 import { createHttpServer } from './http'
 import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
+import { startDigestSchedule } from './digest'
 import { Devices } from './devices'
 import { Jobs } from './jobs'
 import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
@@ -46,6 +47,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   resumePendingAttachments(config, store, ai, sync)
   sync.embedMissing()
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
+  const stopDigest = startDigestSchedule(store, jobs)
   return {
     config,
     store,
@@ -56,6 +58,7 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
     server,
     async close() {
       stopBackups()
+      stopDigest()
       await sync.destroy()
       const closed = new Promise<void>((resolve) => server.close(() => resolve()))
       closeSockets()

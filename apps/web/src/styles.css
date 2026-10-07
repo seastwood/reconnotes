@@ -3918,3 +3918,19 @@ a.button {
 .related-notes h4 {
   margin-top: 4px;
 }
+
+/* Tasks */
+.due-group-label.tasks-note {
+  cursor: pointer;
+}
+.due-row.done .note-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.note-snippet.overdue {
+  color: var(--danger, #dc2626);
+}
+.feed-url {
+  width: 100%;
+  font-size: 13px;
+}
