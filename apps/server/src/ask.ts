@@ -35,6 +35,31 @@ const TOTAL = 16000
  * A long note cut down to the parts about the question: its first lines,
  * and the lines that share words with it (with a line either side).
  */
+const heading = (l: string) => /^#{1,6}\s/.test(l)
+const LIST_ITEM = /^\s*(?:[-*+•]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.+)$/
+
+/**
+ * The lines of the section a line starts or sits in: what follows it, up to a
+ * gap or the next heading – but headings straight after it ("Leadership
+ * Meeting" then "10/5/26") belong to it.
+ */
+function sectionAfter(lines: string[], i: number): number[] {
+  const out: number[] = []
+  let blanks = 0
+  let content = false
+  for (let j = i + 1; j < lines.length && j <= i + 30; j++) {
+    if (!lines[j].trim()) {
+      if (++blanks > 1) break
+      continue
+    }
+    if (heading(lines[j]) && content) break
+    if (!heading(lines[j])) content = true
+    blanks = 0
+    out.push(j)
+  }
+  return out
+}
+
 export function excerpt(md: string, words: string[], limit: number): string {
   if (md.length <= limit) return md
   const lines = md.split('\n')
@@ -43,22 +68,11 @@ export function excerpt(md: string, words: string[], limit: number): string {
     return words.some((w) => low.includes(w))
   }
   const keep = new Set<number>([0, 1, 2])
-  const heading = (l: string) => /^#{1,6}\s/.test(l)
   lines.forEach((l, i) => {
     if (!hits(l)) return
     if (i > 0) keep.add(i - 1)
     keep.add(i)
-    // and the section it starts or sits in: the lines after it, up to a gap or the next heading
-    let blanks = 0
-    for (let j = i + 1; j < lines.length && j <= i + 25; j++) {
-      if (!lines[j].trim()) {
-        if (++blanks > 1) break
-        continue
-      }
-      if (heading(lines[j])) break
-      blanks = 0
-      keep.add(j)
-    }
+    for (const j of sectionAfter(lines, i)) keep.add(j)
   })
   let out = ''
   let last = -1
@@ -147,6 +161,7 @@ export async function askNotes(
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
+- Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
 
 Today is ${todayLabel(now, tz)}.${range ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
@@ -156,7 +171,13 @@ Question: ${question}
 Notes:${context}`
 
   const { text: raw, agent } = await ai.ask(prompt)
-  const text = listify(raw)
+  let text = listify(raw)
+  // the list items of the note sections the question is about, that the answer left out
+  const missing = missingItems(text, sectionItems(texts, words))
+  if (missing.length && !/don't contain|do not contain|doesn't contain|no information|not (?:found|mentioned)/i.test(text)) {
+    const box = /^\s*- \[ \]/m.test(text) ? '- [ ] ' : '- '
+    text += `\n\nAlso in your notes:\n${missing.map((m) => `${box}${m.text} [${m.n}]`).join('\n')}`
+  }
   // keep only sources the answer actually cites – or, if it cites none, the notes it plainly drew on
   const cited = new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))
   return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), agent }
@@ -218,4 +239,44 @@ function notesActiveIn(store: Store, meta: Map<string, { id: string; createdAt: 
   const rows = store.db.prepare("SELECT DISTINCT doc_name FROM versions WHERE created_at >= ? AND created_at < ? AND doc_name LIKE 'note:%'").all(from, to) as { doc_name: string }[]
   for (const r of rows) ids.add(r.doc_name.slice('note:'.length))
   return [...ids].filter((id) => meta.has(id))
+}
+
+const significant = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((w) => !STOP.has(w))
+
+/**
+ * List items under the lines that are plainly what the question is about
+ * (a line with two of its words, e.g. a "Leadership Meeting" heading).
+ */
+export function sectionItems(texts: Map<number, string>, words: string[]): { n: number; text: string }[] {
+  const need = Math.min(2, new Set(words).size)
+  if (!need) return []
+  const out: { n: number; text: string }[] = []
+  const seen = new Set<string>()
+  for (const [n, md] of texts) {
+    const lines = md.split('\n')
+    lines.forEach((l, i) => {
+      const low = l.toLowerCase()
+      if (new Set(words.filter((w) => low.includes(w))).size < need || LIST_ITEM.test(l)) return
+      for (const j of sectionAfter(lines, i)) {
+        const item = lines[j].match(LIST_ITEM)?.[1]?.trim()
+        const key = item?.toLowerCase().replace(/\W+/g, ' ').trim()
+        if (item && key && !seen.has(key)) {
+          seen.add(key)
+          out.push({ n, text: item.replace(/\s*\[\d+\]$/, '') })
+        }
+      }
+    })
+  }
+  return out.slice(0, 30)
+}
+
+/** Items whose words mostly don't appear in the answer (stems: "returning" ≈ "return"). */
+export function missingItems(answer: string, items: { n: number; text: string }[]): { n: number; text: string }[] {
+  const said = significant(answer).map((w) => w.slice(0, 5))
+  const has = (w: string) => said.includes(w.slice(0, 5))
+  return items.filter((it) => {
+    const ws = significant(it.text)
+    if (!ws.length) return false
+    return ws.filter(has).length / ws.length < 0.5
+  })
 }

@@ -76,6 +76,46 @@ describe('questions about a time', () => {
   })
 })
 
+describe('items the answer left out', () => {
+  // the note as it reads: the handwriting's text, then the converted checklist under two headings
+  const note = [
+    '# 10/5/26',
+    '✍️ Leadership Meeting – Thursday focus on power tool training – Ensure students are returning safety glasses',
+    '',
+    '## Leadership Meeting',
+    '',
+    '## 10/5/26',
+    '',
+    '- [ ] Thursday focus on power tool training',
+    '- [ ] Verify all build is on github',
+    '- [ ] Ensure students are returning safety glasses & grabbing their assigned ones.',
+    '',
+    '',
+    '## Something else',
+    '- [ ] Buy milk',
+  ].join('\n')
+  const words = ['leadership', 'meeting', 'dos']
+
+  it('finds the list under a heading even with a date heading in between', async () => {
+    const { sectionItems, excerpt } = await import('../src/ask')
+    const items = sectionItems(new Map([[2, note]]), words)
+    expect(items.map((i) => i.text)).toEqual([
+      'Thursday focus on power tool training',
+      'Verify all build is on github',
+      'Ensure students are returning safety glasses & grabbing their assigned ones.',
+    ])
+    const long = note.replace('# 10/5/26', '# 10/5/26\n' + 'filler line here\n'.repeat(200))
+    expect(excerpt(long, words, 2000)).toContain('Thursday focus on power tool training')
+  })
+
+  it('adds what the answer missed', async () => {
+    const { sectionItems, missingItems } = await import('../src/ask')
+    // the answer you got: two of the three
+    const answer = '- [ ] Ensure students return safety glasses & grab assigned ones. [3]\n- [ ] Verify all builds are on GitHub. [3]'
+    expect(missingItems(answer, sectionItems(new Map([[3, note]]), words))).toEqual([{ n: 3, text: 'Thursday focus on power tool training' }])
+  })
+})
+
 describe('excerpts', () => {
   it('keeps the whole list under a matching line', async () => {
     const { excerpt } = await import('../src/ask')
