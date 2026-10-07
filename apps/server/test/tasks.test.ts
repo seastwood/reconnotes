@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createNote, extractTasks, getContent, getNotes, noteDocName, readNote, updateNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
-import { lastSlot } from '../src/digest'
+import { lastSlot, oneLine, tidySummary } from '../src/digest'
 
 const TOKEN = 'test-token-0123456789abcdef'
 let app: App
@@ -115,10 +115,10 @@ describe('weekly digest', () => {
   })
 
   it('writes a note about the week, with links and what is overdue and coming up', async () => {
-    // a note edited this week
+    // a note edited this week (yesterday: the digest covers the 7 days before today)
     await app.sync.change(WORKSPACE_DOC, (ws) => {
       const m = getNotes(ws).get('notetasks00000001')!
-      updateNote(ws, 'notetasks00000001', { updatedAt: Date.now() })
+      updateNote(ws, 'notetasks00000001', { updatedAt: Date.now() - 86_400_000 })
       expect(readNote(m).title).toBe('Shop, plan')
     })
     const { body } = await api('POST', '/api/digest/run', { tzOffset: new Date().getTimezoneOffset() })
@@ -135,5 +135,34 @@ describe('weekly digest', () => {
     const s = (await api('PUT', '/api/digest', { enabled: true, day: 1, hour: 8, tzOffset: 300 })).body
     expect(s).toMatchObject({ enabled: true, day: 1, hour: 8, tzOffset: 300 })
     expect(s.lastRun).toBeGreaterThan(0) // no digest for a time already past
+  })
+
+  it('keeps the AI summary short, in three sections, with each point linked to its note', () => {
+    // what a small model wrote
+    const raw = `Here is a summary of your week based on the provided notes:
+**Tasks and Decisions:**
+- **Create Notes App**: Develop an app to record, attach files, and manage folders for various file types like PDFs, documents, spreadsheets, and much more besides that [1].
+- Team Division:
+  - Divide team members into A and B groups for Monday meetings [2].
+  - Make decision on Leu tenant today [2][3].
+- Mentor involvement in power tool training [4]
+- Mentor involvement in power tool training [4]
+- One [1]
+- Two [1]
+- Three [1]
+### Still open
+- Finalize team division [2]
+Future Actions:
+- Continue development of the notes app.
+I hope this helps!`
+    const out = tidySummary(raw, (n) => (n <= 3 ? `[[n${n}|Note ${n}]]` : null))
+    expect(out).not.toMatch(/Here is|hope this|\*\*|Team Division:/)
+    expect(out.startsWith('## Decisions\n- Create Notes App: Develop an app')).toBe(true)
+    expect(out).toContain('- Make decision on Leu tenant today – [[n2|Note 2]], [[n3|Note 3]]')
+    expect(out.match(/power tool/g)).toHaveLength(1) // the same point once
+    expect(out.split('\n').every((l) => l.length <= 160)).toBe(true) // one line each
+    expect(out.split('\n').filter((l) => l.startsWith('- ')).length).toBeLessThanOrEqual(14)
+    expect(out).toContain('## Still open\n- Finalize team division – [[n2|Note 2]]')
+    expect(oneLine('IRP Backwash Procedure\nPreparation Open main drain valve!\n1. Turn off wells')).toBe('IRP Backwash Procedure')
   })
 })
