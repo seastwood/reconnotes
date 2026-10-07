@@ -370,9 +370,38 @@ export interface ServerInfo {
 
 export async function serverInfo(url: string, token: string): Promise<ServerInfo & { authorized: boolean }> {
   const base = url.replace(/\/$/, '')
-  const info = (await fetch(`${base}/api/health`).then((r) => r.json())) as ServerInfo
+  let info: ServerInfo
+  try {
+    info = (await fetch(`${base}/api/health`).then((r) => r.json())) as ServerInfo
+  } catch (e) {
+    throw new Error(await whyUnreachable(base, (e as Error).message))
+  }
   const auth = await fetch(`${base}/api/auth/check`, { headers: { Authorization: `Bearer ${token}` } })
   return { ...info, authorized: auth.ok }
+}
+
+/**
+ * The server couldn't be reached: work out why, as far as a page can. A
+ * request that ignores the cross-origin rules ("no-cors") still reaches a
+ * server that answers – then the answer is being blocked, usually a proxy
+ * dropping the server's Access-Control headers.
+ */
+async function whyUnreachable(base: string, error: string): Promise<string> {
+  if (!/^https?:\/\//i.test(base)) return 'The address must start with http:// or https://'
+  let host = ''
+  try {
+    host = new URL(base).host
+  } catch {
+    return `“${base}” isn't a web address.`
+  }
+  try {
+    await fetch(`${base}/api/health`, { mode: 'no-cors', cache: 'no-store' })
+    return `${host} answered, but the app isn't allowed to read the answer: something between them (a reverse proxy such as HAProxy) is dropping the server's Access-Control-Allow-Origin header, or answering instead of the server.`
+  } catch {
+    // not even that: the name, the route or the certificate
+  }
+  if (location.protocol === 'https:' && base.startsWith('http:')) return `This page is https, so it can't talk to an http:// server – use the server's https:// address.`
+  return `${error}. ${host} didn't answer: check the name resolves on this device (over a VPN, its DNS server must be the one that knows the name), the device can reach it, and its certificate is trusted here.`
 }
 
 // --- One-tap note actions --------------------------------------------------

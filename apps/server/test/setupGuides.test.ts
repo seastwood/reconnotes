@@ -57,4 +57,26 @@ describe('setup guides', () => {
     expect(guideNotes().map((n) => n.title)).toContain('Something new') // in the same folder
     fs.rmSync(next, { recursive: true, force: true })
   })
+
+  it('bring an improved guide up to date, unless you edited that note', async () => {
+    const next = fs.mkdtempSync(path.join(os.tmpdir(), 'reconnotes-guides-v2-'))
+    for (const f of fs.readdirSync(guidesDir()!)) fs.copyFileSync(path.join(guidesDir()!, f), path.join(next, f))
+    fs.writeFileSync(path.join(next, 'Something new.md'), '# Something new\n\nA new guide.')
+    // you edited "Install the server" (its note was changed after it was written)
+    const install = guideNotes().find((n) => n.title === 'Install the server')!
+    await app.sync.change(WORKSPACE_DOC, (d) => updateNote(d, install.id, { updatedAt: Date.now() + 60_000 }))
+    // the new version improves both guides
+    fs.appendFileSync(path.join(next, 'Connect your devices.md'), '\nA brand new tip.\n')
+    fs.appendFileSync(path.join(next, 'Install the server.md'), '\nAnother new tip.\n')
+    const changed = await seedSetupGuides(app.config, app.store, app.ai, app.sync, next)
+    const connect = guideNotes().find((n) => n.title === 'Connect your devices')!
+    expect(changed).toEqual([connect.id])
+    expect(getContent(app.sync.getDoc(noteDocName(connect.id))!).toString()).toContain('A brand new tip.')
+    expect(getContent(app.sync.getDoc(noteDocName(install.id))!).toString()).not.toContain('Another new tip.')
+    // and its links still point at the other guides
+    expect(getContent(app.sync.getDoc(noteDocName(connect.id))!).toString()).toMatch(/<notelink/i)
+    // nothing changes the next time
+    expect(await seedSetupGuides(app.config, app.store, app.ai, app.sync, next)).toEqual([])
+    fs.rmSync(next, { recursive: true, force: true })
+  })
 })

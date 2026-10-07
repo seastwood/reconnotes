@@ -29,6 +29,12 @@ A wildcard (`*.yourdomain.com`) keeps "notes" out of the public certificate logs
 
 In *Services › DNS Resolver › Host Overrides*, add host `notes`, domain `yourdomain.com`, IP = **pfSense's LAN address** (where HAProxy listens, often `192.168.1.1`), **not** the ReconNotes server's address. Save and apply. Create no record for it in Cloudflare.
 
+For VPN clients to see it:
+
+- Each WireGuard peer's config has `DNS = <pfSense LAN address>`.
+- *Services › DNS Resolver › General Settings*: **Network Interfaces** includes the WireGuard interface (or All).
+- *Services › DNS Resolver › Access Lists*: if your WireGuard subnet isn't already allowed, add it with action **Allow**.
+
 If you do add the record at Cloudflare instead, make it **DNS only** (grey cloud), never proxied: the orange cloud routes traffic through Cloudflare, which needs the site public. pfSense's DNS rebinding protection also blocks public names that point to private addresses, so the host override is the simpler route.
 
 ## 4. HAProxy
@@ -73,3 +79,5 @@ curl -v https://notes.yourdomain.com/api/health  # {"ok":true…}
 | Certificate error | The HAProxy frontend isn't using the ACME certificate, or the certificate hasn't been issued yet. |
 | Notes don't sync, or sync drops every minute | `timeout tunnel 1h` is missing in the backend. |
 | Uploads of big recordings fail | HAProxy's max upload size (step 4.3). |
+| Works in a browser on a computer, but not on the phone | The phone isn't using pfSense for DNS over the VPN (step 3): open the address in Safari on the phone to check. |
+| Safari on the phone works, the app says it can't read the answer | HAProxy is dropping the server's `Access-Control-Allow-Origin` header (the app runs from its own origin, Safari doesn't). Check with `curl -sI -H 'Origin: capacitor://localhost' https://notes.yourdomain.com/api/health` – it must show `access-control-allow-origin: *`. |
