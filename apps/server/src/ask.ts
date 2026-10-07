@@ -1,4 +1,4 @@
-import { noteDocName, noteToMarkdown } from '@reconnotes/core'
+import { WORKSPACE_DOC, effectiveFolderId, folderPaths, foldersNamedIn, listFolders, noteDocName, noteToMarkdown } from '@reconnotes/core'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
@@ -135,6 +135,21 @@ export async function askNotes(
   const byMeaning = meaning?.available ? (await meaning.search(meaningQuery, 200)).map((h) => h.noteId).filter(usable).slice(0, 20) : []
   const score = new Map<string, number>()
   for (const list of [byWords, byMeaning]) list.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (10 + i)))
+  // notes in a folder the question names ("what's in my FRC notes?") are read first
+  const ws = sync.getDoc(WORKSPACE_DOC)
+  const folders = ws ? listFolders(ws) : []
+  const paths = folderPaths(folders)
+  const live = new Set(paths.keys())
+  const named = foldersNamedIn([...history.map((h) => h.question), question].join(' \n '), folders)
+  const folderOf = (id: string) => {
+    const m = meta.get(id)
+    return m ? effectiveFolderId(m, live) : null
+  }
+  if (named.ids.size)
+    for (const m of [...meta.values()].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      const f = folderOf(m.id)
+      if (f && named.ids.has(f) && usable(m.id)) score.set(m.id, (score.get(m.id) ?? 0) + (score.has(m.id) ? 0.6 : 0.3 - Math.min(0.2, (now - m.updatedAt) / 864e8)))
+    }
   // the notes the earlier answers used come first: a follow-up is usually about them
   const earlier = [...new Set(history.flatMap((h) => h.sources ?? []))].filter(usable)
   earlier.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 - i / 100))
@@ -173,7 +188,8 @@ export async function askNotes(
     const m = meta.get(id)!
     sources.push({ n, noteId: id, title: shortTitle(m.title) })
     texts.set(n, md)
-    context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)}) ===\n${md}`
+    const path = paths.get(folderOf(id) ?? '')
+    context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)}) ===\n${md}`
   }
 
   const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.

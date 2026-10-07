@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowUpDown, Folder, ListFilter, Lock, Sparkles, X } from 'lucide-react'
-import { buildTree, effectiveFolderId, type TreeNode } from '@reconnotes/core'
+import { buildTree, effectiveFolderId, folderPaths, foldersNamedIn, type FolderData, type NoteData, type TreeNode } from '@reconnotes/core'
 import { searchNotes, type SearchResult } from '../lib/search'
 import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useFolderAccess } from '../lib/folderLock'
@@ -61,6 +61,8 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
   const sortBtn = useRef<HTMLButtonElement>(null)
   const filterBtn = useRef<HTMLButtonElement>(null)
 
+  const wsRef = useRef(ws)
+  wsRef.current = ws
   useEffect(() => {
     setAsked(askedFor.has(q))
     if (!q) return setFound(null)
@@ -70,7 +72,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     let alive = true
     const t = setTimeout(
       () =>
-        void searchNotes(q, { folders: scope, unlocked: access.unlockedIds }).then((r) => {
+        void folderAwareSearch(q, { folders: scope, unlocked: access.unlockedIds }, wsRef.current.folders, wsRef.current.notes).then((r) => {
           cache.delete(key) // most recent last, for trimming
           cache.set(key, { results: r, at: Date.now() })
           while (cache.size > 30) cache.delete(cache.keys().next().value!)
@@ -86,6 +88,8 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
   }, [key])
 
   const liveFolders = useMemo(() => new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id)), [ws.folders])
+  const paths = useMemo(() => folderPaths(ws.folders), [ws.folders])
+  const marks = useMemo(() => highlightWords(q), [q])
   const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
   /** the chosen folders and everything inside them ('none': notes in no folder) */
   const inFolder = useMemo(() => {
@@ -244,7 +248,18 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
                 </span>
               )}
             </div>
-            <div className="note-snippet">{r.snippet}</div>
+            {(() => {
+              const n = ws.notes.find((x) => x.id === r.noteId)
+              const path = n && paths.get(effectiveFolderId(n, liveFolders) ?? '')
+              return path ? (
+                <div className={`note-path${r.inFolder ? ' named' : ''}`}>
+                  <Folder size={11} /> {path.join(' › ')}
+                </div>
+              ) : null
+            })()}
+            <div className="note-snippet">
+              <Highlighted text={r.snippet} words={marks} />
+            </div>
           </li>
         ))}
         {results && !results.length && (
@@ -296,4 +311,57 @@ function Chip({ label, onClear }: { label: ReactNode; onClear: () => void }) {
       </button>
     </span>
   )
+}
+
+/** The words of a search worth marking in the results. */
+function highlightWords(q: string): string[] {
+  return [...new Set(q.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])].filter((w) => !/^(the|and|for|was|what|are|with|from|that|this|have|you|my|your)$/.test(w)).sort((a, b) => b.length - a.length)
+}
+
+/** Text with the search's words marked (start of word, any case: "pow" marks "Power"). */
+function Highlighted({ text, words }: { text: string; words: string[] }) {
+  if (!words.length || !text) return <>{text}</>
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'giu')
+  const parts = text.split(re)
+  return (
+    <>
+      {parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>))}
+    </>
+  )
+}
+
+/**
+ * Search that knows folder names: "FRC wiring" finds notes about wiring in the
+ * FRC folder (and its subfolders) first; "FRC" alone, the notes in it.
+ */
+async function folderAwareSearch(q: string, where: Parameters<typeof searchNotes>[1], folders: FolderData[], notes: NoteData[]): Promise<SearchResult[]> {
+  const named = foldersNamedIn(q, folders)
+  const [main, rest] = await Promise.all([searchNotes(q, where), named.ids.size && named.rest ? searchNotes(named.rest, where) : Promise.resolve([])])
+  if (!named.ids.size) return main
+  const live = new Set(folders.filter((f) => !f.trashedAt).map((f) => f.id))
+  const byId = new Map(notes.map((n) => [n.id, n]))
+  const inNamed = (id: string) => {
+    const n = byId.get(id)
+    const f = n ? effectiveFolderId(n, live) : null
+    return Boolean(f && named.ids.has(f))
+  }
+  const out: SearchResult[] = []
+  const seen = new Set<string>()
+  const add = (r: SearchResult) => {
+    if (seen.has(r.noteId)) return
+    seen.add(r.noteId)
+    out.push(r)
+  }
+  if (named.rest) {
+    // in the folder and about the rest of the search
+    for (const r of rest) if (inNamed(r.noteId) && !r.meaning) add({ ...r, inFolder: true })
+  } else {
+    // just the folder's name: what's in it, newest first
+    for (const n of notes.filter((n) => !n.trashedAt && !n.template && inNamed(n.id)).sort((a, b) => b.updatedAt - a.updatedAt))
+      add({ noteId: n.id, title: n.title, snippet: n.snippet, inFolder: true })
+  }
+  for (const r of main) if (!r.meaning) add(r)
+  for (const r of rest) if (inNamed(r.noteId)) add({ ...r, inFolder: true })
+  for (const r of main) add(r)
+  return out
 }

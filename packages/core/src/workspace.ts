@@ -357,3 +357,47 @@ export function folderRules(folders: FolderData[]): Map<string, FolderRule> {
   }
   return out
 }
+
+/** Each live folder's path from the top: ['Coding', 'Projects', 'ReconNotes']. */
+export function folderPaths(folders: FolderData[]): Map<string, string[]> {
+  const byId = new Map(folders.filter((f) => !f.trashedAt).map((f) => [f.id, f]))
+  const out = new Map<string, string[]>()
+  for (const f of byId.values()) {
+    const path: string[] = []
+    const seen = new Set<string>()
+    for (let cur: FolderData | undefined = f; cur && !seen.has(cur.id); cur = cur.parentId ? byId.get(cur.parentId) : undefined) {
+      seen.add(cur.id)
+      path.unshift(cur.name)
+    }
+    out.set(f.id, path)
+  }
+  return out
+}
+
+/**
+ * Folders a search or question names: a folder whose whole name appears in
+ * it ("FRC", "To Do"), with their subfolders. Returns the folder ids and the
+ * text left once the folder names are taken out.
+ */
+export function foldersNamedIn(query: string, folders: FolderData[]): { ids: Set<string>; rest: string } {
+  const live = folders.filter((f) => !f.trashedAt && f.name.trim().length >= 2)
+  const norm = (s: string) => ` ${s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
+  let q = norm(query)
+  const named: string[] = []
+  // longest names first, so "To Do" wins over a folder called "Do"
+  for (const f of [...live].sort((a, b) => b.name.length - a.name.length)) {
+    const n = norm(f.name)
+    if (n.trim().length < 2 || !q.includes(n)) continue
+    // generic words aren't folder references on their own
+    if (/^ (new folder|notes?|untitled folder|folder) $/.test(n)) continue
+    named.push(f.id)
+    q = q.replace(n, ' ')
+  }
+  const ids = new Set(named)
+  let grew = true
+  while (grew && ids.size) {
+    grew = false
+    for (const f of live) if (f.parentId && ids.has(f.parentId) && !ids.has(f.id)) (ids.add(f.id), (grew = true))
+  }
+  return { ids, rest: q.replace(/\s+/g, ' ').trim() }
+}

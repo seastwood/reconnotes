@@ -41,6 +41,8 @@ export interface SearchResult {
   snippet: string
   /** found by meaning (related), not by its words */
   meaning?: boolean
+  /** in a folder the search names ("FRC wiring" → the FRC folder) */
+  inFolder?: boolean
 }
 
 function snippetFor(text: string, terms: string[]): string {

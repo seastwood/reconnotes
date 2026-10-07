@@ -3807,3 +3807,28 @@ a.button {
   flex-basis: 100%;
   margin: 0;
 }
+
+/* search results: where a note is, and the words that matched */
+.note-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.note-path svg {
+  flex: none;
+}
+.note-path.named {
+  color: var(--accent-text);
+}
+.note-snippet mark {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}

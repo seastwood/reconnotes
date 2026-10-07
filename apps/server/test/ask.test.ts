@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { WORKSPACE_DOC, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
+import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -280,5 +280,31 @@ describe('follow-up questions', () => {
     expect(prompts[0]).toContain('Follow-up question: and when is that happening?')
     expect(prompts[0]).toContain('T8 bins with all the parts') // the earlier answer's note
     expect(done.result.sources.map((s: { noteId: string }) => s.noteId)).toContain('asknote000001')
+  })
+})
+
+describe('folder names in questions', () => {
+  it('reads the notes in a folder the question names first, and says which folder each is in', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => {
+      createFolder(ws, { id: 'folderfrc0000001', name: 'FRC' })
+      createFolder(ws, { id: 'folderpits000001', name: 'Pit crew', parentId: 'folderfrc0000001' })
+    })
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'asknote000006', title: 'Breaker checks', folderId: 'folderpits000001' }))
+    await app.sync.change(noteDocName('asknote000006'), (doc) => {
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText('Check the main breaker before every match')])
+      getContent(doc).insert(0, [p])
+    })
+    app.sync.hocuspocus.flushPendingStores()
+    await new Promise((r) => setTimeout(r, 300))
+    prompts.length = 0
+    const res = await fetch(`${base}/api/ai/ask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: "what's in my FRC notes?" }),
+    })
+    expect(res.status).toBe(200)
+    // the note in FRC › Pit crew comes first, with its folder
+    expect(prompts[0]).toMatch(/=== \[1\] "Breaker checks" \(in folder FRC › Pit crew,/)
   })
 })
