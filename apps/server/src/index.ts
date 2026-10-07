@@ -64,7 +64,7 @@ ${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}
   }
 
   const config = loadConfig()
-  const app = createApp(config, { backups: cmd === 'serve' })
+  const app = createApp(config, { backups: cmd === 'serve', guides: cmd === 'serve' })
 
   if (cmd === 'backup') {
     const dir = await runBackup(config, app.store, app.sync, { waitOffsite: true })

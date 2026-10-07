@@ -9,6 +9,8 @@ import { createHttpServer } from './http'
 import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
 import { startDigestSchedule } from './digest'
+import { GUIDES_FOLDER, seedSetupGuides } from './setupGuides'
+import { log } from './log'
 import { Devices } from './devices'
 import { Jobs } from './jobs'
 import { JOB_KINDS, registerJobHandlers } from './jobHandlers'
@@ -30,7 +32,7 @@ export interface App {
   close(): Promise<void>
 }
 
-export function createApp(config: Config, opts: { backups?: boolean } = {}): App {
+export function createApp(config: Config, opts: { backups?: boolean; guides?: boolean } = {}): App {
   if (!config.token || config.token.length < 16) {
     throw new Error('RECON_TOKEN must be set to a secret of at least 16 characters (try: reconnotes-server gen-token)')
   }
@@ -51,6 +53,11 @@ export function createApp(config: Config, opts: { backups?: boolean } = {}): App
   sync.embedMissing()
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   const stopDigest = startDigestSchedule(store, jobs)
+  // the setup guides, as notes in a "ReconNotes Setup" folder (each added once)
+  if (opts.guides)
+    void seedSetupGuides(config, store, ai, sync)
+      .then((ids) => ids.length && log.info(`added ${ids.length} setup guide${ids.length === 1 ? '' : 's'} to the “${GUIDES_FOLDER}” folder`))
+      .catch((err) => log.warn(`setup guides not added: ${(err as Error).message}`))
   return {
     config,
     store,

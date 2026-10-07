@@ -115,6 +115,11 @@ Open the app, go to **Settings**, enter `http://<your-machine>:8787` and the tok
 
 ## Running the server on Linux
 
+Step-by-step setup guides (installing, connecting devices, HTTPS with a private certificate or
+with your own domain via Cloudflare + pfSense + HAProxy, AI agents, backups) are in
+[`docs/setup`](docs/setup). They also come with the server: on first start they're added as notes
+in a **ReconNotes Setup** folder (each once; edit or delete them freely).
+
 You need Node.js 20 or newer (or Docker), and `ffmpeg` if you'll transcribe recordings with a
 Wyoming (Home Assistant) Whisper server: `sudo apt install ffmpeg`.
 

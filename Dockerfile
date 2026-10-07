@@ -27,6 +27,8 @@ RUN npm pkg delete devDependencies "dependencies.@reconnotes/core" scripts \
  && npm cache clean --force
 COPY --from=build /src/apps/server/dist ./dist
 COPY --from=build /src/apps/web/dist ./web
+# the setup guides, added as notes on first start
+COPY --from=build /src/docs/setup ./docs/setup
 VOLUME /data
 EXPOSE 8787 8443
 USER node
