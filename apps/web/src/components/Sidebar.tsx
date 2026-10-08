@@ -54,7 +54,7 @@ import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/sea
 import { useSavedSearches } from '../lib/searchHistory'
 import { openDailyNote } from '../lib/daily'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
-import { AskNoteDialog } from './AskNoteDialog'
+import { openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
 
 export type View =
@@ -177,7 +177,6 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   }, [ws.notes])
   const tagsFolded = Boolean(collapsed[TAGS_KEY])
   /** the folder "Ask this folder…" is open for */
-  const [askFolder, setAskFolder] = useState<string | null>(null)
   /** this folder holds pages imported from the web (they can be checked for updates) */
   const hasSource = (folderId: string) => ws.notes.some((n) => n.source && !n.trashedAt && n.folderId === folderId)
   const [allTags, setAllTags] = useState(false)
@@ -357,7 +356,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 >
                   Search in this folder…
                 </button>
-                <button onClick={() => (setMenuFor(null), setAskFolder(f.id))} title="A question answered from this folder’s notes (and its subfolders’) – even if it’s left out of search">
+                <button onClick={() => (setMenuFor(null), openAskChat({ folderId: f.id, title: f.name }))} title="A question answered from this folder’s notes (and its subfolders’) – even if it’s left out of search">
                   Ask this folder…
                 </button>
                 {hasSource(f.id) && (
@@ -623,14 +622,6 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           <span className="count">{trashCount || ''}</span>
         </div>
       </nav>
-      )}
-      {askFolder && (
-        <AskNoteDialog
-          folderId={askFolder}
-          title={ws.folders.find((x) => x.id === askFolder)?.name ?? 'Folder'}
-          onClose={() => setAskFolder(null)}
-          onOpen={(id, find) => onOpenResult(id, find)}
-        />
       )}
       {pw && (
         <PasswordDialog

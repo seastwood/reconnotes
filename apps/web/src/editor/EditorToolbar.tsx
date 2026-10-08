@@ -64,7 +64,7 @@ import { duplicateNote, newNoteFromTemplate, saveAsTemplate } from '../lib/templ
 import { trashNotes } from '../lib/noteActions'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { takeQuickAction } from '../lib/appLinks'
-import { AskNoteDialog } from '../components/AskNoteDialog'
+import { openAskChat } from '../lib/askChat'
 import { Capacitor } from '@capacitor/core'
 
 const isNativeApp = Capacitor.isNativePlatform()
@@ -188,7 +188,6 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [asking, setAsking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const styleBtn = useRef<HTMLButtonElement>(null)
@@ -476,7 +475,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       {menu === 'more' && (
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
             <div className="menu-label">AI</div>
-            <button onClick={() => (setMenu(null), setAsking(true))}>
+            <button onClick={() => (setMenu(null), openAskChat({ noteId, title: (meta?.get('title') as string) ?? '' }))}>
               <MessageCircleQuestion size={16} /> Ask about this note…
             </button>
             <button onClick={() => (setMenu(null), void run('Summarising…', () => noteAction(editor, noteId, 'summary')))}>
@@ -588,7 +587,6 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
           {error}
         </div>
       )}
-      {asking && <AskNoteDialog noteId={noteId} title={(meta?.get('title') as string) ?? ''} onClose={() => setAsking(false)} onOpen={onOpenNote} />}
     </div>
   )
 }

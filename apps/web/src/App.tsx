@@ -18,6 +18,7 @@ import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
 import { LockedScreen } from './components/LockedScreen'
 import { WebImportDialog } from './components/WebImportDialog'
+import { AskChatHost } from './components/AskChat'
 import { useFolderAccess } from './lib/folderLock'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
@@ -514,6 +515,7 @@ export function App() {
       <HideKeyboardButton />
       <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />
       <ImageViewerHost />
+      <AskChatHost onOpen={followLink} />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {webImport && <WebImportDialog folderId={webImport.folderId} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
       {paletteOpen && (
