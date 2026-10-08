@@ -78,6 +78,31 @@ body {
   position: relative;
   top: var(--app-top, 0px);
 }
+/* the room at the bottom: the home indicator – and in a Safari tab, its toolbar */
+:root {
+  --bar-gap: 0px;
+  --safe-bottom: env(safe-area-inset-bottom);
+}
+/* Safari in a tab: the app runs on under Safari's see-through toolbar. Nothing
+   fixed may span the bottom edge (Safari would fill the toolbar with its colour) */
+html.glass {
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--bar-gap));
+}
+html.glass body {
+  position: relative;
+  height: var(--app-height, 100%);
+}
+html.glass .ask-chat {
+  position: absolute;
+}
+/* lists scroll up from under the toolbar */
+html.glass .folders::after,
+html.glass .notes::after {
+  content: '';
+  display: block;
+  flex: none;
+  height: var(--bar-gap);
+}
 
 body {
   background: var(--bg);
@@ -867,14 +892,14 @@ button.text {
   outline: none;
   max-width: 820px;
   margin: 0 auto;
-  padding: 24px 28px calc(40vh + 120px + env(safe-area-inset-bottom));
+  padding: 24px 28px calc(40vh + 120px + var(--safe-bottom));
   line-height: 1.55;
   font-size: 17px;
   caret-color: var(--accent);
 }
 @media (max-width: 699px) {
   .note-content {
-    padding: 16px 16px calc(40vh + 120px + env(safe-area-inset-bottom));
+    padding: 16px 16px calc(40vh + 120px + var(--safe-bottom));
   }
 }
 .note-content h1 {
@@ -1317,7 +1342,7 @@ button.link {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(16px + var(--safe-bottom));
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2607,7 +2632,7 @@ li[data-checked='true'] .due-chip button {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  bottom: calc(24px + var(--safe-bottom));
   transform: translateX(-50%);
   z-index: 300;
   display: flex;
@@ -2733,7 +2758,7 @@ li[data-checked='true'] .due-chip button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 10px calc(8px + var(--safe-bottom));
   border-top: 1px solid var(--line);
   background: var(--bg);
   overflow-x: auto;
@@ -3149,7 +3174,7 @@ a.button {
 }
 .image-viewer .ink-toolbar {
   position: absolute;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(16px + var(--safe-bottom));
 }
 .image-frame img {
   cursor: zoom-in;
@@ -3822,7 +3847,7 @@ a.button {
 .recording-pill {
   position: fixed;
   left: 50%;
-  bottom: calc(14px + env(safe-area-inset-bottom));
+  bottom: calc(14px + var(--safe-bottom));
   transform: translateX(-50%);
   z-index: 260;
   display: flex;
@@ -4400,7 +4425,7 @@ a.button {
 .ask-chat-input {
   border-top: 1px solid var(--line);
   background: var(--panel);
-  padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px);
+  padding: 8px 10px calc(var(--safe-bottom) + 8px);
 }
 .keyboard-open .ask-chat-input {
   padding-bottom: 8px;
@@ -4451,7 +4476,7 @@ a.button {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom) + 70px);
+  bottom: calc(var(--safe-bottom) + 70px);
   z-index: 90;
   display: flex;
   align-items: center;
@@ -4477,4 +4502,23 @@ a.button {
   align-items: center;
   gap: 5px;
   margin-top: 8px;
+}
+/* Safari tab: the chat's box floats over the messages, which scroll on under it and the toolbar */
+html.glass:not(.keyboard-open) .ask-chat-input {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: none;
+  border-top: 0;
+  pointer-events: none;
+}
+html.glass:not(.keyboard-open) .ask-chat-input > * {
+  pointer-events: auto;
+}
+html.glass:not(.keyboard-open) .ask-chat-input-row {
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+html.glass:not(.keyboard-open) .ask-chat-body {
+  padding-bottom: calc(var(--safe-bottom) + 84px);
 }
