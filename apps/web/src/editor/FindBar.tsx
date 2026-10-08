@@ -44,8 +44,9 @@ export function FindBar({ editor, initial, focus = true, onClose }: { editor: Ed
     if (state.current >= 0) revealCurrentMatch(editor.view)
   }, [editor, state.current, state.count, state.query])
 
-  const next = () => editor.commands.findNext()
-  const prev = () => editor.commands.findPrevious()
+  // (with one match the current one doesn't change: still scroll to it – it may be out of view)
+  const next = () => (editor.commands.findNext(), requestAnimationFrame(() => revealCurrentMatch(editor.view)))
+  const prev = () => (editor.commands.findPrevious(), requestAnimationFrame(() => revealCurrentMatch(editor.view)))
 
   // each replacement is its own undo step, separate from typing before it
   const um = useUndoManager()
