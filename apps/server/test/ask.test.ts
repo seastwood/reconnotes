@@ -200,6 +200,20 @@ describe('ask your notes', () => {
     expect(prompts[0]).toContain('T8 bins')
     expect(prompts[0]).not.toContain('milk') // unrelated note left out
   })
+
+  it('leaves the weekly digests out (they only repeat other notes)', async () => {
+    await addNote('asknote000003', ['Week in review – Oct 1 to Oct 7', 'Team A sorted the T8 bins this week'])
+    app.sync.hocuspocus.flushPendingStores()
+    await new Promise((r) => setTimeout(r, 300))
+    const res = await fetch(`${base}/api/ai/ask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: 'What is team A doing with the T8 bins?' }),
+    })
+    expect(res.status).toBe(200)
+    expect(prompts.at(-1)).toContain('T8 bins with all the parts')
+    expect(prompts.at(-1)).not.toContain('sorted the T8 bins this week')
+  })
 })
 
 describe('ask about a day', () => {

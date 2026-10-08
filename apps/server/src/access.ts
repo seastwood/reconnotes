@@ -12,6 +12,15 @@ import type { SyncEngine } from './sync'
  * - With `folders`, only notes in those folders and their subfolders
  *   ('none' = notes in no folder).
  */
+/** The weekly digest's notes are titled "Week in review – …". */
+export const DIGEST_PREFIX = 'Week in review'
+
+/**
+ * Notes an AI answer shouldn't draw on unless asked about directly: the weekly
+ * digests (summaries of other notes – the notes themselves are better sources).
+ */
+export const aiSkips = (m: { title: string }) => m.title.startsWith(DIGEST_PREFIX)
+
 export interface Scope {
   folders?: string[] | null
   unlocked?: string[]

@@ -4,7 +4,7 @@ import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
-import { noteFilter, type Scope } from './access'
+import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial } from './jobs'
 
 /**
@@ -119,7 +119,8 @@ export async function askNotes(
   if (isDueQuestion(question)) return dueAnswer(sync, meta, (id) => allowedEarly(id), question, now, tz)
   const usable = (id: string) => {
     const m = meta.get(id)
-    return Boolean(m && !m.trashedAt && !m.template && allowed(id))
+    // weekly digests only when asked about directly ("Ask about this note")
+    return Boolean(m && !m.trashedAt && !m.template && allowed(id) && (!aiSkips(m) || scope.notes?.includes(id)))
   }
   const wordsOf = (q: string) =>
     q

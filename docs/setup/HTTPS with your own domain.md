@@ -31,7 +31,7 @@ In *Services › DNS Resolver › Host Overrides*, add host `notes`, domain `you
 
 For VPN clients to see it:
 
-- Each WireGuard peer's config has `DNS = <pfSense LAN address>`.
+- Each WireGuard peer's config has `DNS = <pfSense LAN address>` (in the iOS WireGuard app: edit the tunnel › Interface › **DNS servers**). This is the right way to run it: a public resolver such as `1.1.1.1` doesn't know the name, so the app can't find the server. Your other lookups still work, since pfSense answers those too.
 - *Services › DNS Resolver › General Settings*: **Network Interfaces** includes the WireGuard interface (or All).
 - *Services › DNS Resolver › Access Lists*: if your WireGuard subnet isn't already allowed, add it with action **Allow**.
 
@@ -43,7 +43,7 @@ If you do add the record at Cloudflare instead, make it **DNS only** (grey cloud
     - Server: address `<server address>`, port `8787`, Encrypt (SSL) off, and **no client certificate** (the certificate goes on the frontend).
     - Advanced settings, *Backend pass thru*: `timeout tunnel 1h` (keeps the sync connection open) and `http-request set-header X-Forwarded-Proto https` (correct links, such as the calendar feed's).
 2. *Frontend*, add one (or add to an existing one):
-    - Listen on **LAN address** and the **WireGuard interface address**, port `443`, SSL offloading. **Never WAN.**
+    - Listen on **LAN address** and the **WireGuard interface address** (add a second row for it), port `443`, SSL offloading. **Never WAN.** Without the WireGuard address, it works at home but not over the VPN.
     - Certificate: the `*.yourdomain.com` one from step 2.
     - ACL: *Host matches* `notes.yourdomain.com` → backend `reconnotes`.
 3. *Settings*: if you attach large recordings or files, raise the max upload size (ReconNotes accepts up to 200 MB by default).
@@ -74,6 +74,7 @@ curl -v https://notes.yourdomain.com/api/health  # {"ok":true…}
 | Problem | What to check |
 | --- | --- |
 | The name doesn't resolve on the VPN | The WireGuard client's DNS isn't pfSense, or the host override is missing. |
+| Works at home, not over the VPN | The HAProxy frontend doesn't listen on the WireGuard address (step 4.2), or the WireGuard firewall rule is missing. |
 | Connection refused or times out | The host override points at the ReconNotes server instead of pfSense, or pfSense's own web interface is still on port 443. |
 | 503 Service Unavailable | HAProxy can't reach the backend: check `<server address>:8787` and *Status › HAProxy Stats* (the backend should be UP). |
 | Certificate error | The HAProxy frontend isn't using the ACME certificate, or the certificate hasn't been issued yet. |

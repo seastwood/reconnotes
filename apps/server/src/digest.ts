@@ -3,7 +3,7 @@ import type { Ai } from './ai'
 import type { Jobs } from './jobs'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
-import { noteFilter } from './access'
+import { DIGEST_PREFIX, noteFilter } from './access'
 import { log } from './log'
 import { Tasks } from './tasks'
 import { shortDate, startOfToday } from './timeRange'
@@ -32,7 +32,7 @@ export interface DigestSettings {
 }
 
 export const DIGEST_DEFAULTS: DigestSettings = { enabled: false, day: 0, hour: 18, tzOffset: 0 }
-export const DIGEST_PREFIX = 'Week in review'
+export { DIGEST_PREFIX }
 const DAY = 86_400_000
 
 export function digestSettings(store: Store): DigestSettings {

@@ -38,7 +38,7 @@ import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
 import { aiHealth } from './health'
-import { noteFilter, scopeFromQuery } from './access'
+import { aiSkips, noteFilter, scopeFromQuery } from './access'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
@@ -869,7 +869,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const allowed = noteFilter(sync, scopeFromQuery(url.searchParams))
     const usable = (n: string) => {
       const m = meta.get(n)
-      return Boolean(m && !m.trashedAt && !m.template && allowed(n))
+      return Boolean(m && !m.trashedAt && !m.template && !aiSkips(m) && allowed(n))
     }
     const related = (sync.meaning?.related(id, 10) ?? [])
       .filter((h) => usable(h.noteId))
