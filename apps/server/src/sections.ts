@@ -90,7 +90,7 @@ export function splitSections(noteId: string, title: string, md: string): Sectio
  * "size" a "sizing box". A question word matches any of its group.
  */
 const GROUPS: string[][] = [
-  ['height', 'tall', 'taller', 'tallest', 'high'],
+  ['height', 'tall', 'taller', 'tallest'],
   ['width', 'wide', 'wider'],
   ['length', 'long', 'longer'],
   ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger', 'not extend beyond'],
@@ -99,6 +99,7 @@ const GROUPS: string[][] = [
   ['weight', 'weigh', 'weighs', 'heavy', 'heavier', 'mass', 'lbs', 'pounds', 'kg'],
   ['robot', 'robots'],
   ['time', 'duration', 'seconds', 'minutes', 'timer'],
+  ['speed', 'fast', 'faster', 'fastest', 'quick', 'velocity', 'fps', 'feet per second', 'per second', 'mph'],
   ['cost', 'costs', 'price', 'budget', 'spend'],
   ['score', 'scoring', 'scored', 'points', 'point'],
   ['penalty', 'penalties', 'foul', 'fouls', 'violation'],
@@ -113,8 +114,9 @@ export const variantsOf = (t: string): string[] => GROUP_OF.get(t) ?? GROUP_OF.g
 /** A word (or phrase) in lower-case text: at the start of a word; a long word by its stem. */
 const holds = (low: string, t: string) =>
   t.includes(' ') ? low.includes(t) : t.length > 5 ? low.includes(STEM(t)) : new RegExp(`(^|[^\\p{L}\\p{N}])${t}`, 'u').test(low)
-/** Any of the words that mean the same. */
-const holdsAny = (low: string, t: string) => variantsOf(t).some((v) => holds(low, v))
+/** Any of the words that mean the same: the word itself as above; a stand-in only as a whole word ("limit", not "limited to"). */
+const holdsAny = (low: string, t: string) =>
+  holds(low, t) || variantsOf(t).some((v) => v !== t && (v.includes(' ') ? low.includes(v) : new RegExp(`(^|[^\\p{L}\\p{N}])${v}(?:s|es)?(?![\\p{L}\\p{N}])`, 'u').test(low)))
 
 const wordsOf = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
 

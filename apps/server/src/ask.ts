@@ -18,7 +18,7 @@ import { claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreS
  */
 
 export const STOP = new Set(
-  'a an and are as at be but by can could did do does for from had has have how i if in into is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about any all also did didnt dont get got just know like make need should tell than want note notes wrote write written work worked working yesterday today tonight week month last past previous day days morning afternoon evening monday tuesday wednesday thursday friday saturday sunday'.split(
+  'a an and are as at be but by can could much many go goes did do does for from had has have how i if in into is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about any all also did didnt dont get got just know like make need should tell than want note notes wrote write written work worked working yesterday today tonight week month last past previous day days morning afternoon evening monday tuesday wednesday thursday friday saturday sunday'.split(
     ' ',
   ),
 )
@@ -279,9 +279,30 @@ export async function askNotes(
     rest = (matched ? order : [...scored].sort((a, b) => b.score - a.score)).filter((x) => !read.has(x) && (pinned.length || x.score > 0))
   }
   // the lines most about the question, first: what a small model would otherwise skim past
-  const key = (context: string) => {
-    const shown = new Map([...texts].filter(([, t]) => context.includes(t)))
-    const lines = range ? [] : keyLines(shown, words, rules)
+  // the lines most about the question – asked about one note (a manual), from anywhere in
+  // it, not only the parts read (a part not read becomes a source of its own, so it's cited)
+  const keyed: { n: number; line: string }[] = []
+  if (!range) {
+    const pool = new Map(texts)
+    const unread = new Map<number, Section>()
+    if (pinned.length) {
+      const readTexts = new Set(texts.values())
+      everySection.forEach((sec, i) => {
+        if (!read.has(sec) && !readTexts.has(sec.text)) (pool.set(-1 - i, sec.text), unread.set(-1 - i, sec))
+      })
+    }
+    const added = new Map<Section, number>()
+    for (const l of keyLines(pool, words, rules, 4, 0.9)) {
+      const sec = unread.get(l.n)
+      if (sec && !added.has(sec)) {
+        add(sec.noteId, sec.text, sec)
+        added.set(sec, sources.length)
+      }
+      keyed.push(sec ? { ...l, n: added.get(sec)! } : l)
+    }
+  }
+  const key = (_context: string) => {
+    const lines = keyed
     return lines.length
       ? `\n\nThe lines of the notes above most about the question – answer from these first, and give every value in them that answers it (each limit, with when it applies: e.g. one at the start and another during a match):\n${lines.map((l) => `[${l.n}] ${l.line}`).join('\n')}`
       : ''
@@ -352,25 +373,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   // what the answer left out of the lines most about the question (a small model
   // often answers from one passage): added, each linked to where it is
   if (!range) {
-    // asked about one note (a manual): its lines from anywhere in it, not only the parts read
-    const pool = new Map(texts)
-    const unread = new Map<number, Section>()
-    if (pinned.length) {
-      const readTexts = new Set(texts.values())
-      everySection.forEach((sec, i) => {
-        if (!read.has(sec) && !readTexts.has(sec.text)) (pool.set(-1 - i, sec.text), unread.set(-1 - i, sec))
-      })
-    }
-    const key = keyLines(pool, words, rules, 4, 0.9).map((l) => {
-      const sec = unread.get(l.n)
-      if (!sec) return l
-      // from a part not read: a source of its own, so it's linked
-      add(sec.noteId, sec.text, sec)
-      unread.delete(l.n)
-      const n = sources.length
-      for (const [k, v] of unread) if (v === sec) unread.delete(k)
-      return { ...l, n }
-    })
+    const key = keyed
     // the best line gives figures (40”, 60”): only lines that give figures too
     const figures = /\d/.test(key[0]?.line ?? '')
     const quote = key.filter((l) => (!figures || /\d/.test(l.line)) && !quoted(text, l.line)).slice(0, 4)
