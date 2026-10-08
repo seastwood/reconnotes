@@ -1,5 +1,5 @@
 import type { Store } from './store'
-import type { AskSource } from './ask'
+import type { AskCite, AskSource } from './ask'
 
 /**
  * Ask conversations, kept
@@ -15,6 +15,8 @@ export interface AskTurnSaved {
   question: string
   answer: string
   sources: AskSource[]
+  /** each citation's line in its source, in order */
+  cites?: AskCite[]
   at: number
 }
 

@@ -7,7 +7,7 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
-import { askNotes } from '../src/ask'
+import { askNotes, citeFinds } from '../src/ask'
 import { findIn, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -467,5 +467,28 @@ describe('a manual says it in other words', () => {
     // the first look didn't have it
     expect(prompts.filter((p) => p.includes('Question: What colour is the jersey?'))).toHaveLength(2)
     expect(res.sources[0].section).toBe('Uniforms')
+  })
+})
+
+describe('each citation opens where its sentence came from', () => {
+  it('three facts from one section: three places', () => {
+    const section = [
+      '### 7.2 GENERAL ROBOT DESIGN',
+      'R01. The ROBOT must start a MATCH inside the STARTING VOLUME of 36” long x 36” wide x 40” tall and not extend beyond the ROBOT VOLUME of 36” long x 36” wide x 60” tall during a MATCH.',
+      'R02. The ROBOT weight must not exceed the weight of 125 lbs.',
+      'Battery and bumpers do not count towards the 125 lbs limit.',
+      'R03. The ROBOT must be designed to not exceed a speed of 10.5 feet per second.',
+    ].join('\n\n')
+    const answer = [
+      '- The ROBOT must start inside a STARTING VOLUME of 36” long x 36” wide x 40” tall [7].',
+      '- The maximum height is 60 inches: it must not extend beyond 36” x 36” x 60” tall during a MATCH [7].',
+      '- The ROBOT must not exceed a speed of 10.5 feet per second [7][2].',
+    ].join('\n')
+    const cites = citeFinds(answer, new Map([[7, section], [2, 'Something else entirely.']]))
+    expect(cites.map((c) => c.n)).toEqual([7, 7, 7, 2])
+    expect(cites[0].find).toMatch(/^R01\. The ROBOT must start/)
+    expect(cites[1].find).toMatch(/^R01\./)
+    expect(cites[2].find).toMatch(/^R03\. The ROBOT must be/)
+    expect(cites[3].find).toBeUndefined()
   })
 })

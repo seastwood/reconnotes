@@ -6,7 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial, reportProgress } from './jobs'
-import { findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { findForClaim, findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -38,6 +38,14 @@ export interface AskSource {
   /** the part of the note it's from (a long note's section: "6.4 Scoring") */
   section?: string
   /** text to find when the note is opened from this source (lands on the passage) */
+  find?: string
+  /** (while working it out) */
+  found?: boolean
+}
+
+/** One citation in the answer, in order: where in its source that sentence came from. */
+export interface AskCite {
+  n: number
   find?: string
 }
 
@@ -118,7 +126,7 @@ export async function askNotes(
   scope: Scope = {},
   /** a follow-up: the questions and answers before it, oldest first (with the notes each used) */
   history: AskTurn[] = [],
-): Promise<{ answer: string; sources: AskSource[]; agent: string }> {
+): Promise<{ answer: string; sources: AskSource[]; cites?: AskCite[]; agent: string }> {
   const meta = sync.noteMeta()
   const allowed = noteFilter(sync, scope)
   const now = when.now ?? Date.now()
@@ -273,7 +281,7 @@ export async function askNotes(
 - When the answer is several things, write a Markdown list, one item per line starting with "- ". Include every item the notes give – don't leave any out or merge them.
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
-- After each fact or item, cite the note it came from like [1] or [2][3].
+- After each fact or item, cite the note it came from like [1] or [2][3] – just the number in brackets, not the note's title or section.
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
@@ -317,9 +325,38 @@ Notes:${context}`
     const box = /^\s*- \[ \]/m.test(text) ? '- [ ] ' : '- '
     text += `\n\nAlso in your notes:\n${missing.map((m) => `${box}${m.text} [${m.n}]`).join('\n')}`
   }
+  // each citation: the line of its source the sentence before it came from
+  const cites = citeFinds(text, texts)
+  for (const c of cites) {
+    const src = sources.find((x) => x.n === c.n)
+    // the source's link: where its first citation came from (a rule asked about: its definition, as found)
+    if (src && c.find && !src.found && !rules.length) (src.find = c.find), (src.found = true)
+  }
+  for (const src of sources) delete src.found
   // keep only sources the answer actually cites – or, if it cites none, the notes it plainly drew on
-  const cited = new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))
-  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), agent }
+  const cited = new Set(cites.map((c) => c.n))
+  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), cites, agent }
+}
+
+/** Each citation in the answer, in order, with the line its sentence came from. */
+export function citeFinds(answer: string, texts: Map<number, string>): AskCite[] {
+  const out: AskCite[] = []
+  let from = 0
+  const re = /((?:\[\d+\])+)/g
+  for (const m of answer.matchAll(re)) {
+    // the claim: back to the end of the sentence (or citation) before it
+    const before = answer.slice(from, m.index)
+    // (a sentence ends at ". " or a new line – not at the point in "10.5")
+    const ends = [...before.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1).filter((i) => before.slice(i).trim())
+    const claim = before.slice(ends.length ? ends[ends.length - 1] : 0)
+    from = m.index! + m[0].length
+    for (const n of [...m[0].matchAll(/\[(\d+)\]/g)].map((x) => Number(x[1]))) {
+      const text = texts.get(n)
+      const find = text ? findForClaim(text, claim) : null
+      out.push({ n, ...(find ? { find } : {}) })
+    }
+  }
+  return out
 }
 
 /** A note's title for the source list: handwritten notes can have a whole paragraph as their title. */

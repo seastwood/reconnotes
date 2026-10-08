@@ -229,3 +229,32 @@ export function findTextOf(s: Section): string {
   const first = s.text.split('\n').map(plain).find((l) => l.length >= 8 && !/\(continued\)$/.test(l)) ?? ''
   return first.split(' ').slice(0, 8).join(' ')
 }
+
+/**
+ * Where in a source an answer's sentence came from: the line sharing the most
+ * of its words – numbers most of all ("40” tall", "125 lbs") – as the first
+ * words of that line, for the find bar. Null when nothing is shared.
+ */
+export function findForClaim(text: string, claim: string): string | null {
+  const tokens = (s: string) => s.toLowerCase().match(/\d+(?:\.\d+)?|[\p{L}]{3,}/gu) ?? []
+  const want = new Set(tokens(claim).filter((w) => !CLAIM_STOP.has(w)))
+  if (!want.size) return null
+  let best: { line: string; score: number } | null = null
+  for (const raw of text.split('\n')) {
+    const line = plainLine(raw)
+    if (line.length < 4) continue
+    const have = new Set(tokens(line))
+    let score = 0
+    let shared = 0
+    // a number of two digits or more ("40", "125", "10.5") says most about where it's from
+    for (const w of want) if (have.has(w)) (score += /^\d/.test(w) ? (w.length >= 2 ? 3 : 1) : 1), shared++
+    if (shared >= 2 && score > (best?.score ?? 0)) best = { line, score }
+  }
+  // a word or two in common is chance, not where it came from
+  if (!best || best.score < 4) return null
+  return best.line.split(' ').slice(0, 6).join(' ').replace(/[.,;:]$/, '')
+}
+
+const CLAIM_STOP = new Set(
+  'the and for are was were with that this from have has had not but can will its into than then they their there which what when where who how all any per also must may should note notes section'.split(' '),
+)

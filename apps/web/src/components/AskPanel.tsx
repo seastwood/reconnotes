@@ -17,6 +17,8 @@ interface Source {
 export interface AskResult {
   answer: string
   sources: Source[]
+  /** each citation in the answer, in order: the line its sentence came from */
+  cites?: { n: number; find?: string }[]
 }
 
 /** the newest "Ask your notes" job for this question (still useful: not failed or cancelled) */
@@ -269,9 +271,12 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
   const html = useMemo(() => {
     const md = result.answer.replace(/</g, '&lt;')
     // [2] → a link to source 2
-    return (marked.parse(md, { async: false }) as string).replace(/\[(\d+)\]/g, (m, n) =>
-      result.sources.some((s) => s.n === Number(n)) ? `<button class="cite" data-n="${n}">${n}</button>` : m,
-    )
+    // each citation numbered in order (k), so it opens where its own sentence came from
+    let k = -1
+    return (marked.parse(md, { async: false }) as string).replace(/\[(\d+)\]/g, (m, n) => {
+      k++
+      return result.sources.some((s) => s.n === Number(n)) ? `<button class="cite" data-n="${n}" data-k="${k}">${n}</button>` : m
+    })
   }, [result])
   return (
     <>
@@ -281,7 +286,8 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
         onClick={(e) => {
           const n = (e.target as HTMLElement).closest('.cite') as HTMLElement | null
           const s = n && result.sources.find((x) => x.n === Number(n.dataset.n))
-          if (s) onOpen(s.noteId, s.find)
+          const cite = n ? result.cites?.[Number(n.dataset.k)] : undefined
+          if (s) onOpen(s.noteId, (cite?.n === s.n ? cite.find : undefined) ?? s.find)
         }}
       />
       {result.sources.length > 0 && (
