@@ -462,12 +462,11 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       {busy && <Loader2 size={18} className="spin" aria-label={busy} />}
       <button
         className="tb"
-        title="Compile into a clean document with AI (handwriting + typing)"
-        aria-label="Compile with AI"
-        disabled={Boolean(busy)}
-        onClick={() => run('Compiling…', async () => onOpenNote(await compileNote(editor, noteId)))}
+        title="Chat with AI about this note"
+        aria-label="Ask about this note"
+        onClick={() => openAskChat({ noteId, title: (meta?.get('title') as string) ?? '' })}
       >
-        <Sparkles size={20} />
+        <MessageCircleQuestion size={20} />
       </button>
       <button ref={moreBtn} className={`tb${menu === 'more' ? ' on' : ''}`} onClick={() => setMenu(menu === 'more' ? null : 'more')} aria-label="More">
         <MoreHorizontal size={20} />
@@ -475,8 +474,12 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       {menu === 'more' && (
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
             <div className="menu-label">AI</div>
-            <button onClick={() => (setMenu(null), openAskChat({ noteId, title: (meta?.get('title') as string) ?? '' }))}>
-              <MessageCircleQuestion size={16} /> Ask about this note…
+            <button
+              disabled={Boolean(busy)}
+              title="Compile into a clean document with AI (handwriting + typing)"
+              onClick={() => (setMenu(null), void run('Compiling…', async () => onOpenNote(await compileNote(editor, noteId))))}
+            >
+              <Sparkles size={16} /> Compile into a clean document
             </button>
             <button onClick={() => (setMenu(null), void run('Summarising…', () => noteAction(editor, noteId, 'summary')))}>
               <ScrollText size={16} /> Summarise note
