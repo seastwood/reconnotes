@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUp, MessageCircleQuestion, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
@@ -26,7 +26,17 @@ export function AskNoteDialog({
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState<string | null>(null)
   const access = useFolderAccess()
-  const ask = () => draft.trim() && setQuestion(draft.trim())
+  const answerRef = useRef<HTMLUListElement>(null)
+  const boxRef = useRef<HTMLTextAreaElement>(null)
+  const liftedAt = useRef(0)
+  const ask = () => {
+    if (!draft.trim()) return
+    setQuestion(draft.trim())
+    setDraft('')
+    // the keyboard away, and the question (with how it's going) in view
+    boxRef.current?.blur()
+    setTimeout(() => answerRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 350)
+  }
   // on top of everything (it's opened from the toolbar)
   return createPortal(
     <div className="dialog-backdrop" onClick={onClose}>
@@ -47,6 +57,7 @@ export function AskNoteDialog({
           }}
         >
           <textarea
+            ref={boxRef}
             rows={1}
             autoFocus
             value={draft}
@@ -60,14 +71,30 @@ export function AskNoteDialog({
               }
             }}
           />
-          <button type="submit" className="icon" disabled={!draft.trim()} aria-label="Ask">
+          <button
+            type="submit"
+            className="icon"
+            disabled={!draft.trim()}
+            aria-label="Ask"
+            // iOS can drop the tap that also puts the keyboard away: act when the finger lifts
+            onPointerUp={(e) => {
+              if (e.pointerType === 'mouse') return
+              e.preventDefault()
+              liftedAt.current = Date.now()
+              ask()
+            }}
+            onClick={(e) => {
+              if (Date.now() - liftedAt.current < 800) e.preventDefault()
+            }}
+          >
             <ArrowUp size={16} />
           </button>
         </form>
         {question && (
-          <ul className="ask-note-answer">
+          <ul className="ask-note-answer" ref={answerRef}>
             <AskPanel
               key={question}
+              // it's a job: closing this doesn't stop it
               question={question}
               where={folderId ? { folders: [folderId], unlocked: access.unlockedIds } : { notes: [noteId!], unlocked: access.unlockedIds }}
               onOpen={(id, find) => {
