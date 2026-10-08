@@ -41,8 +41,10 @@ export interface WebImportOptions {
   folderId?: string | null
   /** checking an earlier import for updates */
   update?: WebImportRecord
-  /** a PDF uploaded from the device (an attachment): its chapters as notes */
+  /** a PDF uploaded from the device (an attachment) */
   pdfAttachmentId?: string
+  /** a PDF: a note per chapter (in a folder, with a contents note) instead of one note */
+  splitPdf?: boolean
 }
 
 export interface WebImportResult {
@@ -673,7 +675,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     const att = store.getAttachment(opts.pdfAttachmentId)
     if (!att || !store.hasBlob(att.id)) throw new Error('The PDF hasn’t reached the server yet – try again in a moment.')
     const data = fs.readFileSync(store.blobPath(att.id))
-    const split = await pdfPages(data, new URL(`https://pdf.reconnotes/${encodeURIComponent(att.name || 'Document.pdf')}`))
+    const split = await pdfPages(data, new URL(`https://pdf.reconnotes/${encodeURIComponent(att.name || 'Document.pdf')}`), Boolean(opts.splitPdf))
     pdf = { name: att.name || 'Document.pdf', data, attachmentId: att.id }
     pages.push(...split)
     queue.length = 0
@@ -694,7 +696,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     if (got.type === 'application/pdf' || /\.pdf$/i.test(finalUrl.pathname)) {
       if (pages.length) continue
       const name = decodeURIComponent(path.posix.basename(finalUrl.pathname)) || 'Document.pdf'
-      const split = await pdfPages(got.data, finalUrl).catch(() => null)
+      const split = await pdfPages(got.data, finalUrl, Boolean(opts.splitPdf)).catch(() => null)
       if (!split) return importFile(config, store, ai, sync, got.data, 'application/pdf', name, finalUrl, opts.folderId ?? null)
       pdf = { name, data: got.data }
       pages.push(...split)
@@ -1013,6 +1015,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     id: prev?.id ?? newId(),
     url: prev?.url ?? start.href,
     follow: Boolean(opts.follow),
+    ...(opts.splitPdf ? { splitPdf: true } : {}),
     maxPages,
     folderId: multi ? folderId : (prev?.folderId ?? opts.folderId ?? null),
     contentsNoteId: contentsId ?? undefined,
@@ -1059,6 +1062,8 @@ export interface WebImportRecord {
   url: string
   follow: boolean
   maxPages: number
+  /** a PDF split into a note per chapter */
+  splitPdf?: boolean
   /** where its notes are (the guide's own folder, or the folder it was imported into) */
   folderId: string | null
   contentsNoteId?: string
@@ -1090,7 +1095,7 @@ export function importsFor(store: Store, sync: SyncEngine, where: { noteId?: str
 /** Check an import for updates: fetch its pages again; write what changed. */
 export async function refreshImport(config: Config, store: Store, ai: Ai, sync: SyncEngine, r: WebImportRecord): Promise<WebImportResult> {
   if (new URL(r.url).host === 'pdf.reconnotes') throw new Error('This PDF came from your device, so there’s nowhere to check for a newer version – import the new PDF instead.')
-  return importWebPages(config, store, ai, sync, { url: r.url, follow: r.follow, maxPages: r.maxPages, folderId: r.folderId, update: r })
+  return importWebPages(config, store, ai, sync, { url: r.url, follow: r.follow, maxPages: r.maxPages, folderId: r.folderId, splitPdf: r.splitPdf ?? Object.keys(r.pages).length > 1, update: r })
 }
 
 /**
@@ -1139,8 +1144,19 @@ export function pictureSize(data: Buffer, mime: string): { w: number; h: number 
 }
 
 /** A PDF's sections as pages to import (each with an address of its own, by its title). */
-async function pdfPages(data: Buffer, url: URL): Promise<Page[]> {
-  const { sections } = await pdfSections(data)
+async function pdfPages(data: Buffer, url: URL, split = false): Promise<Page[]> {
+  const { sections, title } = await pdfSections(data)
+  // one note (unless asked to split it): every chapter in it, a heading level down under the document's title
+  if (!split && sections.length > 1) {
+    const body = sections
+      .map((sec) => (/<main>([\s\S]*)<\/main>/.exec(sec.html)?.[1] ?? '').replace(/<(\/?)h([1-6])>/g, (_m, close: string, n: string) => `<${close}h${Math.min(6, Number(n) + 1)}>`))
+      .join('')
+    const name = title || decodeURIComponent(url.pathname.split('/').pop() ?? '').replace(/\.pdf$/i, '') || 'Document'
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    const html = `<html><head><title>${esc(name)}</title></head><body><main><h1>${esc(name)}</h1>${body}</main></body></html>`
+    const { document } = parseHTML(html)
+    return [{ url, title: '', html, doc: document as unknown as Document, pdfPages: [sections[0].pages[0], sections[sections.length - 1].pages[1]] }]
+  }
   const used = new Map<string, number>()
   return sections.map((sec) => {
     let slug = sec.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 60) || 'part'

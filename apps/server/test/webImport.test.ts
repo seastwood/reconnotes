@@ -322,13 +322,13 @@ describe('rule numbers in an imported manual', () => {
 import { manualPdf } from './pdfHelper'
 
 describe('a PDF manual from a link', () => {
-  it('becomes a folder: a note per chapter, a contents note with the PDF, rules linked across chapters', async () => {
+  it('split, becomes a folder: a note per chapter, a contents note with the PDF, rules linked across chapters', async () => {
     PAGES['/manual.pdf'] = '' // served below as a PDF
     const pdfServer = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(manualPdf()))
     await new Promise<void>((r) => pdfServer.listen(0, '127.0.0.1', () => r()))
     try {
       const url = `http://127.0.0.1:${(pdfServer.address() as AddressInfo).port}/2026GameManual.pdf`
-      const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url })
+      const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url, splitPdf: true })
       const ws = app.sync.getDoc(WORKSPACE_DOC)!
       expect(listFolders(ws).find((f) => f.id === r.folderId)?.name).toBe('2026GameManual')
       const titles = listNotes(ws).filter((n) => n.folderId === r.folderId).map((n) => n.title)
@@ -346,6 +346,25 @@ describe('a PDF manual from a link', () => {
     } finally {
       pdfServer.close()
       delete PAGES['/manual.pdf']
+    }
+  })
+
+  it('by default, becomes one note: every chapter in it, the PDF at the end', async () => {
+    const pdfServer = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(manualPdf()))
+    await new Promise<void>((r) => pdfServer.listen(0, '127.0.0.1', () => r()))
+    try {
+      const url = `http://127.0.0.1:${(pdfServer.address() as AddressInfo).port}/OneNoteManual.pdf`
+      const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url, folderId: null })
+      expect(r.noteIds).toHaveLength(1)
+      const m = md(r.noteIds[0])
+      expect(m).toMatch(/^# /)
+      expect(m).toContain('## 6 Game Rules')
+      expect(m).toContain('### 6.1 Fouls')
+      expect(m).toContain('## 9 Robot Rules')
+      expect(m).toMatch(/pages 1–4/)
+      expect(getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()).toMatch(/<file [^>]*name="OneNoteManual\.pdf"/)
+    } finally {
+      pdfServer.close()
     }
   })
 })

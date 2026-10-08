@@ -8,13 +8,16 @@ import { addAttachment, flushUploads } from '../lib/attachments'
 /**
  * Import a web page: a guide, manual or article becomes a note – its text,
  * headings, lists, tables, code, links and every picture – or, with "the
- * rest of the guide", one note per page in a folder of its own. The server
+ * rest of the guide", one note per page in a folder of its own. A PDF is
+ * one note too, unless it's asked to be split at its chapters. The server
  * does the work (as a job), so it carries on if this is closed.
  */
 export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: { folderId: string | null; onClose: () => void; onOpen: (noteId: string) => void; initialUrl?: string }) {
   const [url, setUrl] = useState(initialUrl)
   const [follow, setFollow] = useState(false)
   const [maxPages, setMaxPages] = useState(50)
+  /** a PDF: a note per chapter (in a folder) instead of one note */
+  const [splitPdf, setSplitPdf] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const job = useJobs((s) => s.jobs.find((j) => j.id === jobId))
@@ -32,7 +35,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
     try {
       const attachmentId = await addAttachment(file, file.name)
       await flushUploads()
-      const j = await submitJob({ kind: 'web-import', title: file.name, input: { pdfAttachmentId: attachmentId, folderId } })
+      const j = await submitJob({ kind: 'web-import', title: file.name, input: { pdfAttachmentId: attachmentId, folderId, splitPdf } })
       setJobId(j.id)
     } catch (e) {
       setError((e as Error).message)
@@ -51,7 +54,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
       return setError('That doesn’t look like a web address.')
     }
     try {
-      const j = await submitJob({ kind: 'web-import', title: u.replace(/^https?:\/\//, '').slice(0, 120), input: { url: u, follow, maxPages: follow ? maxPages : 1, folderId } })
+      const j = await submitJob({ kind: 'web-import', title: u.replace(/^https?:\/\//, '').slice(0, 120), input: { url: u, follow, maxPages: follow ? maxPages : 1, folderId, splitPdf } })
       setJobId(j.id)
     } catch (e) {
       setError((e as Error).message)
@@ -139,7 +142,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               <button type="button" className="text" onClick={() => pdfInput.current?.click()}>
                 choose a PDF from this device
               </button>{' '}
-              – it’s split at its chapters into notes, with the original kept.
+              – it becomes a note, with the original PDF kept in it.
               <input
                 ref={pdfInput}
                 type="file"
@@ -152,6 +155,10 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
                 }}
               />
             </p>
+            <label className="check">
+              <input type="checkbox" checked={splitPdf} onChange={(e) => setSplitPdf(e.target.checked)} /> Split a PDF into a note per chapter
+            </label>
+            {splitPdf && <p className="hint">Each chapter becomes its own note, in a new folder with a contents note – handy for very long manuals.</p>}
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel

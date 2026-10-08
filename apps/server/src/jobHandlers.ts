@@ -396,13 +396,14 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   // a web page (and, if asked, the guide's other pages) into notes (see webImport.ts)
   jobs.register('web-import', async (job) => {
-    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string }
+    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string; splitPdf?: boolean }
     const r = await importWebPages(config, store, ai, sync, {
       url: String(i.url ?? ''),
       follow: Boolean(i.follow),
       maxPages: Number(i.maxPages) || undefined,
       folderId: i.folderId ?? null,
       pdfAttachmentId: typeof i.pdfAttachmentId === 'string' ? i.pdfAttachmentId : undefined,
+      splitPdf: Boolean(i.splitPdf),
     })
     const summary = [
       `${r.pages} page${r.pages === 1 ? '' : 's'}, ${r.pictures} picture${r.pictures === 1 ? '' : 's'}.`,
