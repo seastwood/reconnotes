@@ -99,6 +99,7 @@ const GROUPS: string[][] = [
   ['weight', 'weigh', 'weighs', 'heavy', 'heavier', 'mass', 'lbs', 'pounds', 'kg'],
   ['robot', 'robots'],
   ['time', 'duration', 'seconds', 'minutes', 'timer'],
+  ['cutout', 'cutouts', 'cut', 'gap', 'gaps', 'opening', 'openings', 'notch', 'hole', 'holes'],
   ['speed', 'fast', 'faster', 'fastest', 'quick', 'velocity', 'fps', 'feet per second', 'per second', 'mph'],
   ['cost', 'costs', 'price', 'budget', 'spend'],
   ['score', 'scoring', 'scored', 'points', 'point'],

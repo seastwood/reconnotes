@@ -315,6 +315,7 @@ export async function askNotes(
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
+- Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
 
@@ -354,7 +355,9 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   }
   let text = listify(raw)
   // the list items of the note sections the question is about, that the answer left out
-  const missing = missingItems(text, sectionItems(texts, ownWords))
+  // (a yes/no question isn't asking for a list)
+  const yesNo = /^\s*(?:can|could|is|are|was|were|does|do|did|should|may|must|will|would|has|have)\b/i.test(question)
+  const missing = yesNo || !/^\s*(?:[-*]|\d+[.)])\s/m.test(text) ? [] : missingItems(text, sectionItems(texts, ownWords))
   if (missing.length && !/don't contain|do not contain|doesn't contain|no information|not (?:found|mentioned)/i.test(text)) {
     const box = /^\s*- \[ \]/m.test(text) ? '- [ ] ' : '- '
     text += `\n\nAlso in your notes:\n${missing.map((m) => `${box}${m.text} [${m.n}]`).join('\n')}`
@@ -422,18 +425,44 @@ export function citeByNumber(answer: string, sources: AskSource[]): string {
     .replace(/(?:,?\s+(?:as|per|according|to|outlined|stated|described|specified|in|from|under|by|see|the|rules?|sections?|of))*\s*\u0000/gi, '')
 }
 
+/**
+ * Where sentences end: at ". " (or "!", "?") before a capital, a quote or a
+ * list – not at "4 in. (~101 mm)", "e.g. this", "10.5" – and at new lines.
+ */
+function sentenceEnds(t: string): number[] {
+  const out: number[] = []
+  for (const m of t.matchAll(/[.!?](?=\s)|\n/g)) {
+    const i = m.index!
+    if (m[0] !== '\n') {
+      if (m[0] === '.' && /(?:^|[^\p{L}])(?:in|ft|lbs?|oz|mm|cm|kg|sec|min|max|approx|no|vs|etc|fig|e\.g|i\.e)$/iu.test(t.slice(Math.max(0, i - 8), i))) continue
+      const next = /\S/.exec(t.slice(i + 1))?.[0]
+      if (next && !/[\p{Lu}"“*\-#>]/u.test(next)) continue
+    }
+    out.push(i + 1)
+  }
+  return out
+}
+
 /** Each sentence (or list item) of the answer without a citation: cited to the source line it matches best. */
 export function autoCite(answer: string, texts: Map<number, string>): string {
-  return answer.replace(/[^\n]*?(?:[.!?](?=\s|$)|$)/gm, (sentence) => {
-    if (sentence.trim().length < 12 || /\[\d+\]/.test(sentence)) return sentence
+  const cuts = [0, ...sentenceEnds(answer), answer.length].filter((x, i, a) => i === 0 || x > a[i - 1])
+  let out = ''
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const sentence = answer.slice(cuts[k], cuts[k + 1])
+    const body = sentence.replace(/\s+$/, '')
+    const tail = sentence.slice(body.length)
+    if (body.trim().length < 12 || /\[\d+\]/.test(body)) {
+      out += sentence
+      continue
+    }
     let best: { n: number; score: number } | null = null
     for (const [n, text] of texts) {
-      const m = claimMatch(text, sentence)
+      const m = claimMatch(text, body)
       if (m && m.score > (best?.score ?? 0)) best = { n, score: m.score }
     }
-    if (!best) return sentence
-    return /[.!?]$/.test(sentence) ? `${sentence.slice(0, -1)} [${best.n}]${sentence.slice(-1)}` : `${sentence} [${best.n}]`
-  })
+    out += !best ? sentence : /[.!?]$/.test(body) ? `${body.slice(0, -1)} [${best.n}]${body.slice(-1)}${tail}` : `${body} [${best.n}]${tail}`
+  }
+  return out
 }
 
 /** A line the answer already quotes (near enough word for word). */
@@ -448,7 +477,7 @@ const clip = (t: string, n: number) => (t.length <= n ? t : `${t.slice(0, n).rep
 
 /** Where a citation's sentence is: (a sentence ends at ". " or a new line – not at the point in "10.5"). */
 function sentenceAround(answer: string, at: number, len: number): string {
-  const ends = [0, ...[...answer.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1), answer.length]
+  const ends = [0, ...sentenceEnds(answer), answer.length]
   // small models cite mid-sentence: "…based on rule R01 [7], which states that the ROBOT must not…"
   let start = 0
   for (const e of ends) if (e <= at && answer.slice(e, at).trim()) start = e

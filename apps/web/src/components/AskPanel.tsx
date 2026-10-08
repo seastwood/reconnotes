@@ -294,16 +294,24 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
       />
       {result.sources.length > 0 && (
         <div className="ask-sources">
-          {result.sources.map((s) => (
-            <button key={s.n} onClick={() => onOpen(s.noteId, s.find)} title={s.section ? `${s.title} › ${s.section}` : s.title}>
-              <span className="cite">{s.n}</span>
-              <FileText size={14} />{' '}
-              <span>
-                {s.title}
-                {s.section && <span className="ask-section"> › {s.section}</span>}
-              </span>
-            </button>
-          ))}
+          {/* parts of the same section (a long one, read in pieces): one row, with each number */}
+          {groupSources(result.sources).map((g) => {
+            const s = g[0]
+            return (
+              <button key={s.n} onClick={() => onOpen(s.noteId, s.find)} title={s.section ? `${s.title} › ${s.section}` : s.title}>
+                {g.map((x) => (
+                  <span key={x.n} className="cite">
+                    {x.n}
+                  </span>
+                ))}
+                <FileText size={14} />{' '}
+                <span>
+                  {s.title}
+                  {s.section && <span className="ask-section"> › {s.section}</span>}
+                </span>
+              </button>
+            )
+          })}
         </div>
       )}
       {!!result.read?.length && (
@@ -320,4 +328,14 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
       )}
     </>
   )
+}
+
+/** Sources from the same note and section, together (in order of their first number). */
+function groupSources(sources: AskResult['sources']): AskResult['sources'][] {
+  const groups = new Map<string, AskResult['sources']>()
+  for (const s of sources) {
+    const k = `${s.noteId}|${s.section ?? ''}`
+    groups.set(k, [...(groups.get(k) ?? []), s])
+  }
+  return [...groups.values()]
 }

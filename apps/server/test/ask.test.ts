@@ -578,3 +578,18 @@ describe('a citation where the sentence names its section', () => {
     expect(recite('A robot over this limit would be penalized under Rule 4.6 RULE VIOLATIONS [6].', texts, sources)).toBe('A robot over this limit would be penalized under Rule 4.6 RULE VIOLATIONS [3].')
   })
 })
+
+describe('the bumper rules', () => {
+  const texts = new Map([
+    [1, 'R401 BUMPERS all around. ROBOTS are required to use BUMPERS to protect the entire ROBOT PERIMETER. Gaps of less than 1 ¼ in. (31 mm) between adjacent segments are permitted as long as all corners are filled per R406.'],
+    [2, 'R403 BUMPER extension limit. BUMPERS must not extend more than 4 in. (101 mm) from the ROBOT PERIMETER.'],
+  ])
+  it('"cutout" finds the rule about gaps', () => {
+    expect(keyLines(texts, ['robot', 'cutout', 'bumper'])[0].n).toBe(1)
+  })
+  it('"4 in. (~101 mm)" isn’t the end of a sentence', () => {
+    expect(autoCite('BUMPERS must not extend more than 4 in. (~101 mm) from the ROBOT PERIMETER.', texts)).toBe(
+      'BUMPERS must not extend more than 4 in. (~101 mm) from the ROBOT PERIMETER [2].',
+    )
+  })
+})
