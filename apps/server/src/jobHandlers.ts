@@ -32,6 +32,7 @@ import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { meetingNotesText } from './meetingNotes'
+import { importWebPages } from './webImport'
 
 /**
  * What each kind of job does. Results that belong in a note are written into
@@ -56,6 +57,7 @@ export const JOB_KINDS: Record<string, string> = {
   benchmark: 'Test models on your handwriting',
   meeting: 'Meeting notes',
   digest: 'Weekly digest',
+  'web-import': 'Import a web page',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -143,6 +145,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   benchmark: 'handwriting',
   meeting: 'audio',
   digest: 'compile',
+  'web-import': null,
 }
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
@@ -384,6 +387,17 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     await sync.change(WORKSPACE_DOC, (ws) => void (noteId = createNote(ws, { title: d.title, folderId: digestFolder(sync) })))
     await writeResult(sync, noteId, job.id, `# ${d.title}\n\n${d.markdown}`, 'end', null, { noteFor: d.noteFor })
     return { result: { noteId, text: preview(d.markdown) }, agent: d.agent ?? undefined }
+  })
+
+  // a web page (and, if asked, the guide's other pages) into notes (see webImport.ts)
+  jobs.register('web-import', async (job) => {
+    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null }
+    const r = await importWebPages(config, store, ai, sync, { url: String(i.url ?? ''), follow: Boolean(i.follow), maxPages: Number(i.maxPages) || undefined, folderId: i.folderId ?? null })
+    const summary = [
+      `${r.pages} page${r.pages === 1 ? '' : 's'}, ${r.pictures} picture${r.pictures === 1 ? '' : 's'}.`,
+      ...r.notes.slice(0, 20),
+    ].join('\n')
+    return { result: { noteId: r.noteIds[0], noteIds: r.noteIds, folderId: r.folderId, pages: r.pages, pictures: r.pictures, notes: r.notes, text: summary } }
   })
 
   jobs.register('meeting', async (job) => {

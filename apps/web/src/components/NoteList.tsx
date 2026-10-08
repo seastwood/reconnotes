@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, Copy, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -29,6 +29,7 @@ import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 import { duplicateNote } from '../lib/templates'
+import { WebImportDialog } from './WebImportDialog'
 
 interface Props {
   view: View
@@ -153,6 +154,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
     moveNote(workspaceDoc, p.id, view.folderId, index >= 0 ? idx : others.length)
   }
 
+  const [webImport, setWebImport] = useState(false)
   const trashedFolders = view.kind === 'trash' ? ws.folders.filter((f) => f.trashedAt) : []
   // big folders: rows in pieces as you scroll (the open note always shown)
   const shown = useProgressive(notes.length, JSON.stringify(view), notes.findIndex((n) => n.id === noteId))
@@ -291,6 +293,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                   }}
                 />
               </>
+            )}
+            {view.kind !== 'templates' && (
+              <button className="icon" onClick={() => setWebImport(true)} aria-label="Import a web page" title="Import a web page – a guide, manual or article, with its pictures">
+                <Globe size={19} />
+              </button>
             )}
             {view.kind !== 'templates' && (
               <button className="icon" onClick={() => void startMeeting(view.kind === 'folder' ? view.folderId : null).then(onOpen)} aria-label="New meeting" title="New meeting – records, then writes a summary, decisions and action items">
@@ -447,6 +454,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           )}
         </div>
       )}
+      {webImport && <WebImportDialog folderId={view.kind === 'folder' ? view.folderId : null} onClose={() => setWebImport(false)} onOpen={onOpen} />}
     </section>
   )
 }

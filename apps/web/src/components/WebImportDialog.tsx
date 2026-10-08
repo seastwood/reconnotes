@@ -1,0 +1,159 @@
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Globe, Loader2 } from 'lucide-react'
+import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
+import { isSyncConfigured } from '../lib/settings'
+
+/**
+ * Import a web page: a guide, manual or article becomes a note – its text,
+ * headings, lists, tables, code, links and every picture – or, with "the
+ * rest of the guide", one note per page in a folder of its own. The server
+ * does the work (as a job), so it carries on if this is closed.
+ */
+export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: { folderId: string | null; onClose: () => void; onOpen: (noteId: string) => void; initialUrl?: string }) {
+  const [url, setUrl] = useState(initialUrl)
+  const [follow, setFollow] = useState(false)
+  const [maxPages, setMaxPages] = useState(50)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const job = useJobs((s) => s.jobs.find((j) => j.id === jobId))
+
+  // while it's on screen, no "finished" toast for it
+  useEffect(() => {
+    if (!jobId) return
+    watchingJob(jobId, true)
+    return () => watchingJob(jobId, false)
+  }, [jobId])
+
+  const start = async () => {
+    setError(null)
+    let u = url.trim()
+    if (!u) return
+    if (!/^https?:\/\//i.test(u)) u = `https://${u}`
+    try {
+      new URL(u)
+    } catch {
+      return setError('That doesn’t look like a web address.')
+    }
+    try {
+      const j = await submitJob({ kind: 'web-import', title: u.replace(/^https?:\/\//, '').slice(0, 120), input: { url: u, follow, maxPages: follow ? maxPages : 1, folderId } })
+      setJobId(j.id)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const result = job?.status === 'done' ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[] } | null) : null
+  const busy = Boolean(job && !isFinished(job))
+
+  return createPortal(
+    <div className="dialog-backdrop" onClick={onClose}>
+      <form
+        className="dialog web-import-dialog"
+        role="dialog"
+        aria-label="Import a web page"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!jobId) void start()
+        }}
+      >
+        <h2>
+          <Globe size={18} /> Import a web page
+        </h2>
+        {!isSyncConfigured() ? (
+          <p className="hint">Importing web pages is done by your ReconNotes server – connect one in Settings.</p>
+        ) : !jobId ? (
+          <>
+            <p className="hint">
+              A guide, manual or article becomes a note, as it was on the page: headings, lists, tables, code, links and every picture (downloaded,
+              so it stays even if the site changes). The site’s menus, banners and footers are left out.
+            </p>
+            <label>
+              Address
+              <input
+                type="url"
+                inputMode="url"
+                autoFocus
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                placeholder="https://docs.example.com/guide/"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Also import the rest of the guide
+            </label>
+            {follow && (
+              <p className="hint">
+                Follows the links on the page to other pages under the same address (the guide’s own table of contents), in their order: one note per
+                page, in a new folder, with links between the pages turned into links between the notes. At most{' '}
+                <input className="pages-input" type="number" min={1} max={300} value={maxPages} onChange={(e) => setMaxPages(Math.max(1, Math.min(300, Number(e.target.value) || 1)))} /> pages.
+              </p>
+            )}
+            {error && <p className="error-text">{error}</p>}
+            <div className="row">
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="primary" disabled={!url.trim()}>
+                Import
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {busy && (
+              <p className="hint">
+                <Loader2 size={14} className="spin" /> {job?.progress ?? 'Waiting its turn in Jobs…'}
+              </p>
+            )}
+            {busy && <p className="hint">You can close this – it carries on in Jobs, and you’ll be told when it’s done.</p>}
+            {job?.status === 'failed' && <p className="error-text">{job.error ?? 'Couldn’t import it.'}</p>}
+            {result && (
+              <>
+                <p>
+                  ✅ Imported {result.pages ?? 1} page{result.pages === 1 ? '' : 's'}
+                  {result.pictures ? ` with ${result.pictures} picture${result.pictures === 1 ? '' : 's'}` : ''}.
+                </p>
+                {!!result.notes?.length && (
+                  <ul className="hint web-import-notes">
+                    {result.notes.slice(0, 8).map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            <div className="row">
+              {job?.status === 'failed' && (
+                <button type="button" onClick={() => setJobId(null)}>
+                  Try again
+                </button>
+              )}
+              <button type="button" className={result ? undefined : 'primary'} onClick={onClose}>
+                {busy ? 'Close' : 'Done'}
+              </button>
+              {result?.noteId && (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    onOpen(result.noteId!)
+                    onClose()
+                  }}
+                >
+                  Open
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </form>
+    </div>,
+    document.body,
+  )
+}

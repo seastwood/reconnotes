@@ -17,6 +17,7 @@ import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
 import { LockedScreen } from './components/LockedScreen'
+import { WebImportDialog } from './components/WebImportDialog'
 import { useFolderAccess } from './lib/folderLock'
 import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
@@ -147,6 +148,8 @@ export function App() {
   const [overlay, setOverlay] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  /** Import a web page (from ⌘K): the folder it goes in */
+  const [webImport, setWebImport] = useState<{ folderId: string | null } | null>(null)
   const [tourOpen, setTourOpen] = useState(shouldShowTour)
   const [moving, setMoving] = useState<MoveTarget | null>(null)
 
@@ -374,6 +377,7 @@ export function App() {
       ...listNotes(workspaceDoc)
         .filter((n) => n.template && !n.trashedAt)
         .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
+      { id: 'web-import', label: 'Import a web page…', section: N, keywords: 'website url guide manual article download save link', run: () => setWebImport({ folderId: folderNow() }) },
       { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
       { id: 'unfiled', label: 'Not in a folder', section: G, run: () => a().showView({ kind: 'unfiled' }) },
       { id: 'jobs', label: 'Jobs (AI and processing)', section: G, keywords: 'queue ai running tasks progress', run: () => a().showView({ kind: 'jobs' }) },
@@ -509,6 +513,7 @@ export function App() {
       <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />
       <ImageViewerHost />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
+      {webImport && <WebImportDialog folderId={webImport.folderId} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
       {paletteOpen && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}

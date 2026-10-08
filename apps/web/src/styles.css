@@ -4122,3 +4122,31 @@ a.button {
   font-size: 13px;
   padding: 2px 4px;
 }
+
+/* Import a web page */
+.web-import-dialog {
+  width: min(480px, 100%);
+}
+.web-import-dialog h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+}
+.web-import-dialog label:not(.check) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.web-import-dialog .row {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.web-import-dialog .pages-input {
+  width: 64px;
+  display: inline-block;
+}
+.web-import-notes {
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}

@@ -20,6 +20,7 @@
     "@reconnotes/core": "*",
     "@resvg/resvg-js": "^2.6.2",
     "better-sqlite3": "^13.0.0",
+    "linkedom": "^0.18.12",
     "marked": "^16.0.0",
     "ws": "^8.18.3",
     "yjs": "^13.6.27"
