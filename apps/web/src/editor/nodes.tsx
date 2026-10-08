@@ -121,6 +121,8 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   const drawingId = node.attrs.drawingId as string | null
   const markingUp = useInkUi((s) => drawingId !== null && s.activeDrawing === drawingId)
   const [aspect, setAspect] = useState<number | null>(null)
+  /** the file isn't a picture this device can show */
+  const [broken, setBroken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Find in note: highlight matching words in the picture and in handwriting drawn on it
@@ -233,7 +235,9 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
           {ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="picture" />}
         </div>
       )}
-      {url ? (
+      {url && broken ? (
+        <div className="attachment-placeholder">This picture can’t be shown{node.attrs.alt ? `: ${node.attrs.alt}` : ''}</div>
+      ) : url ? (
         <div className="image-frame" style={width ? { width: `${width}%` } : undefined} onPointerDownCapture={onPenDown}>
           <img
             src={url}
@@ -241,6 +245,7 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
             draggable={false}
             onPointerDown={onImgPointerDown}
             onPointerUp={onImgPointerUp}
+            onError={() => setBroken(true)}
             onLoad={(e) => {
               const img = e.currentTarget
               if (img.naturalWidth) setAspect(img.naturalHeight / img.naturalWidth)

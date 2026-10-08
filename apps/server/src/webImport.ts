@@ -1,4 +1,5 @@
 /// <reference lib="dom.iterable" />
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { parseHTML } from 'linkedom'
 import * as Y from 'yjs'
@@ -197,6 +198,33 @@ const BLOCK = new Set([
   'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'SUMMARY', 'TABLE', 'UL', 'CENTER', 'IFRAME', 'VIDEO', 'AUDIO', 'TBODY', 'THEAD', 'TR', 'CAPTION',
 ])
 
+/** What icon pictures are called (Font Awesome, Feather, Lucide, Bootstrap, Octicons, emoji…). */
+const ICON = /(^|[\s_-])(icon|icons|fa|fas|far|fab|svg-inline--fa|feather|lucide|bi|octicon|emoji|avatar|gravatar|logo)([\s_-]|$)/i
+
+/**
+ * An SVG from the page as a picture of its own: it may lean on the page (a
+ * shared sprite through <use>, xlink without its namespace) – put in what it
+ * needs, or leave it out if it can't stand alone.
+ */
+function standaloneSvg(el: El): string | null {
+  const svg = el.cloneNode(true) as El
+  for (const use of [...svg.querySelectorAll('use')]) {
+    const ref = (use.getAttribute('href') ?? use.getAttribute('xlink:href') ?? '').trim()
+    // a shape defined elsewhere on the page: copied in, or nothing to draw
+    const target = ref.startsWith('#') ? el.ownerDocument.getElementById(ref.slice(1)) : null
+    if (!target) return null
+    const g = el.ownerDocument.createElement('g')
+    for (const c of [...target.childNodes]) g.appendChild(c.cloneNode(true))
+    use.replaceWith(g)
+  }
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  let markup = svg.outerHTML
+  if (/xlink:/.test(markup) && !/xmlns:xlink=/.test(markup)) markup = markup.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"')
+  // colours taken from the page's text: black, as on a light page
+  markup = markup.replace(/currentColor/g, '#000')
+  return /<(path|rect|circle|ellipse|line|polyline|polygon|text|image|g)\b/.test(markup) ? markup : null
+}
+
 /** Text that Markdown must read as text. */
 function esc(s: string): string {
   return s.replace(/([\\`*_[\]<>|~!#])/g, '\\$1')
@@ -284,9 +312,19 @@ function pageToMarkdown(main: El, conv: Conv): string {
         const t = kids()
         const href = el.getAttribute('href')
         const target = href ? conv.link(href) : null
-        if (!target || !t.trim()) return t
-        if ('note' in target) return `[${t.replace(/\]/g, '\\]')}](${target.note})`
-        return `[${t}](<${target.url.replace(/>/g, '%3E')}>)`
+        // a picture inside the link (a "card"): the picture, then the link on its text
+        const pics = t.match(/\n\n!\[[^\]]*\]\([^)]*\)\n\n/g) ?? []
+        const words = pics.reduce((x, p) => x.replace(p, ' '), t)
+        const link = (label: string) => {
+          // spaces outside the link, not underlined inside it
+          const lead = /^\s*/.exec(label)![0]
+          const trail = /\s*$/.exec(label)![0]
+          const inner = label.trim()
+          if (!target || !inner) return label
+          if ('note' in target) return `${lead}[${inner.replace(/\]/g, '\\]')}](${target.note})${trail}`
+          return `${lead}[${inner}](<${target.url.replace(/>/g, '%3E')}>)${trail}`
+        }
+        return pics.length ? `${pics.join('')}${link(words)}` : link(t)
       }
       case 'IMG':
         return image(el)
@@ -312,22 +350,25 @@ function pageToMarkdown(main: El, conv: Conv): string {
     return `${lead}${m}${t.trim()}${m}${trail}`
   }
   const image = (img: El) => {
-    const w = Number(img.getAttribute('width') ?? 0)
-    const h = Number(img.getAttribute('height') ?? 0)
+    const w = parseFloat(img.getAttribute('width') ?? '0')
+    const h = parseFloat(img.getAttribute('height') ?? '0')
     if ((w && w <= 2) || (h && h <= 2)) return '' // tracking pixels
+    const alt = (img.getAttribute('alt') ?? '').replace(/[[\]\n]/g, ' ').trim()
+    // icons (a calendar by the date, a clock by the reading time) aren't content
+    if ((w && w <= 40 && (!h || h <= 40)) || (h && h <= 40 && !w) || ICON.test(img.getAttribute('class') ?? '')) return ''
     const src = bestSrc(img, conv.base)
     const token = src ? conv.picture(src) : null
-    const alt = (img.getAttribute('alt') ?? '').replace(/[[\]\n]/g, ' ').trim()
     return token ? `\n\n![${alt}](${token})\n\n` : alt ? esc(alt) : ''
   }
   const svg = (el: El) => {
     // small icons aren't content; a diagram drawn in SVG is
     const w = parseFloat(el.getAttribute('width') ?? '0')
+    const h = parseFloat(el.getAttribute('height') ?? '0')
     const vb = (el.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number)
-    const size = Math.max(w, vb[2] || 0)
-    if (size && size < 64) return ''
-    if (!el.getAttribute('xmlns')) el.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-    const token = conv.svg(el.outerHTML)
+    const size = Math.max(w, h) || Math.max(vb[2] || 0, vb[3] || 0)
+    if (!size || size < 64 || ICON.test(el.getAttribute('class') ?? '') || el.getAttribute('aria-hidden') === 'true') return ''
+    const markup = standaloneSvg(el)
+    const token = markup ? conv.svg(markup) : null
     return token ? `\n\n![](${token})\n\n` : ''
   }
 
@@ -633,8 +674,12 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const pictures = new Map<string, { id: string; name: string; mime: string; size: number } | null>()
   const tokens = new Map<string, string>() // token in the Markdown → picture address
   let failedPictures = 0
+  /** tiny pictures (icons): left out without a trace */
+  const icons = new Set<string>()
   const pictureToken = (src: string) => {
-    if (!tokens.has(src) && tokens.size >= MAX_PICTURES) return null
+    // a picture that turned out to be an icon: as if it weren't there
+    if (icons.has(src)) return null
+    if (tokens.size >= MAX_PICTURES && ![...tokens.values()].includes(src)) return null
     const token = `rnpic-${tokens.size}`
     for (const [t, s] of tokens) if (s === src) return t
     tokens.set(token, src)
@@ -643,34 +688,38 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const svgs = new Map<string, Buffer>()
   const svgToken = (markup: string) => {
     if (markup.length > 2 * 1024 * 1024) return null
-    const token = pictureToken(`svg:${svgs.size}`)
-    if (token) svgs.set(tokens.get(token)!, Buffer.from(markup))
+    // the same drawing (and on the second pass) is the same picture
+    const key = `svg:${crypto.createHash('sha1').update(markup).digest('hex')}`
+    const token = pictureToken(key)
+    if (token) svgs.set(key, Buffer.from(markup))
     return token
   }
 
-  const markdowns = pages.map((p, i) =>
-    pageToMarkdown(mains[i], {
-      base: p.url,
+  // twice: first (on a copy) to find the pictures, then – once they're downloaded
+  // and the icons among them known – for real
+  const convert = (i: number, main: El) =>
+    pageToMarkdown(main, {
+      base: pages[i].url,
       picture: pictureToken,
       svg: svgToken,
       link: (href) => {
         if (/^(javascript|mailto|tel):/i.test(href) && !/^(mailto|tel):/i.test(href)) return null
         let u: URL
         try {
-          u = new URL(href, p.url)
+          u = new URL(href, pages[i].url)
         } catch {
           return null
         }
         if (/^(mailto|tel):$/.test(u.protocol)) return { url: u.href }
         const k = pageKey(u)
         // a link within the same page: just its text
-        if (k === pageKey(p.url) && u.hash) return null
+        if (k === pageKey(pages[i].url) && u.hash) return null
         const target = byKey.get(k)
         if (target !== undefined && target !== i) return { note: `rnpage-${target}` }
         return /^https?:$/.test(u.protocol) ? { url: u.href } : null
       },
-    }),
-  )
+    })
+  pages.forEach((_, i) => convert(i, mains[i].cloneNode(true) as El))
 
   const total = tokens.size
   let done = 0
@@ -699,6 +748,14 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         name = decodeURIComponent(path.posix.basename(new URL(got.url).pathname)) || 'picture'
         if (!/\.\w{2,5}$/.test(name)) name += `.${mime.split('/')[1].replace('svg+xml', 'svg').replace('jpeg', 'jpg')}`
       }
+      // really a picture (not an error page), and not an icon
+      const dims = pictureSize(data, mime)
+      if (!dims) throw new Error('not a picture')
+      if (dims.w && dims.h && dims.w <= 40 && dims.h <= 40) {
+        icons.add(src)
+        pictures.set(src, null)
+        continue
+      }
       const a = { id: newId(), name: name.slice(0, 120), mime, size: data.length }
       store.putAttachment({ id: a.id, mime, name: a.name, size: a.size, created_at: Date.now() }, data, initialTextStatus(config, ai, mime, a.name))
       queueAttachment(config, store, ai, sync, a.id)
@@ -710,12 +767,20 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   }
   if (failedPictures) notes.push(`${failedPictures} picture${failedPictures === 1 ? '' : 's'} couldn’t be downloaded (kept as links).`)
 
+  const markdowns = pages.map((_, i) => convert(i, mains[i]))
+
   // 5. write the notes
   const when = new Date().toISOString().slice(0, 10)
   for (let i = 0; i < pages.length; i++) {
     reportProgress(pages.length > 1 ? `Writing note ${i + 1} of ${pages.length}…` : 'Writing the note…')
     const p = pages[i]
-    let md = markdowns[i]
+    // pictures that didn't come: icons left out, the others a link to where they are
+    let md = markdowns[i].replace(/!\[([^\]]*)\]\((rnpic-\d+)\)/g, (m, alt: string, token: string) => {
+      const src = tokens.get(token)
+      if (!src || pictures.get(src)) return m
+      if (icons.has(src) || src.startsWith('svg:') || src.startsWith('data:')) return ''
+      return `[${alt || 'Picture'}](<${src}>)`
+    })
     // the title first (as the page's own first heading, or added)
     if (!/^#\s/.test(md)) md = `# ${esc(p.title)}\n\n${md}`
     // where it came from, under the title
@@ -747,6 +812,51 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   }
   sync.reindexAll()
   return { noteIds: ids, folderId: pages.length > 1 ? folderId : (opts.folderId ?? null), pages: pages.length, pictures: [...pictures.values()].filter(Boolean).length, notes }
+}
+
+/**
+ * A picture's width and height from its first bytes – or null when the data
+ * isn't the picture it claims to be (an error page, a cut-off download).
+ * 0×0 when it's fine but the size isn't in the header.
+ */
+export function pictureSize(data: Buffer, mime: string): { w: number; h: number } | null {
+  if (data.length < 12) return null
+  const b = data
+  // PNG
+  if (b.readUInt32BE(0) === 0x89504e47) return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) }
+  // GIF
+  if (b.toString('latin1', 0, 4) === 'GIF8') return { w: b.readUInt16LE(6), h: b.readUInt16LE(8) }
+  // JPEG: the frame header
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) return { w: 0, h: 0 }
+      const marker = b[i + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { w: b.readUInt16BE(i + 7), h: b.readUInt16BE(i + 5) }
+      i += 2 + b.readUInt16BE(i + 2)
+    }
+    return { w: 0, h: 0 }
+  }
+  // WebP
+  if (b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') {
+    const kind = b.toString('latin1', 12, 16)
+    if (kind === 'VP8X') return { w: 1 + b.readUIntLE(24, 3), h: 1 + b.readUIntLE(27, 3) }
+    if (kind === 'VP8L') return { w: 1 + (b.readUInt16LE(21) & 0x3fff), h: 1 + ((b.readUInt32LE(21) >> 14) & 0x3fff) }
+    if (kind === 'VP8 ') return { w: b.readUInt16LE(26) & 0x3fff, h: b.readUInt16LE(28) & 0x3fff }
+    return { w: 0, h: 0 }
+  }
+  // AVIF / HEIC, BMP, ICO: fine, size unknown here
+  if (b.toString('latin1', 4, 8) === 'ftyp' || b.toString('latin1', 0, 2) === 'BM' || b.readUInt32BE(0) === 0x00000100) return { w: 0, h: 0 }
+  // SVG: real markup, and how big it says it is
+  if (mime === 'image/svg+xml' || /^\s*(<\?xml|<svg|<!--)/.test(b.toString('utf8', 0, 200))) {
+    const text = b.toString('utf8', 0, Math.min(b.length, 4096))
+    const tag = /<svg\b[^>]*>/i.exec(text)?.[0]
+    if (!tag) return null
+    const num = (a: string) => parseFloat(new RegExp(`\\s${a}=["']([\\d.]+)(px)?["']`).exec(tag)?.[1] ?? '0')
+    const vb = /viewBox=["']([^"']+)["']/.exec(tag)?.[1]?.split(/[\s,]+/).map(Number) ?? []
+    return { w: num('width') || vb[2] || 0, h: num('height') || vb[3] || 0 }
+  }
+  return null
 }
 
 function mimeFromName(u: string): string | null {

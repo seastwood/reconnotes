@@ -15,8 +15,38 @@ let site: http.Server
 let base: string
 const hits: string[] = []
 
-// a 1×1 PNG (shown 400 wide, so not a tracking pixel)
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+import zlib from 'node:zlib'
+
+/** A plain PNG of this size. */
+function png(w: number, h: number): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    return c >>> 0
+  })
+  const crc = (b: Buffer) => {
+    let c = 0xffffffff
+    for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const t = Buffer.from(type)
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const c = Buffer.alloc(4)
+    c.writeUInt32BE(crc(Buffer.concat([t, data])))
+    return Buffer.concat([len, t, data, c])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0)
+  ihdr.writeUInt32BE(h, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  const raw = Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 120)])))
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
+}
+const PNG = png(120, 80)
+const ICON_PNG = png(16, 16)
 
 const layout = (title: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title} | Robot Docs</title></head>
 <body>
@@ -60,6 +90,21 @@ const PAGES: Record<string, string> = {
   ),
   '/guide/wiring': layout('Wiring', `<h1>Wiring</h1><h2 id="power">Power</h2><p>Back to the <a href="/guide/">overview</a>.</p>`),
   '/guide/software': layout('Software', `<h1>Software</h1><p>Deploy with Gradle.</p>`),
+  // a blog post: a linked card picture, icons by the date and reading time
+  '/post': `<html><head><title>Post</title></head><body>
+    <svg style="display:none"><symbol id="i-cal" viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></symbol></svg>
+    <article>
+      <a href="https://blog.example/posts/docker/"><figure><img src="/img/hero.png" alt="Hero"></figure></a>
+      <h1><a href="https://blog.example/posts/docker/"> Reducing storage for Docker </a></h1>
+      <ul class="meta">
+        <li><svg class="icon"><use href="#i-cal"></use></svg> 2021-10-01</li>
+        <li><img src="/img/clock.svg" class="icon icon-clock" alt=""> 2 minutes</li>
+        <li><img src="/img/tiny.png" alt=""> tagged</li>
+      </ul>
+      <p>Docker containers have layers.</p>
+      <img src="/img/broken.png" alt="Diagram">
+      <svg width="300" height="120" viewBox="0 0 300 120"><use xlink:href="#i-cal"></use><text x="10" y="20" fill="currentColor">Layers</text></svg>
+    </article></body></html>`,
   // the shapes of two common documentation sites
   '/sphinx': `<html><head><title>Wiring — FRC docs</title></head><body class="wy-body-for-nav">
     <nav class="wy-nav-side"><div class="wy-menu"><a href="/a">Zero to Robot</a><a href="/b">Hardware</a></div></nav>
@@ -95,6 +140,8 @@ beforeAll(async () => {
     hits.push(req.url!)
     const p = PAGES[req.url!.split('?')[0]]
     if (p) return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(p)
+    if (req.url === '/img/tiny.png') return res.writeHead(200, { 'Content-Type': 'image/png' }).end(ICON_PNG)
+    if (req.url === '/img/broken.png') return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<html>Not found</html>')
     if (req.url!.startsWith('/img/') && !req.url!.includes('missing')) return res.writeHead(200, { 'Content-Type': 'image/png' }).end(PNG)
     res.writeHead(404).end('no')
   })
@@ -165,6 +212,25 @@ describe('importing a web page', () => {
     // not pages outside the guide
     expect(hits).not.toContain('/blog')
     expect(hits).not.toContain('/privacy')
+  })
+
+  it('leaves icons out, keeps a linked picture whole, and links a picture that wasn’t one', async () => {
+    const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/post` })
+    const text = md(r.noteIds[0])
+    const xml = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
+    // the card: its picture, no stray "](…)"
+    expect(xml).toContain('alt="Hero"')
+    expect(text).not.toMatch(/^\]\(/m)
+    expect(text).not.toContain('\n](')
+    expect(text).toMatch(/^# Reducing storage for Docker\n/)
+    // the date and reading time, without their icons
+    expect(text).toMatch(/- 2021-10-01\n- 2 minutes\n- tagged/)
+    expect(hits).not.toContain('/img/clock.svg')
+    // the error page served as a picture: a link, not a broken picture
+    expect(xml).toMatch(/<link [^>]*href="[^"]*\/img\/broken\.png"[^>]*>Diagram/)
+    // the hero and the SVG drawing (its shared shape copied in): 2 pictures
+    expect((xml.match(/<image /g) ?? []).length).toBe(2)
+    expect(r.pictures).toBe(2)
   })
 
   it('finds the content on Sphinx / Read the Docs and Docusaurus sites', async () => {
