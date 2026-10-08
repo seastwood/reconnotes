@@ -265,7 +265,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                   <span className="ask-chat-time">{when(t.at)}</span>
                 </div>
                 <div className="ask-chat-a ask-panel">
-                  <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites }} onOpen={go} />
+                  <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read }} onOpen={go} />
                 </div>
               </div>
             ))}

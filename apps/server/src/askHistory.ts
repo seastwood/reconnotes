@@ -17,6 +17,8 @@ export interface AskTurnSaved {
   sources: AskSource[]
   /** each citation's line in its source, in order */
   cites?: AskCite[]
+  /** what was read to answer it (sections, or notes) */
+  read?: string[]
   at: number
 }
 

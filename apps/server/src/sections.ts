@@ -90,10 +90,10 @@ export function splitSections(noteId: string, title: string, md: string): Sectio
  * "size" a "sizing box". A question word matches any of its group.
  */
 const GROUPS: string[][] = [
-  ['height', 'tall', 'taller', 'tallest', 'high', 'vertical'],
+  ['height', 'tall', 'taller', 'tallest', 'high'],
   ['width', 'wide', 'wider'],
   ['length', 'long', 'longer'],
-  ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger', 'not extend beyond', 'within'],
+  ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger', 'not extend beyond'],
   ['min', 'minimum', 'least', 'fewer than', 'at least'],
   ['size', 'sizes', 'sizing', 'dimension', 'footprint', 'volume', 'fit within', 'fits within', 'starting configuration'],
   ['weight', 'weigh', 'weighs', 'heavy', 'heavier', 'mass', 'lbs', 'pounds', 'kg'],
@@ -300,7 +300,7 @@ const CLAIM_STOP = new Set(
  * words, or words meaning the same; a rule asked about) – put first for the
  * AI, so a small model doesn't skim past the one line that answers it.
  */
-export function keyLines(texts: Map<number, string>, words: string[], rules: string[] = [], limit = 4): { n: number; line: string }[] {
+export function keyLines(texts: Map<number, string>, words: string[], rules: string[] = [], limit = 4, ratio = 0.75): { n: number; line: string }[] {
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
   const all: { n: number; raw: string; line: string; low: string }[] = []
   for (const [n, text] of texts)
@@ -327,7 +327,7 @@ export function keyLines(texts: Map<number, string>, words: string[], rules: str
   return found
     .sort((a, b) => b.score - a.score)
     // only lines nearly as much about it as the best: the rest is noise to a small model
-    .filter((x) => x.score >= best * 0.75 && !seen.has(x.line) && seen.add(x.line))
+    .filter((x) => x.score >= best * ratio && !seen.has(x.line) && seen.add(x.line))
     .slice(0, limit)
     .map(({ n, line }) => ({ n, line }))
 }

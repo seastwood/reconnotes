@@ -13,6 +13,7 @@ export interface SavedTurn {
   answer: string
   sources: AskResult['sources']
   cites?: AskResult['cites']
+  read?: AskResult['read']
   at: number
 }
 export interface Conversation {

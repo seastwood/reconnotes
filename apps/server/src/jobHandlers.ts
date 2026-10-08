@@ -275,7 +275,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
     }, scopeFromInput(job.input), historyFromInput(job.input.history))
     // kept as a conversation (to read again, or carry on, from "Ask about this note")
-    saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: r.answer, sources: r.sources, ...(r.cites ? { cites: r.cites } : {}), at: Date.now() })
+    saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: r.answer, sources: r.sources, ...(r.cites ? { cites: r.cites } : {}), ...(r.read ? { read: r.read } : {}), at: Date.now() })
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 

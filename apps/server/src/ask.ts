@@ -57,7 +57,7 @@ const SMALL_NOTE = 1500
 /** sections given to the AI at most */
 const MAX_SECTIONS = 12
 /** an answer saying the notes don't have it */
-const NOT_FOUND = /\b(?:don't|do not|doesn't|does not) (?:contain|mention|say|specify|include|state)|not (?:specified|mentioned|found|included|provided|stated|given|listed)|no (?:information|mention|details?)\b/i
+const NOT_FOUND = /\b(?:don't|do not|doesn't|does not) (?:contain|mention|say|specify|include|state)|not (?:explicitly |directly |clearly )?(?:specified|mentioned|found|included|provided|stated|given|listed)|no (?:information|mention|details?)\b/i
 
 /**
  * A long note cut down to the parts about the question: its first lines,
@@ -126,7 +126,7 @@ export async function askNotes(
   scope: Scope = {},
   /** a follow-up: the questions and answers before it, oldest first (with the notes each used) */
   history: AskTurn[] = [],
-): Promise<{ answer: string; sources: AskSource[]; cites?: AskCite[]; agent: string }> {
+): Promise<{ answer: string; sources: AskSource[]; cites?: AskCite[]; read?: string[]; agent: string }> {
   const meta = sync.noteMeta()
   const allowed = noteFilter(sync, scope)
   const now = when.now ?? Date.now()
@@ -333,10 +333,22 @@ Notes:${context}`
   }
   // a citation by name ("[4 MATCH PLAY › 4.7 DRIVE TEAM]"): by its number
   text = citeByNumber(text, sources)
+  // the note's own title quoted in the answer ('in "Manual 10-6-26"') says nothing – and its numbers mislead the citations
+  for (const t of new Set(sources.map((x) => x.title).filter((t) => t.length >= 4)))
+    text = text.replace(new RegExp(`\\s*(?:\\b(?:in|from|of|see)\\s+)?(?:the\\s+)?["“'‘]${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["”'’](?:\\s+(?:note|manual|document))?`, 'g'), '')
   // a citation to a source that doesn't say it, when another one does: that one
   text = recite(text, texts)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
+  // what the answer left out of the lines most about the question (a small model
+  // often answers from one passage): added, each linked to where it is
+  if (!range) {
+    const more = keyLines(texts, words, rules, 6, 0.9)
+      .filter((l) => !alreadySaid(text, l.line))
+      .slice(0, 3)
+    if (more.length)
+      text += `\n\n${pinned.length === 1 ? 'More in this note' : 'More in your notes'}:\n${more.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
+  }
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)
   for (const c of cites) {
@@ -347,7 +359,9 @@ Notes:${context}`
   for (const src of sources) delete src.found
   // keep only sources the answer actually cites – or, if it cites none, the notes it plainly drew on
   const cited = new Set(cites.map((c) => c.n))
-  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), cites, agent }
+  // what was read, for "Read N parts of the note" under the answer
+  const readParts = sources.map((s) => (s.section ? s.section : s.title))
+  return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), cites, read: readParts, agent }
 }
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
@@ -390,6 +404,18 @@ export function autoCite(answer: string, texts: Map<number, string>): string {
     return /[.!?]$/.test(sentence) ? `${sentence.slice(0, -1)} [${best.n}]${sentence.slice(-1)}` : `${sentence} [${best.n}]`
   })
 }
+
+/** A line the answer already gives: its figures (or most of its words) are in it. */
+function alreadySaid(answer: string, line: string): boolean {
+  const low = answer.toLowerCase()
+  const figures = [...new Set(line.toLowerCase().match(/\b(?:[a-z]{1,3}\d{2,4}|\d{2,}(?:\.\d+)?)\b/g) ?? [])]
+  if (figures.length) return figures.every((f) => low.includes(f))
+  const words = [...new Set(line.toLowerCase().match(/\p{L}{5,}/gu) ?? [])]
+  return words.length > 0 && words.filter((w) => low.includes(w)).length / words.length >= 0.7
+}
+
+/** A long line cut at a word, for a list under the answer. */
+const clip = (t: string, n: number) => (t.length <= n ? t : `${t.slice(0, n).replace(/\s+\S*$/, '')}…`)
 
 /** Where a citation's sentence is: (a sentence ends at ". " or a new line – not at the point in "10.5"). */
 function sentenceAround(answer: string, at: number, len: number): string {

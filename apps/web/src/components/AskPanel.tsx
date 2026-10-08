@@ -19,6 +19,8 @@ export interface AskResult {
   sources: Source[]
   /** each citation in the answer, in order: the line its sentence came from */
   cites?: { n: number; find?: string }[]
+  /** what was read to answer it: sections of a note, or notes */
+  read?: string[]
 }
 
 /** the newest "Ask your notes" job for this question (still useful: not failed or cancelled) */
@@ -303,6 +305,18 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
             </button>
           ))}
         </div>
+      )}
+      {!!result.read?.length && (
+        <details className="ask-read">
+          <summary>
+            What it read ({result.read.length} part{result.read.length === 1 ? '' : 's'})
+          </summary>
+          <ol>
+            {result.read.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ol>
+        </details>
       )}
     </>
   )

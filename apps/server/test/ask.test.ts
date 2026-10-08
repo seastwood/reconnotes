@@ -538,3 +538,27 @@ describe('the AI gets the line that answers it, and cites it', () => {
     expect(recite('Leaving the STARTING LINE scores 5 pts [1].', texts)).toBe('Leaving the STARTING LINE scores 5 pts [1].')
   })
 })
+
+describe('what the answer left out', () => {
+  it('the line most about the question, when the answer missed it, is added with its link', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'rulesnote00001', title: 'Robot rules' }))
+    await app.sync.change(noteDocName('rulesnote00001'), (doc) => {
+      getContent(doc).insert(
+        0,
+        [
+          'Robot rules',
+          'Penalties: being taller than 60-inches is a 10 point penalty.',
+          'R01. The ROBOT must start inside a STARTING VOLUME 40” tall and not extend beyond 60” tall during a MATCH.',
+        ].map((t) => {
+          const p = new Y.XmlElement('paragraph')
+          p.insert(0, [new Y.XmlText(t)])
+          return p
+        }),
+      )
+    })
+    const r = await askNotes(app.store, app.sync, app.ai, 'What is the maximum height of the robot?', null, {}, { notes: ['rulesnote00001'] })
+    // the stand-in AI answers about T8 bins; what the note says about it is added
+    expect(r.answer).toMatch(/More in this note:\n- R01\. The ROBOT must start inside/)
+    expect(r.read).toHaveLength(1)
+  })
+})
