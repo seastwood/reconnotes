@@ -222,19 +222,6 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
   }
   return (
     <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}${markingUp ? ' marking-up' : ''}`} data-drag-handle="">
-      {/* the picture's buttons sit above it, so they never cover what's in it */}
-      {url && editor.isEditable && (
-        // kept in place while marking up, so the picture doesn't jump under the Pencil
-        <div className="image-actions" style={markingUp ? { visibility: 'hidden' } : undefined}>
-          <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
-            <PenLine size={15} /> Mark up
-          </button>
-          <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
-            {busy ? <Loader2 size={15} className="spin" /> : <ScanText size={15} />} {busy ? 'Reading…' : 'Convert to text'}
-          </button>
-          {ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="picture" />}
-        </div>
-      )}
       {url && broken ? (
         <div className="attachment-placeholder">This picture can’t be shown{node.attrs.alt ? `: ${node.attrs.alt}` : ''}</div>
       ) : url ? (
@@ -261,6 +248,19 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
               overlay={{ aspect }}
               highlights={{ rects: inkMatches, current: find.current }}
             />
+          )}
+          {/* its buttons, once it's tapped (selected): over its top edge, so
+              nothing moves when they appear */}
+          {selected && editor.isEditable && !markingUp && (
+            <div className="image-actions">
+              <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
+                <PenLine size={15} /> Mark up
+              </button>
+              <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
+                {busy ? <Loader2 size={15} className="spin" /> : <ScanText size={15} />} {busy ? 'Reading…' : 'Convert to text'}
+              </button>
+              {ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="picture" />}
+            </div>
           )}
           {selected && editor.isEditable && !markingUp && (
             <div className="image-resize" onPointerDown={startResize} title="Drag to resize" aria-label="Resize image" />
