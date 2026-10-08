@@ -382,6 +382,9 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     // the best line gives figures (40”, 60”): only lines that give figures too
     const figures = /\d/.test(key[0]?.line ?? '')
     const quote = key.filter((l) => (!figures || /\d/.test(l.line)) && !quoted(text, l.line)).slice(0, 4)
+    // a "no" when the most relevant rule says something is permitted: the answer may be wrong – say so
+    if (yesNo && key[0] && saysNo(text) && PERMITS.test(key[0].line))
+      text += `\n\n**Check this:** the answer says no, but the note’s most relevant line allows some of it (“${clip(sentencesOf(key[0].line).find((x) => PERMITS.test(x)) ?? key[0].line, 200)}”) [${key[0].n}].`
     if (quote.length)
       text += `\n\n${pinned.length === 1 ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
   }
@@ -445,8 +448,13 @@ function sentenceEnds(t: string): number[] {
   return out
 }
 
+/** A rule line that allows something. */
+const PERMITS = /\b(?:are|is) (?:permitted|allowed)\b|\bmay\b(?! not)|\bpermitted\b/i
+/** An answer whose first sentence says no. */
+const saysNo = (answer: string) => /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(answer.split(/(?<=[.!?])\s/)[0] ?? '')
+
 /** Words an answer uses when it reasons beyond what the notes say. */
-const INFERENCE = /\b(?:it can be (?:inferred|assumed|concluded)|can be inferred|(?:this|which|these|that) (?:suggests?|implies|indicates?)|(?:suggests?|implies) that|it (?:is|seems) (?:likely|reasonable|safe to (?:say|assume))|presumably|theoretically|it would seem|one could (?:argue|assume)|by extension|we can (?:infer|assume|conclude))\b/i
+const INFERENCE = /\b(?:it can be (?:inferred|assumed|concluded)|can be inferred|(?:this|which|these|that) (?:suggests?|implies|indicates?)|(?:suggests?|implies) that|it (?:is|seems) (?:clear|likely|reasonable|safe to (?:say|assume))|presumably|theoretically|it would seem|one could (?:argue|assume)|by extension|we can (?:infer|assume|conclude)|(?:further )?(?:support|reinforc|strengthen)\w* (?:the idea|the notion|this|that)|could (?:be (?:seen|interpreted|considered|viewed)|imply)|would (?:likely|probably|presumably)|likely (?:violates?|be|not|means?)|there (?:is|are) no (?:provisions?|allowances?|exceptions?) (?:for|allowing)|in other words|this means that|indirectly)\b/i
 
 /**
  * Sentences where the AI reasons past the notes ("Given these points, it can be inferred
@@ -466,6 +474,12 @@ export function markInference(answer: string): string {
     out += `${lead}*(Not stated in the note – the AI's inference:)* ${body.replace(/^\s+/, '')}`
   }
   return out
+}
+
+/** A text's sentences. */
+const sentencesOf = (t: string) => {
+  const cuts = [0, ...sentenceEnds(t), t.length]
+  return cuts.slice(1).map((e, i) => t.slice(cuts[i], e).trim()).filter(Boolean)
 }
 
 /** Each sentence (or list item) of the answer without a citation: cited to the source line it matches best. */

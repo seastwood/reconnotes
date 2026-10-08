@@ -27,6 +27,8 @@ beforeAll(async () => {
     if (req.url?.endsWith('/models')) return res.end(JSON.stringify({ data: [{ id: 'gen' }] }))
     const prompt = JSON.parse(body).messages[0].content.map((c: { text?: string }) => c.text ?? '').join('')
     prompts.push(prompt)
+    if (prompt.includes('Question: Can a robot have a cutout in its bumper?'))
+      return res.end(JSON.stringify({ choices: [{ message: { content: 'A robot cannot have a cutout in its bumper [1].' } }] }))
     // the jersey question: answered only when the uniforms section was read
     if (prompt.includes('Question: What colour is the jersey?'))
       return res.end(JSON.stringify({ choices: [{ message: { content: /everyone wears blue/.test(prompt) ? `Blue [${/\[(\d+)\][^\n]*\n[^=]*everyone wears blue/.exec(prompt)?.[1] ?? 1}].` : 'The notes do not contain that.' } }] }))
@@ -601,5 +603,23 @@ describe('the AI reasoning past the notes', () => {
     expect(markInference(answer)).toBe(
       "- R406 specifies how corners must be filled [3].\n*(Not stated in the note – the AI's inference:)* Given these points, it can be inferred that cutouts would not be allowed under FRC rules. *(Not stated in the note – the AI's inference:)* The emphasis on filling gaps suggests that any openings are prohibited.",
     )
+  })
+})
+
+describe('a "no" against a rule that allows it', () => {
+  it('is flagged', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'bumpernote0001', title: 'Bumper rules' }))
+    await app.sync.change(noteDocName('bumpernote0001'), (doc) => {
+      getContent(doc).insert(
+        0,
+        ['Bumper rules', 'R401 BUMPERS all around. ROBOTS are required to use BUMPERS to protect the entire ROBOT PERIMETER. Gaps of less than 1 ¼ in. (31 mm) between adjacent segments are permitted as long as all corners are filled per R406.'].map((t) => {
+          const p = new Y.XmlElement('paragraph')
+          p.insert(0, [new Y.XmlText(t)])
+          return p
+        }),
+      )
+    })
+    const r = await askNotes(app.store, app.sync, app.ai, 'Can a robot have a cutout in its bumper?', null, {}, { notes: ['bumpernote0001'] })
+    expect(r.answer).toMatch(/\*\*Check this:\*\* the answer says no, but the note’s most relevant line allows some of it \(“Gaps of less than 1 ¼ in\. \(31 mm\) between adjacent segments are permitted/)
   })
 })
