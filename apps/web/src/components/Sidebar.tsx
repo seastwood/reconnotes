@@ -268,7 +268,15 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 autoFocus
                 defaultValue={f.name}
                 onClick={(e) => e.stopPropagation()}
-                onFocus={(e) => e.target.select()}
+                onFocus={(e) => {
+                  e.target.select()
+                  // a new folder can land anywhere in the list: bring its name into view,
+                  // and again once the keyboard has opened (it takes up the bottom half)
+                  const el = e.target
+                  const show = () => el.isConnected && el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                  show()
+                  setTimeout(show, 350)
+                }}
                 onBlur={(e) => {
                   updateFolder(workspaceDoc, f.id, { name: e.target.value.trim() || 'Untitled folder' })
                   setRenaming(null)
