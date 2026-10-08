@@ -183,6 +183,22 @@ const plainLine = (t: string) =>
     .trim()
 
 /**
+ * A note's lines as the find bar can match them: a table row is cells apart
+ * in the note (text can't be found across them), so each cell is a line.
+ */
+function findableLines(text: string): string[] {
+  return text.split('\n').flatMap((l) =>
+    /^\s*\|/.test(l)
+      ? l
+          .split('|')
+          .filter((c) => c.trim() && !/^[\s:-]+$/.test(c))
+          // a list in a cell ("- one - two"): each item is a paragraph of its own in the note
+          .flatMap((c) => c.split(/\s+-\s+(?=[\p{Lu}(\d])|<br\s*\/?>/u))
+      : [l],
+  )
+}
+
+/**
  * Where in a note (or section) the answer to a question is: a few words of
  * the line that has the most of the question's words (or its rule number) –
  * what the find bar looks for when the source is opened, so it lands there.
@@ -191,7 +207,7 @@ export function findIn(text: string, words: string[], rules: string[] = []): str
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
   let best: { line: string; score: number } | null = null
   let first = true
-  for (const raw of text.split('\n')) {
+  for (const raw of findableLines(text)) {
     const line = plainLine(raw)
     if (line.length < 4) continue
     const low = line.toLowerCase()
@@ -236,6 +252,11 @@ export function findTextOf(s: Section): string {
  * words of that line, for the find bar. Null when nothing is shared.
  */
 export function findForClaim(text: string, claim: string): string | null {
+  return claimMatch(text, claim)?.find ?? null
+}
+
+/** findForClaim, with how much the line shares with the sentence. */
+export function claimMatch(text: string, claim: string): { find: string; score: number } | null {
   // words, numbers ("36", "10.5") and rule numbers ("r01") – as written
   const tokens = (t: string) => t.toLowerCase().match(/[\p{L}\p{N}]+(?:\.\d+)?/gu) ?? []
   const weight = (w: string) => (/^\d+(?:\.\d+)?$/.test(w) ? (w.length >= 2 ? 3 : 1) : /^[a-z]{1,3}\d{2,4}$/.test(w) ? 3 : 1)
@@ -248,7 +269,7 @@ export function findForClaim(text: string, claim: string): string | null {
     for (const v of variantsOf(w)) if (!v.includes(' ') && !want.has(v)) want.set(v, 0.5)
   }
   let best: { line: string; score: number } | null = null
-  for (const raw of text.split('\n')) {
+  for (const raw of findableLines(text)) {
     const line = plainLine(raw)
     if (line.length < 4) continue
     const have = new Set(tokens(line))
@@ -259,7 +280,15 @@ export function findForClaim(text: string, claim: string): string | null {
   }
   // a word or two in common is chance, not where it came from
   if (!best || best.score < 4) return null
-  return best.line.split(' ').slice(0, 6).join(' ').replace(/[.,;:]$/, '')
+  const ws = best.line.split(' ')
+  let from = 0
+  // a long line (a table cell listing many things): from where it says it – a rule's own line from its start
+  if (best.line.length > 160 && !/^[A-Z]{1,3}\d{2,4}\b/.test(best.line)) {
+    const at = (strong: boolean) => ws.findIndex((w) => tokens(w).some((t) => (want.get(t) ?? 0) >= (strong ? 3 : 1)))
+    const i = at(true) >= 0 ? at(true) : at(false)
+    from = Math.max(0, Math.min(i - 2, ws.length - 6))
+  }
+  return { find: ws.slice(from, from + 6).join(' ').replace(/[.,;:]$/, ''), score: best.score }
 }
 
 const CLAIM_STOP = new Set(

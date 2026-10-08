@@ -6,7 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial, reportProgress } from './jobs'
-import { findForClaim, findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { claimMatch, findForClaim, findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -281,7 +281,8 @@ export async function askNotes(
 - When the answer is several things, write a Markdown list, one item per line starting with "- ". Include every item the notes give – don't leave any out or merge them.
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
-- After each fact or item, cite the note it came from like [1] or [2][3] – just the number in brackets, not the note's title or section.
+- Give the specific details the notes give – numbers, units, limits and conditions – in the notes' own words.
+- After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
@@ -325,6 +326,10 @@ Notes:${context}`
     const box = /^\s*- \[ \]/m.test(text) ? '- [ ] ' : '- '
     text += `\n\nAlso in your notes:\n${missing.map((m) => `${box}${m.text} [${m.n}]`).join('\n')}`
   }
+  // a citation by name ("[4 MATCH PLAY › 4.7 DRIVE TEAM]"): by its number
+  text = citeByNumber(text, sources)
+  // a fact without a citation: cited to the source it came from
+  text = autoCite(text, texts)
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)
   for (const c of cites) {
@@ -336,6 +341,47 @@ Notes:${context}`
   // keep only sources the answer actually cites – or, if it cites none, the notes it plainly drew on
   const cited = new Set(cites.map((c) => c.n))
   return { answer: text, sources: cited.size ? sources.filter((s) => cited.has(s.n)) : usedSources(text, sources, texts), cites, agent }
+}
+
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+/** Citations written as a note's title or section instead of its number: the number. */
+export function citeByNumber(answer: string, sources: AskSource[]): string {
+  let dropped = false
+  const out = answer.replace(/\[([^\]\n]*\p{L}[^\]\n]*)\](?!\()/gu, (m, inner: string) => {
+    // a checkbox, or a word in brackets
+    if (/^\s*[xX ]?\s*$/.test(inner) || inner.length < 4) return m
+    const said = norm(inner)
+    const last = norm(inner.split('›').pop() ?? inner)
+    const hit =
+      sources.find((s) => s.section && norm(s.section) === said) ??
+      sources.find((s) => s.section && last.length >= 4 && norm(s.section.split('›').pop()!) === last) ??
+      sources.find((s) => s.section && (norm(s.section).endsWith(said) || said.endsWith(norm(s.section)))) ??
+      sources.find((s) => !s.section && norm(s.title) === said)
+    if (hit) return `[${hit.n}]`
+    // a section not among what was read: no citation (a wrong link is worse than none)
+    if (/›|^\s*\d/.test(inner) || sources.some((s) => norm(s.title) && said.startsWith(norm(s.title)))) return (dropped = true), '\u0000'
+    return m
+  })
+  if (!dropped) return out
+  // what pointed at it goes too: "… 60 inches as per the rules outlined in ⟨⟩ and ⟨⟩." → "… 60 inches."
+  return out
+    .replace(/\u0000(?:\s*(?:,|and|or)\s*\u0000)*/g, '\u0000')
+    .replace(/(?:,?\s+(?:as|per|according|to|outlined|stated|described|specified|in|from|under|by|see|the|rules?|sections?|of))*\s*\u0000/gi, '')
+}
+
+/** Each sentence (or list item) of the answer without a citation: cited to the source line it matches best. */
+export function autoCite(answer: string, texts: Map<number, string>): string {
+  return answer.replace(/[^\n]*?(?:[.!?](?=\s|$)|$)/gm, (sentence) => {
+    if (sentence.trim().length < 12 || /\[\d+\]/.test(sentence)) return sentence
+    let best: { n: number; score: number } | null = null
+    for (const [n, text] of texts) {
+      const m = claimMatch(text, sentence)
+      if (m && m.score > (best?.score ?? 0)) best = { n, score: m.score }
+    }
+    if (!best) return sentence
+    return /[.!?]$/.test(sentence) ? `${sentence.slice(0, -1)} [${best.n}]${sentence.slice(-1)}` : `${sentence} [${best.n}]`
+  })
 }
 
 /** Each citation in the answer, in order, with the line its sentence came from. */

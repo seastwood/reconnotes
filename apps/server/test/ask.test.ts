@@ -7,7 +7,7 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
-import { askNotes, citeFinds } from '../src/ask'
+import { askNotes, autoCite, citeByNumber, citeFinds } from '../src/ask'
 import { findIn, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -498,5 +498,28 @@ describe('each citation opens where its sentence came from', () => {
     )
     expect(mid[0].find).toMatch(/^R01\./)
     expect(mid[1].find).toMatch(/^R02\./)
+  })
+})
+
+describe('answers that cite badly', () => {
+  const sources = [
+    { n: 1, noteId: 'm', title: 'Manual', section: '7 ROBOT CONSTRUCTION RULES › 7.2 GENERAL ROBOT DESIGN' },
+    { n: 2, noteId: 'm', title: 'Manual', section: '4 MATCH PLAY › 4.6 RULE VIOLATIONS' },
+  ]
+  it('a section cited by name gets its number; one not read is dropped with what pointed at it', () => {
+    expect(citeByNumber('Max is 60 inches as per the rules outlined in [4 MATCH PLAY › 4.7 DRIVE TEAM] and [3 ARENA › 3.2.6 ROBOT STARTING LINES].', sources)).toBe('Max is 60 inches.')
+    expect(citeByNumber('It starts at 40” tall (see [7.2 GENERAL ROBOT DESIGN]).', sources)).toBe('It starts at 40” tall (see [1]).')
+    // checkboxes and links stay
+    expect(citeByNumber('- [ ] Check it\n- [x] Done [the site](https://x.y)', sources)).toBe('- [ ] Check it\n- [x] Done [the site](https://x.y)')
+  })
+  it('a fact without a citation is cited to where it came from', () => {
+    const texts = new Map([
+      [1, 'R01. The ROBOT must start inside 36” long x 36” wide x 40” tall and not extend beyond 36” long x 36” wide x 60” tall during a MATCH.'],
+      [2, '| +10 Pts | - ROBOT crossing the CENTER LINE - Being taller than 60-inches - Two (2) ROBOTS in the ZONE |'],
+    ])
+    expect(autoCite('The robot may be no more than 60 inches tall during a MATCH.', texts)).toBe('The robot may be no more than 60 inches tall during a MATCH [1].')
+    expect(autoCite('Hello there.', texts)).toBe('Hello there.')
+    // in a table cell's list: that item
+    expect(citeFinds('Being taller than 60-inches is a penalty [2].', texts)[0].find).toBe('Being taller than 60-inches')
   })
 })

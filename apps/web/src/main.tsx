@@ -67,6 +67,16 @@ function pinToViewport() {
     probe.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:100lvh;visibility:hidden;pointer-events:none'
     document.documentElement.appendChild(probe)
   }
+  // #viewport-debug in the address: the numbers this works from, on screen
+  const debug = location.hash.includes('viewport-debug') ? document.createElement('pre') : null
+  const svh = debug ? document.createElement('div') : null
+  const safe = debug ? document.createElement('div') : null
+  if (debug && svh && safe) {
+    debug.style.cssText = 'position:fixed;top:60px;left:8px;right:8px;z-index:99999;margin:0;padding:8px;font:11px/1.4 monospace;background:rgba(0,0,0,.8);color:#0f0;pointer-events:none;white-space:pre-wrap'
+    svh.style.cssText = 'position:absolute;top:0;width:1px;height:100svh;visibility:hidden'
+    safe.style.cssText = 'position:absolute;top:0;width:1px;height:env(safe-area-inset-bottom);visibility:hidden'
+    document.documentElement.append(debug, svh, safe)
+  }
   const apply = () => {
     // not while pinch-zoomed: then the visible area is smaller on purpose
     if (vv && Math.abs(vv.scale - 1) < 0.01) {
@@ -78,8 +88,16 @@ function pinToViewport() {
       document.documentElement.classList.toggle('keyboard-open', open)
       if (keyboard.get().open !== open) keyboard.set({ open })
       // the screen below the visible area: Safari's toolbar (none when the keyboard is up)
-      const large = probe?.offsetHeight ?? 0
+      // (Safari may say the large viewport is the visible one: the screen's height says otherwise)
+      const screenHeight = matchMedia('(orientation: landscape)').matches ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height)
+      const large = glass ? Math.max(probe?.offsetHeight ?? 0, screenHeight) : 0
       const gap = !open && large > vv.height && large - vv.height < 240 ? Math.round(large - vv.height) : 0
+      if (debug)
+        debug.textContent = [
+          `vv ${Math.round(vv.height)} @${Math.round(vv.offsetTop)}  inner ${window.innerHeight}  screen ${screen.width}×${screen.height}`,
+          `lvh ${probe?.offsetHeight}  svh ${svh?.offsetHeight}  gap ${gap}  glass ${glass}  kb ${open}`,
+          `safe-bottom ${getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')} → ${safe?.offsetHeight}  standalone ${(navigator as { standalone?: boolean }).standalone}`,
+        ].join('\n')
       document.documentElement.style.setProperty('--bar-gap', `${gap}px`)
       document.documentElement.style.setProperty('--app-height', `${Math.round(gap ? large : vv.height)}px`)
       // iOS may also slide the visible area down the page as the keyboard
@@ -115,10 +133,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD && location.protocol !=
   })
 }
 
-/** Safari (or another iOS browser) in a tab: it has a toolbar over the page's bottom edge. */
+/** Safari (or another browser) in a tab on an iPhone: its toolbar is over the page's bottom edge (on an iPad it's at the top). */
 function isSafariTab() {
   if (Capacitor.isNativePlatform()) return false
-  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const ios = /iPhone|iPod/.test(navigator.userAgent)
   const homeScreen = (navigator as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches
   return ios && !homeScreen
 }
