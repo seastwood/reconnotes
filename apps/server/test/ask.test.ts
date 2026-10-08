@@ -558,7 +558,9 @@ describe('what the answer left out', () => {
     })
     const r = await askNotes(app.store, app.sync, app.ai, 'What is the maximum height of the robot?', null, {}, { notes: ['rulesnote00001'] })
     // the stand-in AI answers about T8 bins; what the note says about it is added
-    expect(r.answer).toMatch(/More in this note:\n- R01\. The ROBOT must start inside/)
+    expect(r.answer).toMatch(/From the note:\n- R01\. The ROBOT must start inside/)
+    // and the penalty for the same 60” limit
+    expect(r.answer).toMatch(/- Penalties: being taller than 60-inches is a 10 point penalty\. \[1\]/)
     expect(r.read).toHaveLength(1)
   })
 })

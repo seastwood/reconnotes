@@ -208,6 +208,8 @@ export async function askNotes(
   const texts = new Map<number, string>()
   const read = new Set<Section>()
   let rest: Section[] = []
+  /** every section of the notes asked about (a whole manual, for "Ask about this note") */
+  let everySection: Section[] = []
   let context = ''
   const header = (id: string, section: string) => {
     const m = meta.get(id)!
@@ -238,6 +240,7 @@ export async function askNotes(
     // the best sections of the best notes: a long note (a manual's page) is
     // read where it's about the question, not from the top
     const all: Section[] = []
+    everySection = all
     for (const id of ids) {
       const doc = sync.getDoc(noteDocName(id))
       if (!doc) continue
@@ -344,16 +347,35 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   text = recite(text, texts, sources)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
+  // "in [8] and [8]": in [8]
+  text = text.replace(/\[(\d+)\](\s*(?:,|and|&)\s*\[\1\])+/g, '[$1]')
   // what the answer left out of the lines most about the question (a small model
   // often answers from one passage): added, each linked to where it is
   if (!range) {
-    const key = keyLines(texts, words, rules, 6, 0.9)
+    // asked about one note (a manual): its lines from anywhere in it, not only the parts read
+    const pool = new Map(texts)
+    const unread = new Map<number, Section>()
+    if (pinned.length) {
+      const readTexts = new Set(texts.values())
+      everySection.forEach((sec, i) => {
+        if (!read.has(sec) && !readTexts.has(sec.text)) (pool.set(-1 - i, sec.text), unread.set(-1 - i, sec))
+      })
+    }
+    const key = keyLines(pool, words, rules, 4, 0.9).map((l) => {
+      const sec = unread.get(l.n)
+      if (!sec) return l
+      // from a part not read: a source of its own, so it's linked
+      add(sec.noteId, sec.text, sec)
+      unread.delete(l.n)
+      const n = sources.length
+      for (const [k, v] of unread) if (v === sec) unread.delete(k)
+      return { ...l, n }
+    })
     // the best line gives figures (40”, 60”): only lines that give figures too
     const figures = /\d/.test(key[0]?.line ?? '')
-    const more = key.filter((l) => (!figures || /\d/.test(l.line)) && !alreadySaid(text, l.line))
-      .slice(0, 3)
-    if (more.length)
-      text += `\n\n${pinned.length === 1 ? 'More in this note' : 'More in your notes'}:\n${more.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
+    const quote = key.filter((l) => (!figures || /\d/.test(l.line)) && !quoted(text, l.line)).slice(0, 4)
+    if (quote.length)
+      text += `\n\n${pinned.length === 1 ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
   }
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)
@@ -411,13 +433,11 @@ export function autoCite(answer: string, texts: Map<number, string>): string {
   })
 }
 
-/** A line the answer already gives: its figures (or most of its words) are in it. */
-function alreadySaid(answer: string, line: string): boolean {
-  const low = answer.toLowerCase()
-  const figures = [...new Set(line.toLowerCase().match(/\b(?:[a-z]{1,3}\d{2,4}|\d{2,}(?:\.\d+)?)\b/g) ?? [])]
-  if (figures.length) return figures.every((f) => low.includes(f))
-  const words = [...new Set(line.toLowerCase().match(/\p{L}{5,}/gu) ?? [])]
-  return words.length > 0 && words.filter((w) => low.includes(w)).length / words.length >= 0.7
+/** A line the answer already quotes (near enough word for word). */
+function quoted(answer: string, line: string): boolean {
+  const a = norm(answer)
+  const l = norm(line)
+  return a.includes(l.slice(0, Math.min(l.length, 80)))
 }
 
 /** A long line cut at a word, for a list under the answer. */

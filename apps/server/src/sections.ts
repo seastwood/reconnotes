@@ -187,15 +187,20 @@ const plainLine = (t: string) =>
  * in the note (text can't be found across them), so each cell is a line.
  */
 function findableLines(text: string): string[] {
-  return text.split('\n').flatMap((l) =>
-    /^\s*\|/.test(l)
-      ? l
-          .split('|')
-          .filter((c) => c.trim() && !/^[\s:-]+$/.test(c))
-          // a list in a cell ("- one - two"): each item is a paragraph of its own in the note
-          .flatMap((c) => c.split(/\s+-\s+(?=[\p{Lu}(\d])|<br\s*\/?>/u))
-      : [l],
-  )
+  return labelledLines(text).map((x) => x.raw)
+}
+
+/** findableLines, each table cell with its row's first cell ("+10 Pts") – what it's in the table for. */
+function labelledLines(text: string): { raw: string; label?: string }[] {
+  return text.split('\n').flatMap((l) => {
+    if (!/^\s*\|/.test(l)) return [{ raw: l }]
+    const cells = l.split('|').filter((c) => c.trim() && !/^[\s:-]+$/.test(c))
+    const label = cells.length > 1 ? plainLine(cells[0]) : ''
+    return cells.flatMap((c, i) =>
+      // a list in a cell ("- one - two"): each item is a paragraph of its own in the note
+      c.split(/\s+-\s+(?=[\p{Lu}(\d])|<br\s*\/?>/u).map((raw) => ({ raw, ...(i > 0 && label && label.length <= 40 ? { label } : {}) })),
+    )
+  })
 }
 
 /**
@@ -302,32 +307,53 @@ const CLAIM_STOP = new Set(
  */
 export function keyLines(texts: Map<number, string>, words: string[], rules: string[] = [], limit = 4, ratio = 0.75): { n: number; line: string }[] {
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
-  const all: { n: number; raw: string; line: string; low: string }[] = []
+  const all: { n: number; raw: string; line: string; low: string; label?: string }[] = []
   for (const [n, text] of texts)
-    for (const raw of findableLines(text)) {
+    for (const { raw, label } of labelledLines(text)) {
       const plain = plainLine(raw)
       if (plain.length < 20 || /^#{1,6}\s/.test(raw.trim())) continue
       // a long paragraph by its sentences: the one that says it, not the paragraph that has the words somewhere
       for (const line of plain.length > 300 ? plain.split(/(?<=[\p{Ll})”"'][.!?])\s+(?=[\p{Lu}\d])/u) : [plain])
-        if (line.length >= 20) all.push({ n, raw: line === plain ? raw : line, line, low: line.toLowerCase() })
+        if (line.length >= 20) all.push({ n, raw: line === plain ? raw : line, line, low: line.toLowerCase(), label })
     }
   // a word in every line ("robot" in a robot manual) says little; a rare one ("tall") a lot
   const weight = new Map(terms.map((t) => [t, Math.log(1 + all.length / (1 + all.filter((x) => holdsAny(x.low, t)).length))]))
   const found: { n: number; line: string; score: number }[] = []
-  for (const { n, raw, line, low } of all) {
-    const hit = terms.filter((t) => holdsAny(low, t))
+  const hits = all.map((x) => terms.filter((t) => holdsAny(x.low, t)))
+  all.forEach(({ n, raw, line }, i) => {
+    const hit = hits[i]
     const rule = rules.some((r) => definesRule(raw, r)) ? 3 : rules.some((r) => new RegExp(`\\b${r}\\b`).test(line)) ? 1 : 0
-    if (hit.length < 2 && !rule) continue
+    if (hit.length < 2 && !rule) return
     // a line with figures in it is usually the one that says it
     const score = hit.reduce((sum, t) => sum + weight.get(t)!, 0) + rule * 2 + (/\d/.test(line) ? 0.3 : 0)
     found.push({ n, line: line.length > 500 ? `${line.slice(0, 500)}…` : line, score })
-  }
+  })
   const seen = new Set<string>()
   const best = Math.max(0, ...found.map((x) => x.score))
-  return found
+  const top = found
     .sort((a, b) => b.score - a.score)
     // only lines nearly as much about it as the best: the rest is noise to a small model
     .filter((x) => x.score >= best * ratio && !seen.has(x.line) && seen.add(x.line))
     .slice(0, limit)
-    .map(({ n, line }) => ({ n, line }))
+  // lines that give the same measurement as one of those, about the same thing
+  // ("Being taller than 60-inches" – the penalty for R01's 60” limit): they belong with it
+  const measures = new Set(top.flatMap((x) => [...x.line.matchAll(MEASURE)].map((m) => `${m[1]} ${unitOf(m[2])}`)))
+  const related: { n: number; line: string }[] = []
+  if (measures.size)
+    all.forEach(({ n, line, label }, i) => {
+      if (!hits[i].length || seen.has(line) || line.length > 500) return
+      if ([...line.matchAll(MEASURE)].some((m) => measures.has(`${m[1]} ${unitOf(m[2])}`))) {
+        seen.add(line)
+        // a table cell, with what its row is ("+10 Pts – Being taller than 60-inches")
+        related.push({ n, line: label ? `${label} – ${line}` : line })
+      }
+    })
+  return [...top.map(({ n, line }) => ({ n, line })), ...related.slice(0, 2)].slice(0, limit + 2)
+}
+
+/** A figure with its unit: 60”, 60-inches, 125 lbs, 10.5 feet per second. */
+const MEASURE = /(\d+(?:\.\d+)?)\s*-?\s*(”|"|''|in\b\.?|inch(?:es)?|ft\b|feet|foot|lbs?\b|pounds?|kg|seconds?|sec\b|s\b|%|pts?\b|points?)/gi
+const unitOf = (u: string) => {
+  const l = u.toLowerCase().replace(/\.$/, '')
+  return /^(”|"|''|in|inch|inches)$/.test(l) ? 'in' : /^(ft|feet|foot)$/.test(l) ? 'ft' : /^(lb|lbs|pound|pounds)$/.test(l) ? 'lb' : /^(s|sec|second|seconds)$/.test(l) ? 's' : /^(pt|pts|point|points)$/.test(l) ? 'pt' : l
 }
