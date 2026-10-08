@@ -4263,3 +4263,43 @@ a.button {
 .ask-section {
   color: var(--muted);
 }
+
+/* Ask: earlier conversations */
+.ask-history {
+  margin-top: 12px;
+}
+.ask-history .menu-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ask-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 6px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.ask-history-row:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+.ask-history-q {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-history-meta {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  font-weight: normal;
+}
+.ask-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 10px 0 4px;
+}

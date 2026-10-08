@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ArrowUp, MessageCircleQuestion, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { AskPanel } from './AskPanel'
+import { AskConversation, AskHistoryList, useAskHistory } from './AskHistory'
 
 /**
  * "Ask about this note" / "Ask this folder": a question answered from this
@@ -23,15 +24,25 @@ export function AskNoteDialog({
   onClose: () => void
   onOpen: (noteId: string, find?: string) => void
 }) {
+  const access = useFolderAccess()
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState<string | null>(null)
-  const access = useFolderAccess()
+  // earlier conversations about this note (or folder), and the one being read again
+  const history = useAskHistory(folderId ? { folderId } : { noteId })
+  const [viewing, setViewing] = useState<string | null>(null)
+  const conversation = viewing ? history.list?.find((c) => c.id === viewing) : undefined
+  const scope = folderId ? { folders: [folderId], unlocked: access.unlockedIds } : { notes: [noteId!], unlocked: access.unlockedIds }
+  const open = (id: string, find?: string) => {
+    onClose()
+    onOpen(id, find)
+  }
   const answerRef = useRef<HTMLUListElement>(null)
   const boxRef = useRef<HTMLTextAreaElement>(null)
   const liftedAt = useRef(0)
   const ask = () => {
     if (!draft.trim()) return
     setQuestion(draft.trim())
+    setViewing(null)
     setDraft('')
     // the keyboard away, and the question (with how it's going) in view
     boxRef.current?.blur()
@@ -90,17 +101,16 @@ export function AskNoteDialog({
             <ArrowUp size={16} />
           </button>
         </form>
-        {question && (
+        {conversation && <AskConversation conversation={conversation} input={scope} onBack={() => setViewing(null)} onOpen={open} />}
+        {!question && !conversation && history.list && <AskHistoryList list={history.list} onPick={(c) => setViewing(c.id)} onRemove={history.remove} />}
+        {question && !conversation && (
           <ul className="ask-note-answer" ref={answerRef}>
             <AskPanel
               key={question}
               // it's a job: closing this doesn't stop it
               question={question}
-              where={folderId ? { folders: [folderId], unlocked: access.unlockedIds } : { notes: [noteId!], unlocked: access.unlockedIds }}
-              onOpen={(id, find) => {
-                onClose()
-                onOpen(id, find)
-              }}
+              where={scope}
+              onOpen={open}
             />
           </ul>
         )}

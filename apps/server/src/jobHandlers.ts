@@ -32,6 +32,7 @@ import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { meetingNotesText } from './meetingNotes'
+import { saveTurn } from './askHistory'
 import { importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
@@ -273,6 +274,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning, {
       tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
     }, scopeFromInput(job.input), historyFromInput(job.input.history))
+    // kept as a conversation (to read again, or carry on, from "Ask about this note")
+    saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: r.answer, sources: r.sources, at: Date.now() })
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 

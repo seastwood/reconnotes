@@ -40,6 +40,7 @@ import { log } from './log'
 import { aiHealth } from './health'
 import { aiSkips, noteFilter, scopeFromQuery } from './access'
 import { definesRule, ruleIds } from './sections'
+import { deleteConversation, listConversations, scopeKey } from './askHistory'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
@@ -287,6 +288,18 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
     )
     json(res, 200, { text, agent })
+  })
+
+  // conversations kept from Ask (about a note: ?noteId=; a folder: ?folderId=)
+  route('GET', '/api/ask/history', (_req, res, _p, url) => {
+    const noteId = url.searchParams.get('noteId')
+    const folderId = url.searchParams.get('folderId')
+    const scope = noteId ? scopeKey({ notes: [noteId] }) : folderId ? scopeKey({ folders: [folderId] }) : ''
+    json(res, 200, { conversations: listConversations(store, scope) })
+  })
+  route('DELETE', `/api/ask/history/${ID}`, (_req, res, [id]) => {
+    deleteConversation(store, id)
+    json(res, 200, { ok: true })
   })
 
   /** "Ask your notes": an answer from your notes, with the notes it used. */

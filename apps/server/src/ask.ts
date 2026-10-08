@@ -6,7 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial } from './jobs'
-import { findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -205,7 +205,9 @@ export async function askNotes(
   const add = (id: string, md: string, sec?: Section) => {
     const n = sources.length + 1
     const section = sec?.path.join(' › ') ?? ''
-    sources.push({ n, noteId: id, title: shortTitle(meta.get(id)!.title), ...(section ? { section } : {}), ...(sec ? { find: findTextOf(sec) } : {}) })
+    // where the answer is: the line most about the question, else the section's heading
+    const find = findIn(md, words, rules) ?? (sec ? findTextOf(sec) : null)
+    sources.push({ n, noteId: id, title: shortTitle(meta.get(id)!.title), ...(section ? { section } : {}), ...(find ? { find } : {}) })
     texts.set(n, md)
     context += `\n\n=== [${n}] ${header(id, section)} ===\n${md}`
   }

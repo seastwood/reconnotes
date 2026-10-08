@@ -157,7 +157,7 @@ export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string
 }
 
 /** One question's state: waiting, the answer, or what went wrong. */
-function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: string | null; onRetry: () => void; onOpen: (noteId: string, find?: string) => void }) {
+export function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: string | null; onRetry: () => void; onOpen: (noteId: string, find?: string) => void }) {
   const [, tick] = useState(0)
   useEffect(() => {
     if (!job || isFinished(job)) return
@@ -217,7 +217,7 @@ function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: s
 }
 
 /** "Ask a follow-up…" under an answer. */
-function FollowUpBox({ onAsk }: { onAsk: (q: string) => Promise<void> }) {
+export function FollowUpBox({ onAsk }: { onAsk: (q: string) => Promise<void> }) {
   const [q, setQ] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)

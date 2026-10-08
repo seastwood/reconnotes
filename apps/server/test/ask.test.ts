@@ -7,6 +7,7 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
+import { findIn } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 
@@ -196,7 +197,7 @@ describe('ask your notes', () => {
     const body = await res.json()
     expect(res.status).toBe(200)
     expect(body.answer).toContain('[1]')
-    expect(body.sources).toEqual([{ n: 1, noteId: 'asknote000001', title: 'Monday plan' }])
+    expect(body.sources).toEqual([{ n: 1, noteId: 'asknote000001', title: 'Monday plan', find: 'Team A sorts the T8 bins' }])
     expect(prompts[0]).toContain('T8 bins')
     expect(prompts[0]).not.toContain('milk') // unrelated note left out
   })
@@ -390,5 +391,37 @@ describe('long notes (a manual)', () => {
     expect(rule.prompt).toContain('G302 Robots may not extend more than 48 cm')
     // the rule's own section comes first (cited as [1])
     expect(rule.prompt).toMatch(/=== \[1\] "Game rules" › 6\.3 Fouls/)
+  })
+
+  it('keeps each conversation about a note – with its follow-ups – and its sources point at the line with the answer', async () => {
+    const post = (body: unknown) =>
+      fetch(`${base}/api/jobs`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+    const wait = (id: string) => fetch(`${base}/api/jobs/${id}/wait`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())
+    const first = (await post({ kind: 'ask', input: { question: 'is g302 a minor or major foul?', notes: ['manualnote00001'] } })).job
+    const done = (await wait(first.id)).job
+    expect(done.status).toBe('done')
+    // the source opens the note at the rule itself
+    expect(done.result.sources[0].find).toMatch(/^G302 Robots may not extend/)
+    const second = (await post({ kind: 'ask', input: { question: 'and G301?', notes: ['manualnote00001'], thread: first.id, history: [{ question: 'is g302 a minor or major foul?', answer: done.result.answer }] } })).job
+    await wait(second.id)
+    const { conversations } = await fetch(`${base}/api/ask/history?noteId=manualnote00001`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())
+    expect(conversations).toHaveLength(1)
+    expect(conversations[0].id).toBe(first.id)
+    expect(conversations[0].turns.map((t: { question: string }) => t.question)).toEqual(['is g302 a minor or major foul?', 'and G301?'])
+    // not mixed with questions about everything
+    const all = await fetch(`${base}/api/ask/history`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())
+    expect(all.conversations.some((c: { id: string }) => c.id === first.id)).toBe(false)
+    // and it can be deleted
+    await fetch(`${base}/api/ask/history/${first.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${TOKEN}` } })
+    expect((await fetch(`${base}/api/ask/history?noteId=manualnote00001`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())).conversations).toEqual([])
+  })
+})
+
+describe('where a source opens', () => {
+  it('lands on the line with the answer, not the note’s title', () => {
+    const md = '# Install the server\n\nFirst copy the files.\n\nTo install it, run npm ci then start the service.'
+    expect(findIn(md, ['how', 'install', 'it'])).toBe('To install it, run npm ci')
+    // the title when it’s the only line about it
+    expect(findIn('# Install the server\n\nCopy the files.', ['install'])).toBe('Install the server')
   })
 })

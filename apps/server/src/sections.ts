@@ -138,6 +138,52 @@ export function scoreSections(
   })
 }
 
+/** A line of Markdown as it reads in the note (no markers, link targets or formatting). */
+const plainLine = (t: string) =>
+  t
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_m, a: string, b?: string) => b ?? a)
+    .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
+    .replace(/!\d{4}-\d{2}-\d{2}\S*/g, '')
+    .replace(/\s*\[[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} \d{4}[^\]]*\]/g, '')
+    .replace(/[*_`~|\\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * Where in a note (or section) the answer to a question is: a few words of
+ * the line that has the most of the question's words (or its rule number) –
+ * what the find bar looks for when the source is opened, so it lands there.
+ */
+export function findIn(text: string, words: string[], rules: string[] = []): string | null {
+  const terms = [...new Set(words.filter((w) => w.length >= 3))]
+  let best: { line: string; score: number } | null = null
+  let first = true
+  for (const raw of text.split('\n')) {
+    const line = plainLine(raw)
+    if (line.length < 4) continue
+    const low = line.toLowerCase()
+    let score = terms.filter((t) => low.includes(t.length > 5 ? STEM(t) : t)).length
+    if (rules.some((r) => new RegExp(`\\b${r}\\b`).test(line))) score += definesRuleLine(raw, rules) ? 5 : 2
+    // the note's title (its first line) only when nothing below it says as much
+    if (score && first) score -= 0.5
+    first = false
+    if (score > 0 && (!best || score > best.score)) best = { line, score }
+  }
+  if (!best) return null
+  // a few words from where it starts being about the question (a phrase the find bar can match)
+  const ws = best.line.split(' ')
+  const at = Math.max(
+    0,
+    ws.findIndex((w) => terms.some((t) => w.toLowerCase().includes(t.length > 5 ? STEM(t) : t)) || rules.some((r) => w.includes(r))),
+  )
+  const from = Math.max(0, Math.min(at - 2, ws.length - 6))
+  return ws.slice(from, from + 6).join(' ').replace(/[.,;:]$/, '')
+}
+
+const definesRuleLine = (raw: string, rules: string[]) => rules.some((r) => definesRule(raw, r))
+
 /** Text to find in the note when the source is opened: the section's heading, else its first words. */
 export function findTextOf(s: Section): string {
   const head = /^#{1,6}\s+(.*)$/m.exec(s.text)?.[1]
