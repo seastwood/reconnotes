@@ -597,6 +597,11 @@ describe('the bumper rules', () => {
 })
 
 describe('the AI reasoning past the notes', () => {
+  it('"would violate" too', () => {
+    expect(markInference('Therefore, any cut-out would violate these rules as it would create a gap [5].')).toBe(
+      "*(Not stated in the note – the AI's inference:)* Therefore, any cut-out would violate these rules as it would create a gap.",
+    )
+  })
   it('is marked as its inference, without a citation', () => {
     const answer =
       '- R406 specifies how corners must be filled [3].\nGiven these points, it can be inferred that cutouts would not be allowed under FRC rules [3]. The emphasis on filling gaps suggests that any openings are prohibited.'
