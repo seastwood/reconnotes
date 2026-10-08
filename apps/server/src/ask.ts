@@ -371,6 +371,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   text = recite(text, texts, sources)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
+  // the AI's own reasoning ("it can be inferred that…"): marked as such, not cited to a note that doesn't say it
+  text = markInference(text)
   // "in [8] and [8]": in [8]
   text = text.replace(/\[(\d+)\](\s*(?:,|and|&)\s*\[\1\])+/g, '[$1]')
   // what the answer left out of the lines most about the question (a small model
@@ -439,6 +441,29 @@ function sentenceEnds(t: string): number[] {
       if (next && !/[\p{Lu}"“*\-#>]/u.test(next)) continue
     }
     out.push(i + 1)
+  }
+  return out
+}
+
+/** Words an answer uses when it reasons beyond what the notes say. */
+const INFERENCE = /\b(?:it can be (?:inferred|assumed|concluded)|can be inferred|(?:this|which|these|that) (?:suggests?|implies|indicates?)|(?:suggests?|implies) that|it (?:is|seems) (?:likely|reasonable|safe to (?:say|assume))|presumably|theoretically|it would seem|one could (?:argue|assume)|by extension|we can (?:infer|assume|conclude))\b/i
+
+/**
+ * Sentences where the AI reasons past the notes ("Given these points, it can be inferred
+ * that…"): marked as its inference, and without citations – the note doesn't say it.
+ */
+export function markInference(answer: string): string {
+  const cuts = [0, ...sentenceEnds(answer), answer.length].filter((x, i, a) => i === 0 || x > a[i - 1])
+  let out = ''
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const sentence = answer.slice(cuts[k], cuts[k + 1])
+    if (!INFERENCE.test(sentence)) {
+      out += sentence
+      continue
+    }
+    const lead = /^\s*(?:[-*]\s+|\d+[.)]\s+)?/.exec(sentence)![0]
+    const body = sentence.slice(lead.length).replace(/\s*\[\d+\]/g, '')
+    out += `${lead}*(Not stated in the note – the AI's inference:)* ${body.replace(/^\s+/, '')}`
   }
   return out
 }

@@ -7,7 +7,7 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
-import { askNotes, autoCite, citeByNumber, citeFinds, recite } from '../src/ask'
+import { askNotes, autoCite, citeByNumber, citeFinds, markInference, recite } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -590,6 +590,16 @@ describe('the bumper rules', () => {
   it('"4 in. (~101 mm)" isn’t the end of a sentence', () => {
     expect(autoCite('BUMPERS must not extend more than 4 in. (~101 mm) from the ROBOT PERIMETER.', texts)).toBe(
       'BUMPERS must not extend more than 4 in. (~101 mm) from the ROBOT PERIMETER [2].',
+    )
+  })
+})
+
+describe('the AI reasoning past the notes', () => {
+  it('is marked as its inference, without a citation', () => {
+    const answer =
+      '- R406 specifies how corners must be filled [3].\nGiven these points, it can be inferred that cutouts would not be allowed under FRC rules [3]. The emphasis on filling gaps suggests that any openings are prohibited.'
+    expect(markInference(answer)).toBe(
+      "- R406 specifies how corners must be filled [3].\n*(Not stated in the note – the AI's inference:)* Given these points, it can be inferred that cutouts would not be allowed under FRC rules. *(Not stated in the note – the AI's inference:)* The emphasis on filling gaps suggests that any openings are prohibited.",
     )
   })
 })
