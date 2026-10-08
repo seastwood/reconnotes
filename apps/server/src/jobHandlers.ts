@@ -32,7 +32,7 @@ import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { meetingNotesText } from './meetingNotes'
-import { importWebPages } from './webImport'
+import { importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
  * What each kind of job does. Results that belong in a note are written into
@@ -58,6 +58,7 @@ export const JOB_KINDS: Record<string, string> = {
   meeting: 'Meeting notes',
   digest: 'Weekly digest',
   'web-import': 'Import a web page',
+  'web-refresh': 'Check imported pages for updates',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -146,6 +147,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   meeting: 'audio',
   digest: 'compile',
   'web-import': null,
+  'web-refresh': null,
 }
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
@@ -391,13 +393,36 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   // a web page (and, if asked, the guide's other pages) into notes (see webImport.ts)
   jobs.register('web-import', async (job) => {
-    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null }
-    const r = await importWebPages(config, store, ai, sync, { url: String(i.url ?? ''), follow: Boolean(i.follow), maxPages: Number(i.maxPages) || undefined, folderId: i.folderId ?? null })
+    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string }
+    const r = await importWebPages(config, store, ai, sync, {
+      url: String(i.url ?? ''),
+      follow: Boolean(i.follow),
+      maxPages: Number(i.maxPages) || undefined,
+      folderId: i.folderId ?? null,
+      pdfAttachmentId: typeof i.pdfAttachmentId === 'string' ? i.pdfAttachmentId : undefined,
+    })
     const summary = [
       `${r.pages} page${r.pages === 1 ? '' : 's'}, ${r.pictures} picture${r.pictures === 1 ? '' : 's'}.`,
       ...r.notes.slice(0, 20),
     ].join('\n')
     return { result: { noteId: r.noteIds[0], noteIds: r.noteIds, folderId: r.folderId, pages: r.pages, pictures: r.pictures, notes: r.notes, text: summary } }
+  })
+
+  // imported pages: fetched again, the changed ones brought up to date (see webImport.ts)
+  jobs.register('web-refresh', async (job) => {
+    const i = job.input as { noteId?: string; folderId?: string }
+    const records = importsFor(store, sync, { noteId: i.noteId ?? (job.noteId || undefined), folderId: i.folderId })
+    if (!records.length) throw new Error('This wasn’t imported from a web page (or was imported before update checks existed – import it again to get them).')
+    const notes: string[] = []
+    let changed = 0
+    let firstNote: string | undefined
+    for (const r of records) {
+      const res = await refreshImport(config, store, ai, sync, r)
+      notes.push(...res.notes)
+      changed += res.changed ?? 0
+      firstNote ??= res.noteIds[0]
+    }
+    return { result: { noteId: firstNote, changed, notes, text: notes.join('\n') } }
   })
 
   jobs.register('meeting', async (job) => {

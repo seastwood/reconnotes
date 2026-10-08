@@ -5,10 +5,24 @@ import { useFolderAccess } from '../lib/folderLock'
 import { AskPanel } from './AskPanel'
 
 /**
- * "Ask about this note": a question answered from this note only (by your
- * AI agents, as a job), with follow-ups.
+ * "Ask about this note" / "Ask this folder": a question answered from this
+ * note – or the notes in this folder and its subfolders – only (by your AI
+ * agents, as a job), with follow-ups.
  */
-export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: string; title: string; onClose: () => void; onOpen: (noteId: string, find?: string) => void }) {
+export function AskNoteDialog({
+  noteId,
+  folderId,
+  title,
+  onClose,
+  onOpen,
+}: {
+  noteId?: string
+  /** ask the notes in this folder instead (even one left out of search) */
+  folderId?: string
+  title: string
+  onClose: () => void
+  onOpen: (noteId: string, find?: string) => void
+}) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState<string | null>(null)
   const access = useFolderAccess()
@@ -19,7 +33,7 @@ export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: stri
       <div className="dialog ask-note-dialog" role="dialog" aria-label="Ask about this note" onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>
-            <MessageCircleQuestion size={20} /> Ask about “{title || 'Untitled'}”
+            <MessageCircleQuestion size={20} /> {folderId ? 'Ask' : 'Ask about'} “{title || 'Untitled'}”
           </h2>
           <button className="icon" onClick={onClose} aria-label="Close">
             <X size={18} />
@@ -36,7 +50,7 @@ export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: stri
             rows={1}
             autoFocus
             value={draft}
-            placeholder="What were the action items? Who was at this meeting?…"
+            placeholder={folderId ? 'Ask a question – the answer comes from this folder’s notes…' : 'What were the action items? Who was at this meeting?…'}
             enterKeyHint="send"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -55,7 +69,7 @@ export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: stri
             <AskPanel
               key={question}
               question={question}
-              where={{ notes: [noteId], unlocked: access.unlockedIds }}
+              where={folderId ? { folders: [folderId], unlocked: access.unlockedIds } : { notes: [noteId!], unlocked: access.unlockedIds }}
               onOpen={(id, find) => {
                 onClose()
                 onOpen(id, find)

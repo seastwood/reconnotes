@@ -10,7 +10,7 @@ await build({
   format: 'esm',
   target: 'node20',
   sourcemap: true,
-  external: ['better-sqlite3', '@resvg/resvg-js', '@anthropic-ai/sdk', '@hocuspocus/server', 'ws', 'yjs'],
+  external: ['better-sqlite3', '@resvg/resvg-js', '@anthropic-ai/sdk', '@hocuspocus/server', 'ws', 'yjs', 'pdfjs-dist'],
   banner: { js: '#!/usr/bin/env node' },
 })
 console.log('built dist/index.js')

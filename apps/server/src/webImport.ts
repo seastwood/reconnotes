@@ -1,9 +1,10 @@
 /// <reference lib="dom.iterable" />
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 import { parseHTML } from 'linkedom'
 import * as Y from 'yjs'
-import { WORKSPACE_DOC, videoInfo, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
+import { WORKSPACE_DOC, listFolders, videoInfo, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
 import type { Ai } from './ai'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -11,6 +12,7 @@ import type { SyncEngine } from './sync'
 import { initialTextStatus, queueAttachment } from './attachments'
 import { markdownToNodes } from './importNotes'
 import { reportProgress } from './jobs'
+import { pdfSections } from './pdf'
 
 /**
  * Web pages into notes
@@ -37,6 +39,10 @@ export interface WebImportOptions {
   /** how many pages at most (with follow) */
   maxPages?: number
   folderId?: string | null
+  /** checking an earlier import for updates */
+  update?: WebImportRecord
+  /** a PDF uploaded from the device (an attachment): its chapters as notes */
+  pdfAttachmentId?: string
 }
 
 export interface WebImportResult {
@@ -46,6 +52,8 @@ export interface WebImportResult {
   pictures: number
   /** what didn't come across */
   notes: string[]
+  /** notes written (checking for updates: the changed ones) */
+  changed?: number
 }
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15 ReconNotes'
@@ -628,6 +636,8 @@ interface Page {
   title: string
   html: string
   doc: Document
+  /** a section of a PDF: the pages it's on */
+  pdfPages?: [number, number]
 }
 
 function titleOf(doc: Document, main: El, url: URL): string {
@@ -642,7 +652,8 @@ function titleOf(doc: Document, main: El, url: URL): string {
 export async function importWebPages(config: Config, store: Store, ai: Ai, sync: SyncEngine, opts: WebImportOptions): Promise<WebImportResult> {
   let start: URL
   try {
-    start = new URL(opts.url.trim())
+    // a PDF from this device has no address of its own
+    start = opts.pdfAttachmentId ? new URL('https://pdf.reconnotes/upload') : new URL(opts.url.trim())
   } catch {
     throw new Error('That isn’t a web address – it should start with https://')
   }
@@ -655,6 +666,18 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const seen = new Set<string>([pageKey(start)])
   const queue: URL[] = [start]
   let scope = start
+  /** a PDF manual: the file (kept, and linked from the contents) */
+  let pdf: { name: string; data: Buffer; attachmentId?: string } | null = null
+  // a PDF from this device (uploaded as an attachment): its chapters as notes
+  if (opts.pdfAttachmentId) {
+    const att = store.getAttachment(opts.pdfAttachmentId)
+    if (!att || !store.hasBlob(att.id)) throw new Error('The PDF hasn’t reached the server yet – try again in a moment.')
+    const data = fs.readFileSync(store.blobPath(att.id))
+    const split = await pdfPages(data, new URL(`https://pdf.reconnotes/${encodeURIComponent(att.name || 'Document.pdf')}`))
+    pdf = { name: att.name || 'Document.pdf', data, attachmentId: att.id }
+    pages.push(...split)
+    queue.length = 0
+  }
   while (queue.length && pages.length < maxPages) {
     const url = queue.shift()!
     reportProgress(opts.follow ? `Reading page ${pages.length + 1} of up to ${Math.min(maxPages, pages.length + 1 + queue.length)}…` : 'Reading the page…')
@@ -667,10 +690,15 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
       continue
     }
     const finalUrl = new URL(got.url)
-    // a PDF (a manual as one file): a note holding it
+    // a PDF (a manual as one file): its chapters as notes – or, without text in it, a note holding it
     if (got.type === 'application/pdf' || /\.pdf$/i.test(finalUrl.pathname)) {
       if (pages.length) continue
-      return importFile(config, store, ai, sync, got.data, 'application/pdf', decodeURIComponent(path.posix.basename(finalUrl.pathname)) || 'Document.pdf', finalUrl, opts.folderId ?? null)
+      const name = decodeURIComponent(path.posix.basename(finalUrl.pathname)) || 'Document.pdf'
+      const split = await pdfPages(got.data, finalUrl).catch(() => null)
+      if (!split) return importFile(config, store, ai, sync, got.data, 'application/pdf', name, finalUrl, opts.folderId ?? null)
+      pdf = { name, data: got.data }
+      pages.push(...split)
+      break
     }
     if (!/html|xml|^text\/plain$|^$/.test(got.type)) {
       if (!pages.length) throw new Error(`That address is a ${got.type} file, not a web page.`)
@@ -700,23 +728,20 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     p.title = titleOf(p.doc, main, p.url)
     return main
   })
-  const ids = pages.map(() => newId())
+  // checking for updates: the notes the pages went into before
+  const prev = opts.update ?? null
+  const meta = sync.noteMeta()
+  const alive = (id: string | undefined) => Boolean(id && meta.get(id) && !meta.get(id)!.trashedAt)
+  const ids = pages.map((p) => {
+    const was = prev?.pages[pageKey(p.url)]?.noteId
+    return alive(was) ? was! : newId()
+  })
+  const isNew = pages.map((p, i) => ids[i] !== prev?.pages[pageKey(p.url)]?.noteId)
   const byKey = new Map(pages.map((p, i) => [pageKey(p.url), i]))
   /** headings links point at (page#section): what to find when the link is followed */
   const finds: string[] = []
 
-  // 3. the notes (in a folder of their own when there are several)
-  let folderId = opts.folderId ?? null
-  await sync.change(WORKSPACE_DOC, (ws) => {
-    if (pages.length > 1) {
-      folderId = createFolder(ws, { name: pages[0].title.slice(0, 80), parentId: opts.folderId ?? null })
-      // in the guide's order
-      updateFolder(ws, folderId, { sort: 'manual' })
-    }
-    pages.forEach((p, i) => createNote(ws, { id: ids[i], folderId, title: p.title }))
-  })
-
-  // 4. pictures, downloaded once each
+  // 3. pictures, downloaded once each
   const pictures = new Map<string, { id: string; name: string; mime: string; size: number } | null>()
   const tokens = new Map<string, string>() // token in the Markdown → picture address
   let failedPictures = 0
@@ -772,11 +797,18 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         return /^https?:$/.test(u.protocol) ? { url: u.href } : null
       },
     })
-  pages.forEach((_, i) => convert(i, mains[i].cloneNode(true) as El))
+  const first = pages.map((_, i) => convert(i, mains[i].cloneNode(true) as El))
+  // each page's content, comparable between imports (pictures by their address)
+  const contentOf = (md: string) => md.replace(/rnpic-\d+/g, (t) => tokens.get(t) ?? t).replace(/rnpage-\d+(~\d+)?/g, 'page')
+  const hashes = first.map((md) => crypto.createHash('sha1').update(contentOf(md)).digest('hex'))
+  // what to write: every page, or – checking for updates – the new and the changed ones
+  const write = pages.map((p, i) => !prev || isNew[i] || prev.pages[pageKey(p.url)]?.hash !== hashes[i])
 
-  const total = tokens.size
+  const wanted = new Set(first.filter((_, i) => write[i]).flatMap((md) => md.match(/rnpic-\d+/g) ?? []))
+  const total = wanted.size
   let done = 0
-  for (const [, src] of tokens) {
+  for (const [token, src] of tokens) {
+    if (!wanted.has(token)) continue
     done++
     if (done % 5 === 1 || done === total) reportProgress(`Downloading pictures: ${done} of ${total}…`)
     try {
@@ -823,10 +855,56 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   // rule numbers ("see G206") linked to the page where the rule is written
   const markdowns = linkRules(pages.map((_, i) => convert(i, mains[i])))
 
-  // 5. write the notes
+  // 4. the notes (in a folder of their own when there are several, with a contents note first)
   const when = new Date().toISOString().slice(0, 10)
-  for (let i = 0; i < pages.length; i++) {
-    reportProgress(pages.length > 1 ? `Writing note ${i + 1} of ${pages.length}…` : 'Writing the note…')
+  const multi = pages.length > 1 || Boolean(prev?.follow)
+  const folders = sync.getDoc(WORKSPACE_DOC) ? listFolders(sync.getDoc(WORKSPACE_DOC)!) : []
+  let folderId = prev?.folderId && folders.some((f) => f.id === prev.folderId && !f.trashedAt) ? prev.folderId : null
+  let contentsId = prev?.contentsNoteId && alive(prev.contentsNoteId) ? prev.contentsNoteId : null
+  const contentsNew = multi && !contentsId
+  if (contentsNew) contentsId = newId()
+  await sync.change(WORKSPACE_DOC, (ws) => {
+    if (multi && !folderId) {
+      folderId = createFolder(ws, { name: (pdf ? pdf.name.replace(/\.pdf$/i, '') : pages[0].title).slice(0, 80), parentId: opts.folderId ?? null })
+      // in the guide's order
+      updateFolder(ws, folderId, { sort: 'manual' })
+    }
+    if (!multi && !prev) folderId = opts.folderId ?? null
+    if (contentsNew) createNote(ws, { id: contentsId!, folderId, title: `${pdf ? pdf.name.replace(/\.pdf$/i, '') : pages[0].title} – Contents` })
+    pages.forEach((p, i) => {
+      if (!isNew[i]) return
+      createNote(ws, { id: ids[i], folderId: folderId ?? prev?.folderId ?? opts.folderId ?? null, title: p.title })
+      updateNote(ws, ids[i], { source: p.url.href })
+    })
+  })
+
+  // the PDF itself, kept with the notes (its text is already in them: not read again by the AI)
+  let pdfAtt: { id: string; name: string; mime: string; size: number } | null = null
+  if (pdf) {
+    const id = pdf.attachmentId ?? newId()
+    if (!pdf.attachmentId) store.putAttachment({ id, mime: 'application/pdf', name: pdf.name, size: pdf.data.length, created_at: Date.now() }, pdf.data, 'skipped')
+    pdfAtt = { id, name: pdf.name, mime: 'application/pdf', size: pdf.data.length }
+  }
+  const ctx = {
+    attach: (href: string) => {
+      if (href === 'rnpdf') return pdfAtt
+      const src = tokens.get(href)
+      const a = src ? pictures.get(src) : null
+      return a ?? null
+    },
+    blockFor: videoBlock,
+    noteFor: (target: string) => {
+      const m = /^rn(?:page|rule)-(\d+)/.exec(target)
+      return m ? (ids[Number(m[1])] ?? null) : null
+    },
+    findFor: (target: string) => {
+      const rule = /^rnrule-\d+-(\w+)$/.exec(target)?.[1]
+      if (rule) return rule
+      const f = /^rnpage-\d+~(\d+)$/.exec(target)?.[1]
+      return f !== undefined ? (finds[Number(f)] ?? null) : null
+    },
+  }
+  const pageText = (i: number) => {
     const p = pages[i]
     // pictures that didn't come: icons left out, the others a link to where they are
     let md = markdowns[i].replace(/!\[([^\]]*)\]\((rnpic-\d+)\)/g, (m, alt: string, token: string) => {
@@ -837,41 +915,182 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     })
     // the title first (as the page's own first heading, or added)
     if (!/^#\s/.test(md)) md = `# ${esc(p.title)}\n\n${md}`
-    // where it came from, under the title
-    const source = `*From [${esc(p.url.host + p.url.pathname.replace(/\/$/, ''))}](<${p.url.href}>) · imported ${when}*`
-    md = md.replace(/^(#[^\n]*\n)/, `$1\n${source}\n`)
+    // where it came from, under the title (and when it last changed)
+    const imported = prev?.pages[pageKey(p.url)]?.importedOn ?? when
+    const change = changes.get(i)
+    const where = p.pdfPages
+      ? `${pdfSource(p.url, pdf?.name ?? 'the PDF')}, page${p.pdfPages[0] === p.pdfPages[1] ? ` ${p.pdfPages[0]}` : `s ${p.pdfPages[0]}–${p.pdfPages[1]}`}`
+      : `[${esc(p.url.host + p.url.pathname.replace(/\/$/, ''))}](<${p.url.href}>)`
+    const source = `*From ${where} · imported ${imported}${change ? ` · updated ${when}: ${change}` : ''}*`
+    // a PDF that's one part: the file itself at the end of its note
+    if (pdf && !multi) md += '\n\nThe original PDF:\n\n[original](rnpdf)'
+    return md.replace(/^(#[^\n]*\n)/, `$1\n${source}\n`)
+  }
+  // what changed on a page since it was imported (paragraphs added and removed)
+  const changes = new Map<number, string>()
+  const updated: string[] = []
+  const kept: string[] = []
+  for (let i = 0; i < pages.length; i++) {
+    if (!prev || isNew[i] || !write[i]) continue
+    const before = new Set((store.getSetting<string>(`webPage:${ids[i]}`) ?? '').split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean))
+    const after = contentOf(first[i]).split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean)
+    const added = after.filter((x) => !before.has(x)).length
+    const removed = [...before].filter((x) => !after.includes(x)).length
+    changes.set(i, [added && `${added} paragraph${added === 1 ? '' : 's'} new or changed`, removed && `${removed} removed`].filter(Boolean).join(', ') || 'small changes')
+  }
+
+  for (let i = 0; i < pages.length; i++) {
+    if (!write[i]) continue
+    reportProgress(pages.length > 1 ? `Writing note ${i + 1} of ${pages.length}…` : 'Writing the note…')
+    const p = pages[i]
+    const md = pageText(i)
     if (mains[i] && textLength(mains[i]) < 200 && /__next|__nuxt|id="root"|id="app"|ng-version|data-reactroot/.test(p.html))
       notes.push(`${p.url.href}: the page builds its content with JavaScript in the browser, so only part of it (or none) could be read.`)
-    await sync.change(noteDocName(ids[i]), (doc) => {
-      const nodes = markdownToNodes(md, {
-        attach: (href) => {
-          const src = tokens.get(href)
-          const a = src ? pictures.get(src) : null
-          return a ?? null
-        },
-        blockFor: videoBlock,
-        noteFor: (target) => {
-          const m = /^rn(?:page|rule)-(\d+)/.exec(target)
-          return m ? (ids[Number(m[1])] ?? null) : null
-        },
-        findFor: (target) => {
-          const rule = /^rnrule-\d+-(\w+)$/.exec(target)?.[1]
-          if (rule) return rule
-          const f = /^rnpage-\d+~(\d+)$/.exec(target)?.[1]
-          return f !== undefined ? (finds[Number(f)] ?? null) : null
-        },
-      })
-      // a picture that couldn't be downloaded: a link to it instead
+    let target = ids[i]
+    if (prev && !isNew[i]) {
+      // changed on the site: the note follows – unless you've edited it, which then stays yours
+      const rec = prev.pages[pageKey(p.url)]!
+      const m = sync.noteMeta().get(ids[i])
+      if (m && m.updatedAt > rec.at + 15_000) {
+        target = newId()
+        await sync.change(WORKSPACE_DOC, (ws) => {
+          createNote(ws, { id: target, folderId: m.folderId, title: `${p.title} (updated ${when})` })
+          updateNote(ws, target, { source: p.url.href })
+        })
+        await sync.change(noteDocName(ids[i]), (doc) => {
+          const frag = getContent(doc)
+          const notice = markdownToNodes(`*⚠️ This page has changed on the site (${changes.get(i)}). You’ve edited this note, so it’s kept as it is – the new version: [${esc(p.title)} (updated ${when})](rnnew)*`, {
+            attach: () => null,
+            noteFor: (t) => (t === 'rnnew' ? target : null),
+          })
+          frag.insert(Math.min(1, frag.length), notice)
+        })
+        kept.push(p.title)
+      } else {
+        await sync.change(noteDocName(ids[i]), (doc) => {
+          const frag = getContent(doc)
+          frag.delete(0, frag.length)
+        })
+        updated.push(p.title)
+      }
+    }
+    // the new version of a note you've edited: its title says so
+    const text = target === ids[i] ? md : md.replace(/^# (.*)$/m, `# $1 (updated ${when})`)
+    await sync.change(noteDocName(target), (doc) => {
+      const nodes = markdownToNodes(text, ctx)
       if (nodes.length) getContent(doc).insert(0, nodes)
     })
-    const doc = sync.getDoc(noteDocName(ids[i]))
+    const doc = sync.getDoc(noteDocName(target))
     if (doc) {
       const ex = extractNote(doc)
-      await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, ids[i], { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
+      await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, target, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
+    }
+    // remembered: to tell what changed next time
+    if (target === ids[i]) store.setSetting(`webPage:${ids[i]}`, contentOf(first[i]))
+  }
+
+  // the contents: every page, in order (written again when pages come or go – unless you've edited it)
+  const contentsFresh = contentsNew || (prev && pages.some((_, i) => isNew[i]) && contentsId && (sync.noteMeta().get(contentsId)?.updatedAt ?? 0) <= (prev.contentsAt ?? 0) + 15_000)
+  if (multi && contentsId && contentsFresh) {
+    const guide = pdf ? pdf.name.replace(/\.pdf$/i, '') : pages[0].title
+    const from = pdf ? `${pages.length} part${pages.length === 1 ? '' : 's'} of ${pdfSource(pages[0].url, pdf.name)}` : `${pages.length} page${pages.length === 1 ? '' : 's'} from [${esc(pages[0].url.host + pages[0].url.pathname.replace(/\/$/, ''))}](<${pages[0].url.href}>)`
+    const md = `# ${esc(guide)} – Contents\n\n*${from}*\n\n${pages.map((p, i) => `${i + 1}. [${esc(p.title)}](rnpage-${i})${p.pdfPages ? ` – p. ${p.pdfPages[0]}` : ''}`).join('\n')}${pdf ? '\n\nThe original PDF:\n\n[original](rnpdf)' : ''}`
+    await sync.change(noteDocName(contentsId), (doc) => {
+      const frag = getContent(doc)
+      frag.delete(0, frag.length)
+      frag.insert(0, markdownToNodes(md, ctx))
+    })
+    const doc = sync.getDoc(noteDocName(contentsId))
+    if (doc) {
+      const ex = extractNote(doc)
+      await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, contentsId!, { title: ex.title, snippet: ex.snippet, links: ex.links }))
     }
   }
+
+  // remembered, to check for updates later
+  const now = Date.now()
+  const record: WebImportRecord = {
+    id: prev?.id ?? newId(),
+    url: prev?.url ?? start.href,
+    follow: Boolean(opts.follow),
+    maxPages,
+    folderId: multi ? folderId : (prev?.folderId ?? opts.folderId ?? null),
+    contentsNoteId: contentsId ?? undefined,
+    contentsAt: contentsFresh ? now : prev?.contentsAt,
+    at: now,
+    pages: {
+      // pages not found this time stay remembered (they may come back)
+      ...(prev?.pages ?? {}),
+      ...Object.fromEntries(
+        pages.map((p, i) => {
+          const was = prev?.pages[pageKey(p.url)]
+          const keptOld = write[i] && kept.includes(p.title) && !isNew[i]
+          return [pageKey(p.url), { noteId: ids[i], hash: keptOld ? (was?.hash ?? hashes[i]) : hashes[i], at: write[i] && !keptOld ? now : (was?.at ?? now), importedOn: was?.importedOn ?? when, title: p.title }]
+        }),
+      ),
+    },
+  }
+  saveImport(store, record)
+  if (prev) {
+    const gone = Object.entries(prev.pages).filter(([k]) => !byKey.has(k)).map(([, v]) => v.title)
+    if (updated.length) notes.unshift(`Updated: ${updated.join(', ')}.`)
+    if (kept.length) notes.unshift(`Changed on the site, but you’d edited these – a new version was added next to each: ${kept.join(', ')}.`)
+    const added = pages.filter((_, i) => isNew[i]).map((p) => p.title)
+    if (added.length) notes.unshift(`New pages: ${added.join(', ')}.`)
+    if (gone.length && opts.follow) notes.push(`No longer found on the site: ${gone.join(', ')} (their notes are kept).`)
+    if (!updated.length && !kept.length && !added.length) notes.unshift('Everything is up to date.')
+  }
   sync.reindexAll()
-  return { noteIds: ids, folderId: pages.length > 1 ? folderId : (opts.folderId ?? null), pages: pages.length, pictures: [...pictures.values()].filter(Boolean).length, notes }
+  const written = pages.map((_, i) => ids[i]).filter((_, i) => write[i])
+  return {
+    noteIds: contentsNew && contentsId ? [contentsId, ...ids] : ids,
+    folderId: multi ? folderId : (opts.folderId ?? null),
+    pages: pages.length,
+    pictures: [...pictures.values()].filter(Boolean).length,
+    notes,
+    changed: written.length,
+  }
+}
+
+// --- checking for updates ----------------------------------------------------
+
+export interface WebImportRecord {
+  id: string
+  url: string
+  follow: boolean
+  maxPages: number
+  /** where its notes are (the guide's own folder, or the folder it was imported into) */
+  folderId: string | null
+  contentsNoteId?: string
+  /** when the contents note was last written */
+  contentsAt?: number
+  at: number
+  /** each page (by address): its note, its content's fingerprint, when it was written */
+  pages: Record<string, { noteId: string; hash: string; at: number; importedOn: string; title: string }>
+}
+
+export function listImports(store: Store): WebImportRecord[] {
+  return Object.values(store.getSetting<Record<string, WebImportRecord>>('webImports') ?? {})
+}
+
+function saveImport(store: Store, r: WebImportRecord) {
+  store.setSetting('webImports', { ...(store.getSetting<Record<string, WebImportRecord>>('webImports') ?? {}), [r.id]: r })
+}
+
+/** The imports a note or folder came from (to check them for updates). */
+export function importsFor(store: Store, sync: SyncEngine, where: { noteId?: string; folderId?: string }): WebImportRecord[] {
+  const meta = sync.noteMeta()
+  return listImports(store).filter((r) => {
+    if (where.noteId) return Object.values(r.pages).some((p) => p.noteId === where.noteId) || r.contentsNoteId === where.noteId
+    if (where.folderId) return r.folderId === where.folderId || Object.values(r.pages).some((p) => meta.get(p.noteId)?.folderId === where.folderId)
+    return false
+  })
+}
+
+/** Check an import for updates: fetch its pages again; write what changed. */
+export async function refreshImport(config: Config, store: Store, ai: Ai, sync: SyncEngine, r: WebImportRecord): Promise<WebImportResult> {
+  if (new URL(r.url).host === 'pdf.reconnotes') throw new Error('This PDF came from your device, so there’s nowhere to check for a newer version – import the new PDF instead.')
+  return importWebPages(config, store, ai, sync, { url: r.url, follow: r.follow, maxPages: r.maxPages, folderId: r.folderId, update: r })
 }
 
 /**
@@ -917,6 +1136,31 @@ export function pictureSize(data: Buffer, mime: string): { w: number; h: number 
     return { w: num('width') || vb[2] || 0, h: num('height') || vb[3] || 0 }
   }
   return null
+}
+
+/** A PDF's sections as pages to import (each with an address of its own, by its title). */
+async function pdfPages(data: Buffer, url: URL): Promise<Page[]> {
+  const { sections } = await pdfSections(data)
+  const used = new Map<string, number>()
+  return sections.map((sec) => {
+    let slug = sec.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 60) || 'part'
+    const n = (used.get(slug) ?? 0) + 1
+    used.set(slug, n)
+    if (n > 1) slug += `-${n}`
+    const u = new URL(url.href)
+    u.hash = ''
+    u.searchParams.set('rnsection', slug)
+    const { document } = parseHTML(sec.html)
+    return { url: u, title: '', html: sec.html, doc: document as unknown as Document, pdfPages: sec.pages }
+  })
+}
+
+/** "the PDF at …" for a source line: a link to it, unless it came from this device. */
+function pdfSource(url: URL, name: string): string {
+  if (url.host === 'pdf.reconnotes') return esc(name)
+  const u = new URL(url.href)
+  u.searchParams.delete('rnsection')
+  return `[${esc(name)}](<${u.href}>)`
 }
 
 function mimeFromName(u: string): string | null {

@@ -9,6 +9,7 @@ import {
   Camera,
   ChevronDown,
   Copy,
+  RefreshCw,
   ChevronLeft,
   IndentDecrease,
   IndentIncrease,
@@ -54,6 +55,7 @@ import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@re
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
 import { saveBlob } from '../lib/files'
+import { checkForUpdates } from '../lib/webImport'
 import { RecordingError, setRecordingTarget, startRecording, stopRecording, useRecorderSaving, useRecording } from '../lib/recorder'
 import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { sync } from '../lib/sync'
@@ -223,6 +225,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const meta = getNotes(workspaceDoc).get(noteId)
   const pinned = meta ? readNote(meta).pinned : false
   const isTemplate = meta ? readNote(meta).template : false
+  /** the web page it was imported from */
+  const source = meta ? readNote(meta).source : null
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label)
@@ -517,6 +521,11 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             ) : (
               <button onClick={() => run('Saving template…', async () => void (await saveAsTemplate(noteId)))}>
                 <LayoutTemplate size={16} /> Save as template
+              </button>
+            )}
+            {source && (
+              <button onClick={() => (setMenu(null), void checkForUpdates({ noteId }))} title={`Fetch ${source} again and bring this note up to date if the page changed`}>
+                <RefreshCw size={16} /> Check page for updates
               </button>
             )}
             <button onClick={() => (setMenu(null), void run('Duplicating…', async () => onOpenNote(await duplicateNote(noteId))))}>

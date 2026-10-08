@@ -4,10 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { WORKSPACE_DOC, getContent, listFolders, listNotes, noteDocName, noteToMarkdown } from '@reconnotes/core'
+import { WORKSPACE_DOC, getContent, listFolders, listNotes, noteDocName, noteToMarkdown, updateNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
-import { importWebPages } from '../src/webImport'
+import { importWebPages, importsFor, refreshImport } from '../src/webImport'
 
 let app: App
 let dir: string
@@ -204,12 +204,18 @@ describe('importing a web page', () => {
     const folder = listFolders(ws).find((f) => f.id === r.folderId)!
     expect(folder.name).toBe('Robot guide')
     const titles = listNotes(ws).filter((n) => n.folderId === r.folderId).map((n) => n.title)
-    expect(titles).toEqual(['Robot guide', 'Wiring', 'Software'])
-    // links between the pages are links between the notes
-    const first = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
-    // keeping the page's own words, and opening at the heading it points to (wiring#power)
-    expect(first).toMatch(new RegExp(`<notelink find="Power" label="the wiring page" noteId="${r.noteIds[1]}"`))
-    expect(getContent(app.sync.getDoc(noteDocName(r.noteIds[1]))!).toString()).toMatch(new RegExp(`<notelink [^>]*noteId="${r.noteIds[0]}"`))
+    // a contents note first, then the pages in the guide's order
+    expect(titles).toEqual(['Robot guide – Contents', 'Robot guide', 'Wiring', 'Software'])
+    const [contents, ...pageIds] = r.noteIds
+    const toc = getContent(app.sync.getDoc(noteDocName(contents))!).toString()
+    for (const id of pageIds) expect(toc).toMatch(new RegExp(`<notelink [^>]*noteId="${id}"`))
+    // links between the pages are links between the notes,
+    // keeping the page's own words, and opening at the heading they point to (wiring#power)
+    const first = getContent(app.sync.getDoc(noteDocName(pageIds[0]))!).toString()
+    expect(first).toMatch(new RegExp(`<notelink find="Power" label="the wiring page" noteId="${pageIds[1]}"`))
+    expect(getContent(app.sync.getDoc(noteDocName(pageIds[1]))!).toString()).toMatch(new RegExp(`<notelink [^>]*noteId="${pageIds[0]}"`))
+    // each page remembers where it came from
+    expect(listNotes(ws).find((n) => n.id === pageIds[2])?.source).toBe(`${base}/guide/software`)
     // not pages outside the guide
     expect(hits).not.toContain('/blog')
     expect(hits).not.toContain('/privacy')
@@ -249,6 +255,47 @@ describe('importing a web page', () => {
     for (const s of ['Blog', 'Intro', 'On this page', 'Edit this page', 'Next', 'Copyright REV', 'Docs']) expect(b).not.toContain(s)
   })
 
+  it('checks for updates: changed pages follow the site, edited ones are kept, new pages are added', async () => {
+    const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/guide/`, follow: true, maxPages: 10 })
+    const [, intro, wiring, software] = r.noteIds
+    const record = importsFor(app.store, app.sync, { noteId: wiring })[0]
+    expect(record).toBeTruthy()
+    // nothing changed
+    let check = await refreshImport(app.config, app.store, app.ai, app.sync, record)
+    expect(check.notes[0]).toBe('Everything is up to date.')
+    expect(check.changed).toBe(0)
+    // the site changes two pages and adds one; you've edited one of the changed ones
+    const saved = { ...PAGES }
+    PAGES['/guide/wiring'] = PAGES['/guide/wiring'].replace('Back to the', 'Use 10 AWG wire. Back to the')
+    PAGES['/guide/software'] = PAGES['/guide/software'].replace('Deploy with Gradle.', 'Deploy with Gradle 9.')
+    PAGES['/guide/'] = PAGES['/guide/'].replace('<a href="/guide/software">Software</a>', '<a href="/guide/software">Software</a><a href="/guide/vision">Vision</a>')
+    PAGES['/guide/vision'] = PAGES['/guide/software'].replace(/Software/g, 'Vision')
+    await new Promise((r) => setTimeout(r, 30))
+    await app.sync.change(WORKSPACE_DOC, (d) => updateNote(d, software, { updatedAt: Date.now() + 60_000 }))
+    try {
+      check = await refreshImport(app.config, app.store, app.ai, app.sync, importsFor(app.store, app.sync, { folderId: r.folderId! })[0])
+    } finally {
+      Object.assign(PAGES, saved)
+      delete PAGES['/guide/vision']
+    }
+    // wiring (unedited) updated in place, saying what changed
+    const w = md(wiring)
+    expect(w).toContain('Use 10 AWG wire.')
+    expect(w).toMatch(/updated \d{4}-\d{2}-\d{2}: 1 paragraph new or changed, 1 removed/)
+    // software (edited) kept as it was, pointing to a new version next to it
+    expect(md(software)).not.toContain('Gradle 9')
+    expect(md(software)).toContain('This page has changed on the site')
+    const ws = app.sync.getDoc(WORKSPACE_DOC)!
+    const newer = listNotes(ws).find((n) => n.title.startsWith('Software (updated'))!
+    expect(md(newer.id)).toContain('Deploy with Gradle 9.')
+    // the new page: added to the folder, and to the contents
+    const vision = listNotes(ws).find((n) => n.title === 'Vision' && n.folderId === r.folderId)
+    expect(vision).toBeTruthy()
+    expect(check.notes.join('\n')).toMatch(/New pages: Vision/)
+    expect(check.notes.join('\n')).toMatch(/Updated: Wiring/)
+    expect(intro).toBeTruthy()
+  })
+
   it('says what went wrong with a bad address', async () => {
     await expect(importWebPages(app.config, app.store, app.ai, app.sync, { url: 'not a url' })).rejects.toThrow(/web address/)
     await expect(importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/nothing-here` })).rejects.toThrow(/404/)
@@ -269,5 +316,36 @@ describe('rule numbers in an imported manual', () => {
     expect(scoring).toContain('`G303` in code')
     expect(scoring).toContain('[G301](<https://x/g301>)')
     expect(scoring).toContain('The RS775 is allowed.') // one part number isn't a family of rules
+  })
+})
+
+import { manualPdf } from './pdfHelper'
+
+describe('a PDF manual from a link', () => {
+  it('becomes a folder: a note per chapter, a contents note with the PDF, rules linked across chapters', async () => {
+    PAGES['/manual.pdf'] = '' // served below as a PDF
+    const pdfServer = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(manualPdf()))
+    await new Promise<void>((r) => pdfServer.listen(0, '127.0.0.1', () => r()))
+    try {
+      const url = `http://127.0.0.1:${(pdfServer.address() as AddressInfo).port}/2026GameManual.pdf`
+      const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url })
+      const ws = app.sync.getDoc(WORKSPACE_DOC)!
+      expect(listFolders(ws).find((f) => f.id === r.folderId)?.name).toBe('2026GameManual')
+      const titles = listNotes(ws).filter((n) => n.folderId === r.folderId).map((n) => n.title)
+      expect(titles).toEqual(['2026GameManual – Contents', '1 Introduction', '6 Game Rules', '9 Robot Rules'])
+      const [contents, , rules] = r.noteIds
+      expect(md(contents)).toMatch(/2\. \[\[6 Game Rules\]\] – p\. 2/)
+      expect(getContent(app.sync.getDoc(noteDocName(contents))!).toString()).toMatch(/<file [^>]*name="2026GameManual\.pdf"/)
+      const g = md(rules)
+      expect(g).toMatch(/^# 6 Game Rules\n/)
+      expect(g).toMatch(/From \*\[\*2026GameManual\.pdf\*\]\([^)]*2026GameManual\.pdf\)\*, pages 2–3/)
+      expect(g).toContain('## 6.1 Fouls')
+      expect(g).toContain('G301 Robots may not damage the field.')
+      // "See G302" links to the rule (on the same note, at G302)
+      expect(getContent(app.sync.getDoc(noteDocName(rules))!).toString()).toMatch(/<notelink find="G302" label="G302" noteId="/)
+    } finally {
+      pdfServer.close()
+      delete PAGES['/manual.pdf']
+    }
   })
 })

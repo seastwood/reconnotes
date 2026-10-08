@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Globe, Loader2 } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
+import { addAttachment, flushUploads } from '../lib/attachments'
 
 /**
  * Import a web page: a guide, manual or article becomes a note – its text,
@@ -24,6 +25,20 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
     watchingJob(jobId, true)
     return () => watchingJob(jobId, false)
   }, [jobId])
+
+  /** a PDF manual from this device: uploaded, then split into notes like a guide */
+  const startPdf = async (file: File) => {
+    setError(null)
+    try {
+      const attachmentId = await addAttachment(file, file.name)
+      await flushUploads()
+      const j = await submitJob({ kind: 'web-import', title: file.name, input: { pdfAttachmentId: attachmentId, folderId } })
+      setJobId(j.id)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  const pdfInput = useRef<HTMLInputElement>(null)
 
   const start = async () => {
     setError(null)
@@ -69,7 +84,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
         }}
       >
         <h2>
-          <Globe size={18} /> Import a web page
+          <Globe size={18} /> Import a web page or PDF
         </h2>
         {!isSyncConfigured() ? (
           <p className="hint">Importing web pages is done by your ReconNotes server – connect one in Settings.</p>
@@ -77,7 +92,8 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
           <>
             <p className="hint">
               A guide, manual or article becomes a note, as it was on the page: headings, lists, tables, code, links and every picture (downloaded,
-              so it stays even if the site changes). The site’s menus, banners and footers are left out.
+              so it stays even if the site changes). The site’s menus, banners and footers are left out. Later, “Check for updates” in its menu brings
+              it up to date.
             </p>
             <label>
               Link to the page
@@ -118,6 +134,24 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               )}
             </p>
             {error && <p className="error-text">{error}</p>}
+            <p className="hint">
+              A manual that’s a PDF? Paste its link, or{' '}
+              <button type="button" className="text" onClick={() => pdfInput.current?.click()}>
+                choose a PDF from this device
+              </button>{' '}
+              – it’s split at its chapters into notes, with the original kept.
+              <input
+                ref={pdfInput}
+                type="file"
+                accept="application/pdf,.pdf"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void startPdf(f)
+                }}
+              />
+            </p>
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel

@@ -80,6 +80,8 @@ export interface NoteData {
   due: { id: string; date: string; text: string; done: boolean; repeat?: import('./due').Repeat | null }[]
   /** set when the note was made from a file added to a folder: shown as that file */
   file: { name: string; mime: string; size: number } | null
+  /** the web page it was imported from (checked for updates) */
+  source: string | null
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -127,6 +129,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     links: (m.get('links') as string[] | undefined) ?? [],
     due: (m.get('due') as NoteData['due'] | undefined) ?? [],
     file: (m.get('file') as NoteData['file'] | undefined) ?? null,
+    source: (m.get('source') as string | undefined) ?? null,
   }
 }
 
