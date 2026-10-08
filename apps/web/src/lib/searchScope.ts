@@ -7,11 +7,12 @@ import { Store, safeLocalGet, safeLocalSet, useStore } from './store'
  * 'none' = notes that aren't in a folder.
  */
 const KEY = 'reconnotes.searchFolders'
-export const searchScope = new Store<{ folders: string[] }>({ folders: safeLocalGet<string[]>(KEY, []) })
+const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+export const searchScope = new Store<{ folders: string[] }>({ folders: asList(safeLocalGet<string[]>(KEY, [])) })
 export const useSearchScope = () => useStore(searchScope, (s) => s.folders)
 export function setSearchFolders(folders: string[]) {
-  searchScope.set({ folders })
-  safeLocalSet(KEY, folders)
+  searchScope.set({ folders: asList(folders) })
+  safeLocalSet(KEY, asList(folders))
 }
 export function toggleSearchFolder(id: string) {
   const cur = searchScope.get().folders

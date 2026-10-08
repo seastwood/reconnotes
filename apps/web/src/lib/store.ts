@@ -23,7 +23,14 @@ export function useStore<T, S>(store: Store<T>, select: (s: T) => S): S {
 export function safeLocalGet<T>(key: string, fallback: T): T {
   try {
     const v = localStorage.getItem(key)
-    return v ? { ...fallback, ...JSON.parse(v) } : fallback
+    if (!v) return fallback
+    const saved = JSON.parse(v) as unknown
+    // a list stays a list (spreading one into an object made { 0: …, 1: … })
+    if (Array.isArray(fallback)) return (Array.isArray(saved) ? saved : fallback) as T
+    // settings objects: saved values over the defaults (new settings get theirs)
+    if (fallback && typeof fallback === 'object') return saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...fallback, ...saved } : fallback
+    // a plain value: only one of the same kind
+    return (typeof saved === typeof fallback ? saved : fallback) as T
   } catch {
     return fallback
   }
