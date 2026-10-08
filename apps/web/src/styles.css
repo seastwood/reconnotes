@@ -4472,3 +4472,9 @@ a.button {
   padding: 6px 8px;
   font-weight: 600;
 }
+.ask-go-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+}

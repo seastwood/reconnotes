@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { getNotes, listFolders, readNote } from '@reconnotes/core'
+import { askChat, chatKey, openAskChat, type AskChatTarget } from '../lib/askChat'
 import {
   AudioLines,
+  MessageCircleQuestion,
   Ban,
   CheckCircle2,
   ChevronDown,
@@ -46,7 +49,7 @@ import {
 } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
 import { showToast } from '../lib/toast'
-import { useWorkspace } from '../lib/workspace'
+import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { AiHealthLine, BenchTable } from './AiHealth'
@@ -407,6 +410,7 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                   <AskAnswer result={j.result as unknown as AskResult} onOpen={onOpenNote} />
                   {/* follow-ups, and ask another (under the first question of a conversation) */}
                   {!j.input.thread && <AskThread root={j} onOpen={onOpenNote} />}
+                  <GoToChat job={j} />
                 </div>
               ) : (
                 <pre>{text}</pre>
@@ -533,5 +537,38 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * An Ask job from a note's (or folder's) chat: "Go to conversation" opens
+ * that chat at this conversation.
+ */
+function GoToChat({ job }: { job: Job }) {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : [])
+  const notes = list(job.input.notes)
+  const folders = list(job.input.folders)
+  let target: AskChatTarget | null = null
+  if (notes.length === 1) {
+    const m = getNotes(workspaceDoc).get(notes[0])
+    if (m && !readNote(m).trashedAt) target = { noteId: notes[0], title: readNote(m).title }
+  } else if (!notes.length && folders.length === 1) {
+    const f = listFolders(workspaceDoc).find((x) => x.id === folders[0])
+    if (f) target = { folderId: f.id, title: f.name }
+  }
+  if (!target) return null
+  const t = target
+  return (
+    <button
+      className="text ask-go-chat"
+      onClick={() => {
+        // the conversation: its first question's job
+        const id = typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id
+        askChat.set((s) => ({ chat: { ...s.chat, [chatKey(t)]: id } }))
+        openAskChat(t)
+      }}
+    >
+      <MessageCircleQuestion size={14} /> Go to conversation
+    </button>
   )
 }
