@@ -201,7 +201,7 @@ export function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; er
         {job?.retryAt
           ? 'Your AI server can’t be reached – it will try again by itself.'
           : job?.status === 'running'
-            ? `Reading your notes… ${job.startedAt ? duration(Date.now() - job.startedAt) : ''}`
+            ? `${job.progress ?? 'Reading your notes…'} ${job.startedAt ? duration(Date.now() - job.startedAt) : ''}`
             : job?.status === 'paused'
               ? 'Paused in Jobs.'
               : 'Waiting its turn in Jobs…'}

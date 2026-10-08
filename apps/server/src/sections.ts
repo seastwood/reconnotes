@@ -85,6 +85,37 @@ export function splitSections(noteId: string, title: string, md: string): Sectio
   return out
 }
 
+/**
+ * Words a manual says the same thing with: "max height" is "no taller than",
+ * "size" a "sizing box". A question word matches any of its group.
+ */
+const GROUPS: string[][] = [
+  ['height', 'tall', 'taller', 'tallest', 'high', 'vertical'],
+  ['width', 'wide', 'wider'],
+  ['length', 'long', 'longer'],
+  ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger'],
+  ['min', 'minimum', 'least', 'fewer than', 'at least'],
+  ['size', 'sizes', 'sizing', 'dimension', 'footprint', 'volume', 'fit within', 'fits within', 'starting configuration'],
+  ['weight', 'weigh', 'weighs', 'heavy', 'heavier', 'mass', 'lbs', 'pounds', 'kg'],
+  ['robot', 'robots'],
+  ['time', 'duration', 'seconds', 'minutes', 'timer'],
+  ['cost', 'costs', 'price', 'budget', 'spend'],
+  ['score', 'scoring', 'scored', 'points', 'point'],
+  ['penalty', 'penalties', 'foul', 'fouls', 'violation'],
+  ['start', 'starting', 'begin', 'beginning'],
+  ['allowed', 'legal', 'permitted', 'prohibited', 'illegal', 'must not'],
+  ['battery', 'batteries', 'power'],
+  ['motor', 'motors', 'actuator', 'actuators'],
+]
+const GROUP_OF = new Map(GROUPS.flatMap((g) => g.filter((w) => !w.includes(' ')).map((w) => [w, g] as const)))
+/** A question word and the words that mean the same in a manual. */
+export const variantsOf = (t: string): string[] => GROUP_OF.get(t) ?? GROUP_OF.get(t.replace(/s$/, '')) ?? [t]
+/** A word (or phrase) in lower-case text: at the start of a word; a long word by its stem. */
+const holds = (low: string, t: string) =>
+  t.includes(' ') ? low.includes(t) : t.length > 5 ? low.includes(STEM(t)) : new RegExp(`(^|[^\\p{L}\\p{N}])${t}`, 'u').test(low)
+/** Any of the words that mean the same. */
+const holdsAny = (low: string, t: string) => variantsOf(t).some((v) => holds(low, v))
+
 const wordsOf = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
 
 export interface Scored extends Section {
@@ -104,7 +135,7 @@ export function scoreSections(
 ): Scored[] {
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
   const lows = sections.map((s) => s.text.toLowerCase())
-  const has = (low: string, t: string) => (t.length > 5 ? low.includes(STEM(t)) : new RegExp(`(^|[^\\p{L}\\p{N}])${t}`, 'u').test(low))
+  const has = holdsAny
   const df = new Map(terms.map((t) => [t, lows.filter((l) => has(l, t)).length]))
   const n = sections.length || 1
   return sections.map((s, i) => {
@@ -164,7 +195,7 @@ export function findIn(text: string, words: string[], rules: string[] = []): str
     const line = plainLine(raw)
     if (line.length < 4) continue
     const low = line.toLowerCase()
-    let score = terms.filter((t) => low.includes(t.length > 5 ? STEM(t) : t)).length
+    let score = terms.filter((t) => holdsAny(low, t)).length
     if (rules.some((r) => new RegExp(`\\b${r}\\b`).test(line))) score += definesRuleLine(raw, rules) ? 5 : 2
     // the note's title (its first line) only when nothing below it says as much
     if (score && first) score -= 0.5
@@ -176,7 +207,7 @@ export function findIn(text: string, words: string[], rules: string[] = []): str
   const ws = best.line.split(' ')
   const at = Math.max(
     0,
-    ws.findIndex((w) => terms.some((t) => w.toLowerCase().includes(t.length > 5 ? STEM(t) : t)) || rules.some((r) => w.includes(r))),
+    ws.findIndex((w) => terms.some((t) => holdsAny(w.toLowerCase(), t)) || rules.some((r) => w.includes(r))),
   )
   const from = Math.max(0, Math.min(at - 2, ws.length - 6))
   return ws.slice(from, from + 6).join(' ').replace(/[.,;:]$/, '')

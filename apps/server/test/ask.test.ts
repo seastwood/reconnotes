@@ -7,7 +7,8 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
-import { findIn } from '../src/sections'
+import { askNotes } from '../src/ask'
+import { findIn, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 
@@ -26,6 +27,9 @@ beforeAll(async () => {
     if (req.url?.endsWith('/models')) return res.end(JSON.stringify({ data: [{ id: 'gen' }] }))
     const prompt = JSON.parse(body).messages[0].content.map((c: { text?: string }) => c.text ?? '').join('')
     prompts.push(prompt)
+    // the jersey question: answered only when the uniforms section was read
+    if (prompt.includes('Question: What colour is the jersey?'))
+      return res.end(JSON.stringify({ choices: [{ message: { content: /everyone wears blue/.test(prompt) ? `Blue [${/\[(\d+)\][^\n]*\n[^=]*everyone wears blue/.exec(prompt)?.[1] ?? 1}].` : 'The notes do not contain that.' } }] }))
     res.end(JSON.stringify({ choices: [{ message: { content: 'Team A sorts the T8 bins on Monday [1].' } }] }))
   })
   await new Promise<void>((r) => llm.listen(0, '127.0.0.1', () => r()))
@@ -423,5 +427,45 @@ describe('where a source opens', () => {
     expect(findIn(md, ['how', 'install', 'it'])).toBe('To install it, run npm ci')
     // the title when it’s the only line about it
     expect(findIn('# Install the server\n\nCopy the files.', ['install'])).toBe('Install the server')
+  })
+})
+
+describe('a manual says it in other words', () => {
+  it('finds "no taller than" for "max height"', () => {
+    const md = [
+      '# Game manual',
+      '## 3 ARENA',
+      'The arena wall height is 12 in. A maximum of 3 cookies fit in each goal.',
+      '## 4 MATCH PLAY',
+      'During the match, each robot may score a maximum of 10 points per cycle.',
+      '## 5 ROBOT RULES',
+      'R3 Robots must fit within an 18 in. sizing box at the start and be no taller than 24 in. once expanded.',
+    ].join('\n')
+    const best = scoreSections(splitSections('m', 'Game manual', md), ['max', 'height', 'robot'], []).sort((a, b) => b.score - a.score)[0]
+    expect(best.text).toContain('R3 Robots')
+  })
+
+  it('looks further in the note when the first sections don’t have the answer', async () => {
+    const lines = ['Team handbook']
+    for (let i = 1; i <= 14; i++) lines.push(`Section ${i}`, `The jersey number rule ${i}: ` + 'numbers are assigned at check-in and must be visible from the side. '.repeat(20))
+    lines.push('Uniforms', 'At events everyone wears blue. ' + 'Bring a spare set for the second day of the event. '.repeat(26))
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'handbook000001', title: 'Team handbook' }))
+    await app.sync.change(noteDocName('handbook000001'), (doc) => {
+      getContent(doc).insert(
+        0,
+        lines.map((t, i) => {
+          const heading = i === 0 || /^Section \d+$|^Uniforms$/.test(t)
+          const p = new Y.XmlElement(heading ? 'heading' : 'paragraph')
+          if (heading) p.setAttribute('level', i === 0 ? '1' : '2')
+          p.insert(0, [new Y.XmlText(t)])
+          return p
+        }),
+      )
+    })
+    const res = await askNotes(app.store, app.sync, app.ai, 'What colour is the jersey?', null, {}, { notes: ['handbook000001'] })
+    expect(res.answer).toMatch(/^Blue/)
+    // the first look didn't have it
+    expect(prompts.filter((p) => p.includes('Question: What colour is the jersey?'))).toHaveLength(2)
+    expect(res.sources[0].section).toBe('Uniforms')
   })
 })

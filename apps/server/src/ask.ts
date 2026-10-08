@@ -5,7 +5,7 @@ import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
-import { reportPartial } from './jobs'
+import { reportPartial, reportProgress } from './jobs'
 import { findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
@@ -48,6 +48,8 @@ const TOTAL = 16000
 const SMALL_NOTE = 1500
 /** sections given to the AI at most */
 const MAX_SECTIONS = 12
+/** an answer saying the notes don't have it */
+const NOT_FOUND = /\b(?:don't|do not|doesn't|does not) (?:contain|mention|say|specify|include|state)|not (?:specified|mentioned|found|included|provided|stated|given|listed)|no (?:information|mention|details?)\b/i
 
 /**
  * A long note cut down to the parts about the question: its first lines,
@@ -196,6 +198,8 @@ export async function askNotes(
 
   const sources: AskSource[] = []
   const texts = new Map<number, string>()
+  const read = new Set<Section>()
+  let rest: Section[] = []
   let context = ''
   const header = (id: string, section: string) => {
     const m = meta.get(id)!
@@ -239,12 +243,15 @@ export async function askNotes(
     const matched = scored.some((s) => s.score > 1)
     // nothing really matched (a vague question): each note's start, best notes first
     const order = matched ? [...scored].sort((a, b) => b.score - a.score) : [...scored].sort((a, b) => rank.get(a.noteId)! - rank.get(b.noteId)! || a.index - b.index)
+    // a question only about this note (or these): read more of it, and less alike
+    const limit = pinned.length ? MAX_SECTIONS + 6 : MAX_SECTIONS
+    const cutoff = pinned.length ? 0.2 : 0.4
     let used = 0
     const perNote = new Map<string, number>()
     for (const sec of order) {
-      if (used >= MAX_SECTIONS) break
+      if (used >= limit) break
       // only sections close to the best: one about "robot" in a manual about robots is no match
-      if (matched && sec.score < order[0].score * 0.4) break
+      if (matched && sec.score < order[0].score * cutoff) break
       // a few sections of one note at most, unless the question is only about it
       const already = perNote.get(sec.noteId) ?? 0
       if (!pinned.length && already >= 4) continue
@@ -253,12 +260,14 @@ export async function askNotes(
       if (context.length + md.length > TOTAL) continue
       // a small note is one section: cited as the note
       add(sec.noteId, md, sec.path.length || all.filter((x) => x.noteId === sec.noteId).length > 1 ? sec : undefined)
+      read.add(sec)
       perNote.set(sec.noteId, already + 1)
       used++
     }
+    // not read yet, best first: where to look next if the answer isn't in these
+    rest = (matched ? order : [...scored].sort((a, b) => b.score - a.score)).filter((x) => !read.has(x) && (pinned.length || x.score > 0))
   }
-
-  const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
+  const promptFor = (context: string) => `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
 - Be brief and direct. Start with the answer, not a restatement of the question.
 - When the answer is several things, write a Markdown list, one item per line starting with "- ". Include every item the notes give – don't leave any out or merge them.
@@ -280,7 +289,27 @@ ${
 Notes:${context}`
 
   // the answer as it's written: the app shows it growing, with its citations linked
-  const { text: raw, agent } = await ai.ask(prompt, (soFar) => reportPartial({ answer: listify(soFar), sources }))
+  let { text: raw, agent } = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }))
+  // not in what was read: a second look, in the sections not read yet (a manual
+  // can say "no taller than 18 in." where the question asked for "max height")
+  if (NOT_FOUND.test(raw) && rest.length) {
+    context = ''
+    let more = 0
+    for (const sec of rest) {
+      if (more >= MAX_SECTIONS) break
+      const md = sec.text.length > PER_NOTE ? excerpt(sec.text, words, PER_NOTE) : sec.text
+      if (context.length + md.length > TOTAL) continue
+      add(sec.noteId, md, sec.path.length || sec.index > 0 ? sec : undefined)
+      more++
+    }
+    if (more) {
+      reportProgress('Not in the first part it read – looking further…')
+      reportPartial({ answer: '', sources })
+      const again = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }))
+      // found it there: that answer; else the first one stands
+      if (!NOT_FOUND.test(again.text)) ({ text: raw, agent } = again)
+    }
+  }
   let text = listify(raw)
   // the list items of the note sections the question is about, that the answer left out
   const missing = missingItems(text, sectionItems(texts, ownWords))
