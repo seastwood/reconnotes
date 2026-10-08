@@ -12,6 +12,19 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-180.png" />
     <title>ReconNotes</title>
+    <script>
+      // The app's own light / dark choice, before anything is drawn: Safari
+      // colours its status bar and toolbar from the page as it first appears
+      try {
+        var t = (JSON.parse(localStorage.getItem('reconnotes.settings') || '{}') || {}).theme
+        var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) {
+          m.removeAttribute('media')
+          m.content = dark ? '#1c1c1e' : '#f7f5ef'
+        })
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
