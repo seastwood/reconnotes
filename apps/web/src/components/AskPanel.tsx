@@ -9,6 +9,10 @@ interface Source {
   n: number
   noteId: string
   title: string
+  /** the section of a long note it's from */
+  section?: string
+  /** what to find in the note when it's opened (lands on the passage) */
+  find?: string
 }
 export interface AskResult {
   answer: string
@@ -47,7 +51,7 @@ export function AskPanel({
   question: string
   /** folders to search in; or only these notes ("Ask about this note") */
   where?: { folders?: string[]; unlocked?: string[]; notes?: string[] }
-  onOpen: (noteId: string) => void
+  onOpen: (noteId: string, find?: string) => void
 }) {
   const folders = where.folders ?? []
   const notes = where.notes ?? []
@@ -98,7 +102,7 @@ export function AskPanel({
  * The follow-up questions asked under an answer (oldest first), and the box to
  * ask another – under "Ask your notes" in search, and under the answer in Jobs.
  */
-export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string) => void }) {
+export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string, find?: string) => void }) {
   const jobs = useJobs((s) => s.jobs)
   const [error, setError] = useState<string | null>(null)
   const thread = jobs.filter((j) => j.kind === 'ask' && j.input.thread === root.id && j.status !== 'cancelled').sort((a, b) => a.createdAt - b.createdAt)
@@ -153,7 +157,7 @@ export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string
 }
 
 /** One question's state: waiting, the answer, or what went wrong. */
-function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: string | null; onRetry: () => void; onOpen: (noteId: string) => void }) {
+function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; error?: string | null; onRetry: () => void; onOpen: (noteId: string, find?: string) => void }) {
   const [, tick] = useState(0)
   useEffect(() => {
     if (!job || isFinished(job)) return
@@ -261,7 +265,7 @@ function FollowUpBox({ onAsk }: { onAsk: (q: string) => Promise<void> }) {
 }
 
 /** An answer with its numbered citations linked to the notes. */
-export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (noteId: string) => void }) {
+export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (noteId: string, find?: string) => void }) {
   const html = useMemo(() => {
     const md = result.answer.replace(/</g, '&lt;')
     // [2] → a link to source 2
@@ -277,15 +281,19 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
         onClick={(e) => {
           const n = (e.target as HTMLElement).closest('.cite') as HTMLElement | null
           const s = n && result.sources.find((x) => x.n === Number(n.dataset.n))
-          if (s) onOpen(s.noteId)
+          if (s) onOpen(s.noteId, s.find)
         }}
       />
       {result.sources.length > 0 && (
         <div className="ask-sources">
           {result.sources.map((s) => (
-            <button key={s.n} onClick={() => onOpen(s.noteId)}>
+            <button key={s.n} onClick={() => onOpen(s.noteId, s.find)} title={s.section ? `${s.title} › ${s.section}` : s.title}>
               <span className="cite">{s.n}</span>
-              <FileText size={14} /> <span>{s.title}</span>
+              <FileText size={14} />{' '}
+              <span>
+                {s.title}
+                {s.section && <span className="ask-section"> › {s.section}</span>}
+              </span>
             </button>
           ))}
         </div>

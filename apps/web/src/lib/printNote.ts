@@ -134,7 +134,7 @@ async function node(n: JSONContent, doc: Y.Doc): Promise<string> {
       return `<div class="attachment">📎 ${esc(n.attrs?.name || 'File')}</div>`
     case 'noteLink': {
       const meta = getNotes(workspaceDoc).get(n.attrs?.noteId)
-      return `<span class="link">↗ ${esc((meta && readNote(meta).title) || n.attrs?.title || 'note')}</span>`
+      return `<span class="link">↗ ${esc(n.attrs?.label || (meta && readNote(meta).title) || n.attrs?.title || 'note')}</span>`
     }
     default:
       return await inner()

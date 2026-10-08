@@ -545,6 +545,50 @@ export function videoBlock(text: string): Y.XmlElement | null {
   return el
 }
 
+/**
+ * Rule numbers (G206, R104…) mentioned in the pages, linked to the page that
+ * defines the rule (where it starts a line, a heading or a bold lead-in) –
+ * like a manual's own cross-references. Only numbers some page defines.
+ */
+export function linkRules(markdowns: string[]): string[] {
+  const defined = new Map<string, number>()
+  markdowns.forEach((md, page) => {
+    for (const m of md.matchAll(/(?:^|\n)\s*(?:#{1,6}\s*|[-*]\s+|\*\*|\*|>\s*)*([A-Z]{1,3}\d{2,4})\b/g)) if (!defined.has(m[1])) defined.set(m[1], page)
+  })
+  // rules come in families (G301, G302, G303…); a part number or two (RS775) isn't one
+  const family = new Map<string, number>()
+  for (const id of defined.keys()) {
+    const prefix = /^[A-Z]+/.exec(id)![0]
+    family.set(prefix, (family.get(prefix) ?? 0) + 1)
+  }
+  for (const id of [...defined.keys()]) if ((family.get(/^[A-Z]+/.exec(id)![0]) ?? 0) < 3) defined.delete(id)
+  if (!defined.size) return markdowns
+  return markdowns.map((md) => {
+    let fenced = false
+    return md
+      .split('\n')
+      .map((line) => {
+        if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
+        if (fenced || /^#{1,6}\s/.test(line)) return line
+        // not inside code, links, pictures or addresses
+        return line
+          .split(/(`[^`]*`|!?\[[^\]]*\]\([^)]*\)|<[^>]*>)/)
+          .map((part, k) => {
+            if (k % 2) return part
+            return part.replace(/(^|[^\p{L}\p{N}\\-])([A-Z]{1,3}\d{2,4})\b/gu, (all, pre: string, id: string, at: number) => {
+              const page = defined.get(id)
+              if (page === undefined) return all
+              // the rule's own definition (it starts the line): not a link to itself
+              if (k === 0 && /^\s*(?:[-*]\s+|\*\*|\*|>\s*)*$/.test(part.slice(0, at + pre.length))) return all
+              return `${pre}[${id}](rnrule-${page}-${id})`
+            })
+          })
+          .join('')
+      })
+      .join('\n')
+  })
+}
+
 /** A paragraph mustn't start like a list item or a numbered one. */
 function startSafe(p: string): string {
   return p.replace(/^([-+])(\s)/, '\\$1$2').replace(/^(\d+)([.)])(\s)/, '$1\\$2$3').replace(/^(=+|-+)$/m, (m) => `\\${m}`)
@@ -658,6 +702,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   })
   const ids = pages.map(() => newId())
   const byKey = new Map(pages.map((p, i) => [pageKey(p.url), i]))
+  /** headings links point at (page#section): what to find when the link is followed */
+  const finds: string[] = []
 
   // 3. the notes (in a folder of their own when there are several)
   let folderId = opts.folderId ?? null
@@ -712,10 +758,17 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         }
         if (/^(mailto|tel):$/.test(u.protocol)) return { url: u.href }
         const k = pageKey(u)
-        // a link within the same page: just its text
-        if (k === pageKey(pages[i].url) && u.hash) return null
         const target = byKey.get(k)
-        if (target !== undefined && target !== i) return { note: `rnpage-${target}` }
+        // a heading on that page (page#section, or #section on this one): open the note there
+        const anchor = u.hash.slice(1) ? decodeURIComponent(u.hash.slice(1)) : ''
+        const heading = target !== undefined && anchor ? pages[target].doc.getElementById(anchor)?.textContent?.replace(/[#¶§]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) : ''
+        if (target !== undefined && (target !== i || heading)) {
+          if (!heading) return { note: `rnpage-${target}` }
+          finds.push(heading)
+          return { note: `rnpage-${target}~${finds.length - 1}` }
+        }
+        // a link within the same page to something that isn't a heading: just its text
+        if (target === i) return null
         return /^https?:$/.test(u.protocol) ? { url: u.href } : null
       },
     })
@@ -767,7 +820,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   }
   if (failedPictures) notes.push(`${failedPictures} picture${failedPictures === 1 ? '' : 's'} couldn’t be downloaded (kept as links).`)
 
-  const markdowns = pages.map((_, i) => convert(i, mains[i]))
+  // rule numbers ("see G206") linked to the page where the rule is written
+  const markdowns = linkRules(pages.map((_, i) => convert(i, mains[i])))
 
   // 5. write the notes
   const when = new Date().toISOString().slice(0, 10)
@@ -797,8 +851,14 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         },
         blockFor: videoBlock,
         noteFor: (target) => {
-          const m = /^rnpage-(\d+)$/.exec(target)
+          const m = /^rn(?:page|rule)-(\d+)/.exec(target)
           return m ? (ids[Number(m[1])] ?? null) : null
+        },
+        findFor: (target) => {
+          const rule = /^rnrule-\d+-(\w+)$/.exec(target)?.[1]
+          if (rule) return rule
+          const f = /^rnpage-\d+~(\d+)$/.exec(target)?.[1]
+          return f !== undefined ? (finds[Number(f)] ?? null) : null
         },
       })
       // a picture that couldn't be downloaded: a link to it instead

@@ -18,7 +18,8 @@ import { sync } from '../lib/sync'
  */
 
 export interface NoteLinkOptions {
-  onOpen: (noteId: string) => void
+  /** open the note – at this text, when the link points into it (a rule: "G206") */
+  onOpen: (noteId: string, find?: string) => void
   /** "[[" was typed: the range covers both brackets */
   onTrigger: (range: { from: number; to: number }) => void
 }
@@ -29,15 +30,17 @@ function NoteLinkView({ node, extension }: ReactNodeViewProps) {
   const note = ws.notes.find((n) => n.id === id)
   const gone = !note || note.trashedAt
   const title = note?.title || (node.attrs.title as string) || 'Untitled'
+  // its own words (an imported page's "see G206", "installing it"), else the note's title
+  const label = (node.attrs.label as string) || title
   return (
     <NodeViewWrapper as="span" className={`note-link${gone ? ' gone' : ''}`} contentEditable={false}>
       <button
         type="button"
-        onClick={() => !gone && (extension.options as NoteLinkOptions).onOpen(id)}
+        onClick={() => !gone && (extension.options as NoteLinkOptions).onOpen(id, (node.attrs.find as string) || undefined)}
         title={gone ? 'This note was deleted' : `Open “${title}”`}
       >
         <FileText size={13} />
-        {title}
+        {label}
       </button>
     </NodeViewWrapper>
   )
@@ -55,7 +58,8 @@ export const NoteLink = Node.create<NoteLinkOptions>({
   },
 
   addAttributes() {
-    return { noteId: { default: null }, title: { default: '' } }
+    // label: the link's own words (shown instead of the note's title); find: where in the note it points
+    return { noteId: { default: null }, title: { default: '' }, label: { default: '' }, find: { default: '' } }
   },
 
   parseHTML() {
@@ -63,11 +67,11 @@ export const NoteLink = Node.create<NoteLinkOptions>({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    return ['span', mergeAttributes(HTMLAttributes, { 'data-note-link': node.attrs.noteId }), node.attrs.title || 'note']
+    return ['span', mergeAttributes(HTMLAttributes, { 'data-note-link': node.attrs.noteId }), node.attrs.label || node.attrs.title || 'note']
   },
 
   renderText({ node }) {
-    return `[[${node.attrs.title || 'note'}]]`
+    return node.attrs.label && node.attrs.label !== node.attrs.title ? `[[${node.attrs.title || 'note'}|${node.attrs.label}]]` : `[[${node.attrs.title || 'note'}]]`
   },
 
   addNodeView() {

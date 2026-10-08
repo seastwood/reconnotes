@@ -113,6 +113,11 @@ export async function searchNotes(query: string, where: SearchWhere = {}): Promi
     }
     // word matches first, then notes related by meaning
     all.sort((a, b) => Number(Boolean(a.meaning)) - Number(Boolean(b.meaning)))
+    // a rule number ("G301"): the server knows which note defines it – its order
+    if (/^\s*[a-z]{1,3}[- ]?\d{2,4}\s*$/i.test(q)) {
+      const order = new Map(hits.map((h, i) => [h.noteId, i]))
+      all.sort((a, b) => (order.get(a.noteId) ?? 1e9) - (order.get(b.noteId) ?? 1e9))
+    }
     return all
   } catch {
     /* offline or slow – local results are enough */

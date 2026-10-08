@@ -127,7 +127,7 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
       if (name === 'noteLink') {
         const id = node.getAttribute('noteId') as string | undefined
         if (id) links.add(id)
-        const title = node.getAttribute('title') as string | undefined
+        const title = (node.getAttribute('label') as string | undefined) || (node.getAttribute('title') as string | undefined)
         if (title) cur += title
         return
       }

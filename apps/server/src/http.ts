@@ -39,6 +39,7 @@ import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup
 import { log } from './log'
 import { aiHealth } from './health'
 import { aiSkips, noteFilter, scopeFromQuery } from './access'
+import { definesRule, ruleIds } from './sections'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
@@ -229,10 +230,26 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
           .slice(0, 12)
           .map((h) => ({ noteId: h.noteId, title: meta.get(h.noteId)!.title, snippet: h.passage.replace(/\s+/g, ' ').slice(0, 180), rank: -h.score, meaning: true })),
       ]
+      // a rule number on its own ("G301"): the note that defines it first, showing the rule
+      const rule = /^\s*[a-z]{1,3}[- ]?\d{2,4}\s*$/i.test(q) ? ruleIds(q)[0] : undefined
+      if (rule) {
+        const defines = new Map<string, string>()
+        for (const h of hits) {
+          const doc = sync.getDoc(noteDocName(h.noteId))
+          const line = doc
+            ? noteToMarkdown(doc)
+                .split('\n')
+                .find((l) => definesRule(l, rule))
+            : undefined
+          if (line) defines.set(h.noteId, line.replace(/^[\s#>*-]+/, '').replace(/\*\*/g, '').trim().slice(0, 200))
+        }
+        hits.sort((a, b) => Number(defines.has(b.noteId)) - Number(defines.has(a.noteId)))
+        for (const h of hits) if (defines.has(h.noteId)) h.where = { kind: 'text', line: defines.get(h.noteId)! }
+      }
       // where each matched: typed text, handwriting, a picture, a recording, a file
       const terms = q.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []
       for (const h of hits.slice(0, 50)) {
-        if (h.meaning) continue
+        if (h.meaning || h.where) continue
         const p = piecesOf(h.noteId)
         const w = p && whereMatched(p.pieces, terms)
         if (w) h.where = w

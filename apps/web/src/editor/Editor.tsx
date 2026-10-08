@@ -44,9 +44,9 @@ interface Props {
   noteId: string
   doc: Y.Doc
   folderId: string | null
-  onOpenNote: (id: string) => void
+  onOpenNote: (id: string, find?: string) => void
   /** a tapped link to another note (kept in the back/forward trail) */
-  onFollowLink?: (id: string) => void
+  onFollowLink?: (id: string, find?: string) => void
   onBack?: () => void
   /** iPad/desktop: cycle folders / notes / full-screen note */
   onTogglePanels?: () => void
@@ -110,7 +110,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         ImageNode,
         DueDate,
         NoteLink.configure({
-          onOpen: (id) => onFollowLinkRef.current(id),
+          onOpen: (id, find) => onFollowLinkRef.current(id, find),
           onTrigger: (range) => openLinkPicker(range),
         }),
         Hashtags.configure({ onTagClick: (tag, rect) => setTagChip({ tag, x: rect.left, y: rect.bottom }) }),

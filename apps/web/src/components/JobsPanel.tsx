@@ -97,7 +97,7 @@ function useTick(on: boolean) {
 }
 
 interface Props {
-  onOpenNote: (id: string) => void
+  onOpenNote: (id: string, find?: string) => void
   onBack?: () => void
   onToggleFolders?: () => void
   /** iPad / computer: the column is widened over the note area */
@@ -243,7 +243,7 @@ function statusLine(j: Job, pos: number | undefined): string {
   }
 }
 
-function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job: Job; label: string; pos?: number; open: boolean; onToggle: () => void; onOpenNote: (id: string) => void; jobs: Job[] }) {
+function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job: Job; label: string; pos?: number; open: boolean; onToggle: () => void; onOpenNote: (id: string, find?: string) => void; jobs: Job[] }) {
   const ws = useWorkspace()
   const Icon = ICONS[j.kind] ?? Sparkles
   const [redoing, setRedoing] = useState(false)

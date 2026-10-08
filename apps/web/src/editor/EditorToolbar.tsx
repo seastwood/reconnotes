@@ -71,7 +71,7 @@ interface Props {
   editor: Editor
   noteId: string
   folderId: string | null
-  onOpenNote: (id: string) => void
+  onOpenNote: (id: string, find?: string) => void
   onBack?: () => void
   onTogglePanels?: () => void
   fullScreen?: boolean

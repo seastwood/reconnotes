@@ -240,10 +240,10 @@ export class MeaningIndex {
    * Asked straight away (not through the job queue) with a short timeout:
    * a search shouldn't wait – without an answer it's plain word search.
    */
-  async search(query: string, limit = 12): Promise<MeaningHit[]> {
+  /** The query as a vector (null: no embedding model, or it didn't answer in time). */
+  private async queryVector(query: string): Promise<Float32Array | null> {
     const model = this.modelKey()
-    if (!model || !query.trim()) return []
-    let q: number[]
+    if (!model || !query.trim()) return null
     try {
       const a = this.agents.chain('embed')[0]!
       const text = /nomic/i.test(a.model) ? `search_query: ${query}` : query
@@ -251,12 +251,33 @@ export class MeaningIndex {
         this.agents.run('embed', (backend) => backend.embed!([text])),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timed out')), 4000)),
       ])
-      q = r.result[0]
+      return new Float32Array(r.result[0])
     } catch (err) {
       log.warn(`search by meaning skipped: ${(err as Error).message}`)
-      return []
+      return null
     }
-    const qv = new Float32Array(q)
+  }
+
+  /**
+   * The passages closest in meaning to the query – several from the same
+   * note if they're the best (Ask uses them to find the right section of a
+   * long note, like a manual's rule).
+   */
+  async searchPassages(query: string, limit = 40): Promise<MeaningHit[]> {
+    const model = this.modelKey()
+    const qv = model ? await this.queryVector(query) : null
+    if (!model || !qv) return []
+    return this.vectors(model)
+      .map((c) => ({ noteId: c.noteId, score: cosine(qv, c.vec), passage: c.passage }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+  }
+
+  async search(query: string, limit = 12): Promise<MeaningHit[]> {
+    const model = this.modelKey()
+    if (!model || !query.trim()) return []
+    const qv = await this.queryVector(query)
+    if (!qv) return []
     const best = new Map<string, MeaningHit>()
     for (const c of this.vectors(model)) {
       const score = cosine(qv, c.vec)

@@ -335,3 +335,60 @@ describe('ask about this note', () => {
     expect(prompts[0]).not.toContain('T8 bins')
   })
 })
+
+describe('long notes (a manual)', () => {
+  it('reads and cites the section about the question – and a rule asked for by its number', async () => {
+    // a manual page: many sections, the answer deep inside
+    const filler = (n: number) => Array.from({ length: 12 }, (_, i) => `Section ${n} paragraph ${i}: the robot and the field and the alliance and the match.`).join('\n\n')
+    const lines = [
+      'Game rules',
+      '# Game rules',
+      '## 6.1 Safety',
+      filler(1),
+      '## 6.2 Robot size',
+      'Robots must fit within a 120 cm frame perimeter and be no taller than 152 cm at the start of the match.',
+      filler(2),
+      '## 6.3 Fouls',
+      'G301 Robots may not damage the field. Violation: major foul.',
+      'G302 Robots may not extend more than 48 cm beyond their frame perimeter. Violation: minor foul.',
+      filler(3),
+      '## 6.4 Scoring',
+      'A coral on level 4 is worth 5 points. See G302 for extension limits.',
+      filler(4),
+    ]
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'manualnote00001', title: 'Game rules' }))
+    await app.sync.change(noteDocName('manualnote00001'), (doc) => {
+      getContent(doc).insert(
+        0,
+        lines.flatMap((t) => t.split('\n\n')).map((t) => {
+          const h = /^(#+) (.*)$/.exec(t)
+          const el = new Y.XmlElement(h ? 'heading' : 'paragraph')
+          if (h) el.setAttribute('level', String(h[1].length) as unknown as string)
+          el.insert(0, [new Y.XmlText(h ? h[2] : t)])
+          return el
+        }),
+      )
+    })
+    app.sync.hocuspocus.flushPendingStores()
+    await new Promise((r) => setTimeout(r, 300))
+    const ask = async (question: string) => {
+      prompts.length = 0
+      const res = await fetch(`${base}/api/ai/ask`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      })
+      return { body: await res.json(), prompt: prompts[0] }
+    }
+    const height = await ask('How tall can the robot be?')
+    expect(height.prompt).toContain('no taller than 152 cm')
+    expect(height.prompt).toContain('"Game rules" › 6.2 Robot size')
+    // not the whole page: the other sections' filler stays out
+    expect(height.prompt).not.toContain('Section 4 paragraph 11')
+
+    const rule = await ask('is g302 a minor or major foul?')
+    expect(rule.prompt).toContain('G302 Robots may not extend more than 48 cm')
+    // the rule's own section comes first (cited as [1])
+    expect(rule.prompt).toMatch(/=== \[1\] "Game rules" › 6\.3 Fouls/)
+  })
+})

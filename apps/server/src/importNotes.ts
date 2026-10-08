@@ -214,6 +214,8 @@ export interface Ctx {
   blockFor?(text: string): Y.XmlElement | null
   /** "!2026-10-14" → a due date's attributes */
   dueFor?(date: string): Record<string, unknown> | null
+  /** a link to a note that points at a place in it ("G206"): the text to find there */
+  findFor?(target: string): string | null
 }
 
 type Inline = Y.XmlText | Y.XmlElement
@@ -263,7 +265,8 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
         if (attrs) node = el('dueDate', { ...attrs, id: newId() })
       } else {
         const id = ctx.noteFor(match[1].trim())
-        if (id) node = el('noteLink', { noteId: id, title: (match[2] ?? match[1]).trim() })
+        // [[Note|its own words]]: the words kept as the link's label
+        if (id) node = el('noteLink', { noteId: id, title: match[1].trim(), ...(match[2] && match[2].trim() !== match[1].trim() ? { label: match[2].trim() } : {}) })
       }
       if (!node) continue
       if (match.index! > last) out.push(text(t.slice(last, match.index), m))
@@ -299,7 +302,11 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
         const att = ctx.attach(l.href)
         const note = att ? null : /^[a-z][a-z0-9+.-]*:/i.test(l.href) ? null : ctx.noteFor(l.href)
         if (att) out.push({ block: fileNode(att) })
-        else if (note) out.push(el('noteLink', { noteId: note, title: l.text }))
+        else if (note) {
+          // the link's own words stay (not replaced by the note's title), and where it points
+          const find = ctx.findFor?.(l.href)
+          out.push(el('noteLink', { noteId: note, title: l.text, label: l.text, ...(find ? { find } : {}) }))
+        }
         else out.push(...inlines(l.tokens, ctx, { ...marks, link: { href: l.href, target: '_blank', rel: 'noopener noreferrer nofollow', class: null } }))
         break
       }

@@ -207,8 +207,9 @@ describe('importing a web page', () => {
     expect(titles).toEqual(['Robot guide', 'Wiring', 'Software'])
     // links between the pages are links between the notes
     const first = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
-    expect(first).toContain(`<notelink noteId="${r.noteIds[1]}"`)
-    expect(getContent(app.sync.getDoc(noteDocName(r.noteIds[1]))!).toString()).toContain(`<notelink noteId="${r.noteIds[0]}"`)
+    // keeping the page's own words, and opening at the heading it points to (wiring#power)
+    expect(first).toMatch(new RegExp(`<notelink find="Power" label="the wiring page" noteId="${r.noteIds[1]}"`))
+    expect(getContent(app.sync.getDoc(noteDocName(r.noteIds[1]))!).toString()).toMatch(new RegExp(`<notelink [^>]*noteId="${r.noteIds[0]}"`))
     // not pages outside the guide
     expect(hits).not.toContain('/blog')
     expect(hits).not.toContain('/privacy')
@@ -251,5 +252,22 @@ describe('importing a web page', () => {
   it('says what went wrong with a bad address', async () => {
     await expect(importWebPages(app.config, app.store, app.ai, app.sync, { url: 'not a url' })).rejects.toThrow(/web address/)
     await expect(importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/nothing-here` })).rejects.toThrow(/404/)
+  })
+})
+
+import { linkRules } from '../src/webImport'
+
+describe('rule numbers in an imported manual', () => {
+  it('links each mention to the page that defines the rule – not the definition itself, code, links or part numbers', () => {
+    const pages = [
+      '# Fouls\n\n**G301** Robots may not damage the field.\n\nG302 Robots may not extend more than 48 cm.\n\n- G303 No pinning.',
+      '# Scoring\n\nA coral is 5 points. See G302 and G301, and `G303` in code, and [G301](<https://x/g301>).\n\n- RS775 motor\n\nThe RS775 is allowed.',
+    ]
+    const [fouls, scoring] = linkRules(pages)
+    expect(fouls).toBe(pages[0]) // definitions stay as they are
+    expect(scoring).toContain('See [G302](rnrule-0-G302) and [G301](rnrule-0-G301)')
+    expect(scoring).toContain('`G303` in code')
+    expect(scoring).toContain('[G301](<https://x/g301>)')
+    expect(scoring).toContain('The RS775 is allowed.') // one part number isn't a family of rules
   })
 })

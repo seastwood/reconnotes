@@ -6,6 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial } from './jobs'
+import { findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -34,11 +35,19 @@ export interface AskSource {
   n: number
   noteId: string
   title: string
+  /** the part of the note it's from (a long note's section: "6.4 Scoring") */
+  section?: string
+  /** text to find when the note is opened from this source (lands on the passage) */
+  find?: string
 }
 
 // kept small: on a home GPU, reading the notes is most of the wait
 const PER_NOTE = 3500
 const TOTAL = 16000
+/** a note this short is read whole, as one source */
+const SMALL_NOTE = 1500
+/** sections given to the AI at most */
+const MAX_SECTIONS = 12
 
 /**
  * A long note cut down to the parts about the question: its first lines,
@@ -132,11 +141,17 @@ export async function askNotes(
   const words = [...new Set([...ownWords, ...history.flatMap((h) => wordsOf(h.question))])]
   // notes that share words with the question, and notes about the same thing in
   // other words (search by meaning), merged by rank
-  const byWords = store.searchAny(words, 200).map((h) => h.noteId).filter(usable).slice(0, 20)
+  // rule numbers asked about (G301, R104…): the notes that have them, first
+  const rules = [...new Set([...ruleIds(question), ...history.flatMap((h) => ruleIds(h.question))])]
+  const byRule = rules.length ? store.searchAny(rules.map((r) => r.toLowerCase()), 50).map((h) => h.noteId).filter(usable) : []
+  const byWords = store.searchAny(words, 200).map((h) => h.noteId).filter(usable).slice(0, 30)
   const meaningQuery = [...history.map((h) => h.question), question].join(' ')
-  const byMeaning = meaning?.available ? (await meaning.search(meaningQuery, 200)).map((h) => h.noteId).filter(usable).slice(0, 20) : []
+  // the closest passages: their notes, and (below) which section of each to read
+  const passages = meaning?.available ? (await meaning.searchPassages(meaningQuery, 60)).filter((h) => usable(h.noteId)) : []
+  const byMeaning = [...new Set(passages.map((h) => h.noteId))].slice(0, 20)
   const score = new Map<string, number>()
   for (const list of [byWords, byMeaning]) list.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 / (10 + i)))
+  byRule.forEach((id, i) => score.set(id, (score.get(id) ?? 0) + 1 - i / 100))
   // notes in a folder the question names ("what's in my FRC notes?") are read first
   const ws = sync.getDoc(WORKSPACE_DOC)
   const folders = ws ? listFolders(ws) : []
@@ -159,7 +174,7 @@ export async function askNotes(
     .sort((a, b) => b[1] - a[1])
     .map(([id]) => id)
     .filter(usable)
-    .slice(0, 8)
+    .slice(0, 25)
   // "Ask about this note": just those notes, as much of each as fits
   const pinned = (scope.notes ?? []).filter(usable).slice(0, 8)
   if (pinned.length) ids = pinned
@@ -182,19 +197,63 @@ export async function askNotes(
   const sources: AskSource[] = []
   const texts = new Map<number, string>()
   let context = ''
-  for (const id of ids) {
-    const doc = sync.getDoc(noteDocName(id))
-    if (!doc) continue
-    // every date explained ("5/4/26 [Mon 4 May 2026, 156 days ago]"): small models can't count days
-    const md = annotateDates(excerpt(noteToMarkdown(doc, { attachmentText: true }), words, pinned.length ? Math.floor(TOTAL / pinned.length) - 200 : PER_NOTE), now, tz)
-    if (!md.trim()) continue
-    if (context.length + md.length > TOTAL) break
-    const n = sources.length + 1
+  const header = (id: string, section: string) => {
     const m = meta.get(id)!
-    sources.push({ n, noteId: id, title: shortTitle(m.title) })
-    texts.set(n, md)
     const path = paths.get(folderOf(id) ?? '')
-    context += `\n\n=== [${n}] "${m.title || 'Untitled'}" (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)}) ===\n${md}`
+    return `"${m.title || 'Untitled'}"${section ? ` › ${section}` : ''} (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)})`
+  }
+  const add = (id: string, md: string, sec?: Section) => {
+    const n = sources.length + 1
+    const section = sec?.path.join(' › ') ?? ''
+    sources.push({ n, noteId: id, title: shortTitle(meta.get(id)!.title), ...(section ? { section } : {}), ...(sec ? { find: findTextOf(sec) } : {}) })
+    texts.set(n, md)
+    context += `\n\n=== [${n}] ${header(id, section)} ===\n${md}`
+  }
+  if (range) {
+    // notes about a time are read whole (as much as fits): what happened then
+    for (const id of ids) {
+      const doc = sync.getDoc(noteDocName(id))
+      if (!doc) continue
+      // every date explained ("5/4/26 [Mon 4 May 2026, 156 days ago]"): small models can't count days
+      const md = annotateDates(excerpt(noteToMarkdown(doc, { attachmentText: true }), words, PER_NOTE), now, tz)
+      if (!md.trim()) continue
+      if (context.length + md.length > TOTAL) break
+      add(id, md)
+    }
+  } else {
+    // the best sections of the best notes: a long note (a manual's page) is
+    // read where it's about the question, not from the top
+    const all: Section[] = []
+    for (const id of ids) {
+      const doc = sync.getDoc(noteDocName(id))
+      if (!doc) continue
+      const md = annotateDates(noteToMarkdown(doc, { attachmentText: true }), now, tz)
+      if (!md.trim()) continue
+      if (md.length <= SMALL_NOTE) all.push({ noteId: id, path: [], text: md.trim(), index: 0 })
+      else all.push(...splitSections(id, meta.get(id)!.title, md))
+    }
+    const rank = new Map(ids.map((id, i) => [id, i]))
+    const scored = scoreSections(all, words, rules, { noteRank: rank, passages })
+    const matched = scored.some((s) => s.score > 1)
+    // nothing really matched (a vague question): each note's start, best notes first
+    const order = matched ? [...scored].sort((a, b) => b.score - a.score) : [...scored].sort((a, b) => rank.get(a.noteId)! - rank.get(b.noteId)! || a.index - b.index)
+    let used = 0
+    const perNote = new Map<string, number>()
+    for (const sec of order) {
+      if (used >= MAX_SECTIONS) break
+      // only sections close to the best: one about "robot" in a manual about robots is no match
+      if (matched && sec.score < order[0].score * 0.4) break
+      // a few sections of one note at most, unless the question is only about it
+      const already = perNote.get(sec.noteId) ?? 0
+      if (!pinned.length && already >= 4) continue
+      if (!matched && already >= 1) continue
+      const md = sec.text.length > PER_NOTE ? excerpt(sec.text, words, PER_NOTE) : sec.text
+      if (context.length + md.length > TOTAL) continue
+      // a small note is one section: cited as the note
+      add(sec.noteId, md, sec.path.length || all.filter((x) => x.noteId === sec.noteId).length > 1 ? sec : undefined)
+      perNote.set(sec.noteId, already + 1)
+      used++
+    }
   }
 
   const prompt = `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.

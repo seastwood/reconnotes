@@ -154,7 +154,7 @@ export function sharePage(id: string, title: string, doc: Y.Doc, updatedAt: numb
         }
       } else if (child instanceof Y.XmlElement) {
         if (child.nodeName === 'hardBreak') s += '<br>'
-        else if (child.nodeName === 'noteLink') s += `<span class="link">${esc(String(child.getAttribute('title') ?? 'note'))}</span>`
+        else if (child.nodeName === 'noteLink') s += `<span class="link">${esc(String(child.getAttribute('label') || child.getAttribute('title') || 'note'))}</span>`
         else if (child.nodeName === 'dueDate') s += `<span class="due">📅 ${esc(String(child.getAttribute('date') ?? ''))}</span>`
         else s += inline(child)
       }

@@ -238,10 +238,12 @@ export function App() {
     else if (wide) setLayout(3)
     else setOverlay(true)
   }
-  const followLink = (id: string) => {
+  /** follow a link in a note – to a place in the note it points to, when it says ("G206") */
+  const followLink = (id: string, find?: string) => {
+    const q = find?.trim()
+    setFindOnOpen((f) => (q ? { noteId: id, query: q, n: (f?.n ?? 0) + 1 } : null))
     if (id === nav.noteId) return
     if (nav.noteId) setTrail({ back: [...trail.back, nav.noteId].slice(-100), forward: [] })
-    setFindOnOpen(null)
     setNav({ ...nav, noteId: id })
     setPane('note')
   }

@@ -52,6 +52,9 @@ beforeAll(async () => {
   }
   await note('notesearch0000000001', 'Leadership', 'Ensure students are returning safety glasses. Make decision on Lieutenant today.')
   await note('notesearch0000000002', 'Shopping', 'Buy milk, eggs and bread')
+  // a manual: one page mentions G206, the other defines it
+  await note('notesearch0000000003', 'Scoring', 'Scoring is covered by G206 and other rules.')
+  await note('notesearch0000000004', 'Fouls', 'G206 Robots may not pin an opponent for more than 3 seconds.')
 })
 
 afterAll(async () => {
@@ -64,6 +67,13 @@ const search = async (q: string) =>
   (await (await fetch(`${base}/api/search?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()).hits as { noteId: string; meaning?: boolean }[]
 
 describe('search', () => {
+  it('a rule number finds the note that defines the rule first, showing the rule', async () => {
+    const hits = (await search('g206')) as { noteId: string; where?: { line: string } }[]
+    expect(hits[0].noteId).toBe('notesearch0000000004')
+    expect(hits[0].where?.line).toBe('G206 Robots may not pin an opponent for more than 3 seconds.')
+    expect(hits.map((h) => h.noteId)).toContain('notesearch0000000003')
+  })
+
   it('finds words with a letter or two wrong (as handwriting is sometimes read)', async () => {
     expect((await search('Leutenant')).map((h) => h.noteId)).toEqual(['notesearch0000000001'])
     expect((await search('studnets')).map((h) => h.noteId)).toEqual(['notesearch0000000001'])

@@ -4259,3 +4259,7 @@ a.button {
   color: var(--accent-text);
   text-decoration: none;
 }
+
+.ask-section {
+  color: var(--muted);
+}

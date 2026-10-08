@@ -8,7 +8,7 @@ import { AskPanel } from './AskPanel'
  * "Ask about this note": a question answered from this note only (by your
  * AI agents, as a job), with follow-ups.
  */
-export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: string; title: string; onClose: () => void; onOpen: (noteId: string) => void }) {
+export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: string; title: string; onClose: () => void; onOpen: (noteId: string, find?: string) => void }) {
   const [draft, setDraft] = useState('')
   const [question, setQuestion] = useState<string | null>(null)
   const access = useFolderAccess()
@@ -56,9 +56,9 @@ export function AskNoteDialog({ noteId, title, onClose, onOpen }: { noteId: stri
               key={question}
               question={question}
               where={{ notes: [noteId], unlocked: access.unlockedIds }}
-              onOpen={(id) => {
+              onOpen={(id, find) => {
                 onClose()
-                onOpen(id)
+                onOpen(id, find)
               }}
             />
           </ul>
