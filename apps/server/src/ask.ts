@@ -279,7 +279,9 @@ export async function askNotes(
   const key = (context: string) => {
     const shown = new Map([...texts].filter(([, t]) => context.includes(t)))
     const lines = range ? [] : keyLines(shown, words, rules)
-    return lines.length ? `\nThe lines of the notes most about the question (read these first; the notes they're from are below):\n${lines.map((l) => `[${l.n}] ${l.line}`).join('\n')}\n` : ''
+    return lines.length
+      ? `\n\nThe lines of the notes above most about the question – answer from these first, and give every value in them that answers it (each limit, with when it applies: e.g. one at the start and another during a match):\n${lines.map((l) => `[${l.n}] ${l.line}`).join('\n')}`
+      : ''
   }
   const promptFor = (context: string) => `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
@@ -299,8 +301,10 @@ ${
       ? `Earlier in this conversation (the new question may refer to it):\n${history.map((h) => `Q: ${h.question}\nA: ${h.answer.slice(0, 1500)}`).join('\n\n')}\n\n`
       : ''
   }${history.length ? 'Follow-up question' : 'Question'}: ${question}
-${key(context)}
-Notes:${context}`
+
+Notes:${context}${key(context)}
+
+${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 
   // the answer as it's written: the app shows it growing, with its citations linked
   let { text: raw, agent } = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }))
