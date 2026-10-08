@@ -478,6 +478,8 @@ button.text {
 .menu.floating {
   position: fixed;
   z-index: 200;
+  /* never wider than the screen (long items wrap) */
+  max-width: calc(100vw - 16px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -523,8 +525,12 @@ button.text {
 .menu button:hover {
   background: rgba(127, 127, 127, 0.12);
 }
+.menu button > span {
+  min-width: 0;
+}
 .menu-sub {
   display: block;
+  white-space: normal;
   font-size: 12px;
   color: var(--muted);
   margin-top: 2px;

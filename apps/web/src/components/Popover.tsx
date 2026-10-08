@@ -55,7 +55,8 @@ export function Popover({
       const maxHeight = Math.max(120, openUp ? above : below)
       const top = openUp ? Math.max(minTop, a.top - 4 - Math.min(h, maxHeight)) : a.bottom + 4
       let left = align === 'right' ? a.right - w : a.left
-      left = Math.min(Math.max(margin, left), innerWidth - w - margin)
+      // inside the screen; the left edge wins if it's somehow still too wide
+      left = Math.max(margin, Math.min(left, innerWidth - w - margin))
       setPos({ top, left, maxHeight })
     }
     place()
