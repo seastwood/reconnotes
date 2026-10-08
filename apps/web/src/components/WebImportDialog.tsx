@@ -43,6 +43,16 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
     }
   }
 
+  /** which pages "the guide" means: those under this address */
+  const scope = (() => {
+    try {
+      const u = new URL(/^https?:\/\//i.test(url.trim()) ? url.trim() : `https://${url.trim()}`)
+      const dir = u.pathname.endsWith('/') ? u.pathname : u.pathname.replace(/[^/]*$/, '')
+      return url.trim() ? `${u.host}${dir}` : ''
+    } catch {
+      return ''
+    }
+  })()
   const result = job?.status === 'done' ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[] } | null) : null
   const busy = Boolean(job && !isFinished(job))
 
@@ -85,15 +95,26 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               />
             </label>
             <label className="check">
-              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Also import the rest of the guide
+              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> It’s a guide split over several pages – import them all
             </label>
-            {follow && (
-              <p className="hint">
-                Follows the links on the page to other pages under the same address (the guide’s own table of contents), in their order: one note per
-                page, in a new folder, with links between the pages turned into links between the notes. At most{' '}
-                <input className="pages-input" type="number" min={1} max={300} value={maxPages} onChange={(e) => setMaxPages(Math.max(1, Math.min(300, Number(e.target.value) || 1)))} /> pages.
-              </p>
-            )}
+            <p className="hint">
+              {follow ? (
+                <>
+                  Imports this page and the guide’s other pages it links to – only those under the same address
+                  {scope ? (
+                    <>
+                      {' '}
+                      (<code>{scope}…</code>)
+                    </>
+                  ) : null}
+                  , so not the site’s blog, home page or other sites. One note per page, in a new folder, in the guide’s order; links between the pages
+                  become links between the notes. At most{' '}
+                  <input className="pages-input" type="number" min={1} max={300} value={maxPages} onChange={(e) => setMaxPages(Math.max(1, Math.min(300, Number(e.target.value) || 1)))} /> pages.
+                </>
+              ) : (
+                'Only this page. Tick it for a manual whose chapters are separate pages.'
+              )}
+            </p>
             {error && <p className="error-text">{error}</p>}
             <div className="row">
               <button type="button" onClick={onClose}>
