@@ -42,6 +42,22 @@ export interface ExtractedNote {
  */
 const TAG = /(^|[\s(\[{,;:])#([\p{L}\p{N}_-]*\p{L}[\p{L}\p{N}_-]*)/gu
 
+/** #tags in the text, but not those only ever written as links (to a site's tag page). */
+function tagsOutsideLinks(text: string, linked: string[]): string[] {
+  if (!linked.length) return extractTags(text)
+  const count = (t: string) => {
+    const n = new Map<string, number>()
+    for (const m of t.matchAll(TAG)) {
+      const tag = m[2].replace(/[-_]+$/, '').toLocaleLowerCase()
+      n.set(tag, (n.get(tag) ?? 0) + 1)
+    }
+    return n
+  }
+  const inLinks = count(linked.join(' \n '))
+  const all = count(text)
+  return extractTags(text).filter((t) => (all.get(t) ?? 0) > (inLinks.get(t) ?? 0))
+}
+
 export function extractTags(text: string): string[] {
   const out = new Set<string>()
   for (const m of text.matchAll(TAG)) {
@@ -61,6 +77,8 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
   const attachments: string[] = []
   const drawings: string[] = []
   const links = new Set<string>()
+  /** text that's a link: a web page's own tags (#docker as a link to its tag page) aren't yours */
+  const linked: string[] = []
   const transcripts = getTranscripts(doc)
   let cur = ''
 
@@ -71,8 +89,10 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
 
   const walk = (node: Y.XmlElement | Y.XmlText | Y.XmlFragment) => {
     if (node instanceof Y.XmlText) {
-      for (const op of node.toDelta() as { insert: unknown }[]) {
-        if (typeof op.insert === 'string') cur += op.insert
+      for (const op of node.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
+        if (typeof op.insert !== 'string') continue
+        cur += op.insert
+        if (op.attributes?.link) linked.push(op.insert)
       }
       return
     }
@@ -135,7 +155,7 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
     .join(' ')
     .slice(0, 200)
   const text = nonEmpty.join('\n')
-  return { title, snippet, text, attachments, drawings, tags: extractTags(text), links: [...links] }
+  return { title, snippet, text, attachments, drawings, tags: tagsOutsideLinks(text, linked), links: [...links] }
 }
 
 /** Spoken text (one long run) → paragraphs of a few sentences each. */

@@ -199,6 +199,21 @@ describe('ink geometry', () => {
 })
 
 describe('#tags', () => {
+  it('leaves out a web page’s own tags (written as links to its tag pages)', async () => {
+    const Y = await import('yjs')
+    const { extractNote, getContent } = await import('../src')
+    const doc = new Y.Doc()
+    const p = new Y.XmlElement('paragraph')
+    const t = new Y.XmlText()
+    p.insert(0, [t])
+    getContent(doc).insert(0, [p])
+    t.insert(0, 'Notes on #mine and ')
+    t.insert(t.length, '#docker', { link: { href: 'https://blog.example/tags/docker' } })
+    t.insert(t.length, ' and ')
+    t.insert(t.length, '#mine', { link: { href: 'https://blog.example/tags/mine' } })
+    expect(extractNote(doc).tags).toEqual(['mine'])
+  })
+
   it('finds tags but not C#, #1 or URL anchors', async () => {
     const { extractTags } = await import('../src')
     expect(extractTags('Plan #Robotics and #build-log, see https://x.com/a#top. C# rocks. Issue #1 (#FRC_2026)')).toEqual(['build-log', 'frc_2026', 'robotics'])

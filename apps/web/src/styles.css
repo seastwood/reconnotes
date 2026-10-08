@@ -352,6 +352,31 @@ button.text {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.section-toggle {
+  width: 100%;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.section-chevron {
+  transition: transform 0.15s;
+}
+.section-chevron.open {
+  transform: rotate(90deg);
+}
+.section-count {
+  margin-left: auto;
+  padding-right: 12px;
+  font-weight: normal;
+}
+.tag-more .folder-name {
+  color: var(--accent-text);
+  font-size: 14px;
+  padding-left: 22px;
+}
 .section-label .menu-anchor {
   margin-left: auto;
 }

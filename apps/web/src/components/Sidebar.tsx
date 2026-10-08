@@ -115,6 +115,11 @@ export function getDrag(e: React.DragEvent): DragPayload | null {
   }
 }
 
+/** the Tags section's folded state, kept with the folders' */
+const TAGS_KEY = '__tags'
+/** tags shown before "Show all" */
+const TOP_TAGS = 5
+
 export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder, search, onSearch, onOpenResult, activeNoteId }: Props) {
   // saved searches shown here (pin them in the search suggestions)
   const smart = useSavedSearches().filter((s) => s.pinned)
@@ -168,6 +173,15 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     for (const n of ws.notes) if (!n.trashedAt && !n.template) for (const t of n.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
     return [...counts].sort((a, b) => a[0].localeCompare(b[0]))
   }, [ws.notes])
+  const tagsFolded = Boolean(collapsed[TAGS_KEY])
+  const [allTags, setAllTags] = useState(false)
+  // the most-used few (and the one being looked at), in A–Z order
+  const shownTags = useMemo(() => {
+    if (allTags || tags.length <= TOP_TAGS) return tags
+    const top = new Set([...tags].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, TOP_TAGS).map(([t]) => t))
+    if (view.kind === 'tag') top.add(view.tag)
+    return tags.filter(([t]) => top.has(t))
+  }, [tags, allTags, view])
 
   const toggle = (id: string) => {
     const next = { ...collapsed, [id]: !collapsed[id] }
@@ -535,19 +549,30 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         {!tree.length && ws.loaded && <p className="empty-hint">No folders yet. Create one with the + button.</p>}
         {tags.length > 0 && (
           <>
-            <div className="section-label">Tags</div>
-            <ul className="tag-list">
-              {tags.map(([tag, count]) => (
-                <li
-                  key={tag}
-                  className={`folder-row tag-row${view.kind === 'tag' && view.tag === tag ? ' active' : ''}`}
-                  onClick={() => onView({ kind: 'tag', tag })}
-                >
-                  <Hash size={15} /> <span className="folder-name">{tag}</span>
-                  <span className="count">{count}</span>
-                </li>
-              ))}
-            </ul>
+            {/* folds away (remembered); open, the most-used few – the rest a tap away */}
+            <button className="section-label section-toggle" onClick={() => toggle(TAGS_KEY)} aria-expanded={!tagsFolded}>
+              <ChevronRight size={14} className={`section-chevron${tagsFolded ? '' : ' open'}`} /> Tags
+              <span className="section-count">{tags.length}</span>
+            </button>
+            {!tagsFolded && (
+              <ul className="tag-list">
+                {shownTags.map(([tag, count]) => (
+                  <li
+                    key={tag}
+                    className={`folder-row tag-row${view.kind === 'tag' && view.tag === tag ? ' active' : ''}`}
+                    onClick={() => onView({ kind: 'tag', tag })}
+                  >
+                    <Hash size={15} /> <span className="folder-name">{tag}</span>
+                    <span className="count">{count}</span>
+                  </li>
+                ))}
+                {tags.length > TOP_TAGS && (
+                  <li className="folder-row tag-more" onClick={() => setAllTags(!allTags)}>
+                    <span className="folder-name">{allTags ? 'Show fewer' : `Show all ${tags.length} tags`}</span>
+                  </li>
+                )}
+              </ul>
+            )}
           </>
         )}
         {templateCount > 0 && (
