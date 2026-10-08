@@ -478,6 +478,7 @@ describe('each citation opens where its sentence came from', () => {
       'R02. The ROBOT weight must not exceed the weight of 125 lbs.',
       'Battery and bumpers do not count towards the 125 lbs limit.',
       'R03. The ROBOT must be designed to not exceed a speed of 10.5 feet per second.',
+      'R04. The ROBOT should be developed by Students. ROBOTS should be designed, built, and programmed by Students.',
     ].join('\n\n')
     const answer = [
       '- The ROBOT must start inside a STARTING VOLUME of 36” long x 36” wide x 40” tall [7].',
@@ -490,5 +491,12 @@ describe('each citation opens where its sentence came from', () => {
     expect(cites[1].find).toMatch(/^R01\./)
     expect(cites[2].find).toMatch(/^R03\. The ROBOT must be/)
     expect(cites[3].find).toBeUndefined()
+    // cited mid-sentence, with the evidence after it (and the wrong rule number)
+    const mid = citeFinds(
+      '- The maximum height of the robot is constrained to be within 60 inches based on rule R04 from section [7] "Minnetrials Manual 10-6-26" › 7 ROBOT CONSTRUCTION RULES › 7.2 GENERAL ROBOT DESIGN, which states that the ROBOT must not extend beyond a volume of 36” long x 36” wide x 60” tall during a MATCH.\n- The ROBOT weight must not exceed 125 lbs [7].',
+      new Map([[7, section]]),
+    )
+    expect(mid[0].find).toMatch(/^R01\./)
+    expect(mid[1].find).toMatch(/^R02\./)
   })
 })

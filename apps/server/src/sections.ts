@@ -236,9 +236,17 @@ export function findTextOf(s: Section): string {
  * words of that line, for the find bar. Null when nothing is shared.
  */
 export function findForClaim(text: string, claim: string): string | null {
-  const tokens = (s: string) => s.toLowerCase().match(/\d+(?:\.\d+)?|[\p{L}]{3,}/gu) ?? []
-  const want = new Set(tokens(claim).filter((w) => !CLAIM_STOP.has(w)))
-  if (!want.size) return null
+  // words, numbers ("36", "10.5") and rule numbers ("r01") – as written
+  const tokens = (t: string) => t.toLowerCase().match(/[\p{L}\p{N}]+(?:\.\d+)?/gu) ?? []
+  const weight = (w: string) => (/^\d+(?:\.\d+)?$/.test(w) ? (w.length >= 2 ? 3 : 1) : /^[a-z]{1,3}\d{2,4}$/.test(w) ? 3 : 1)
+  const own = tokens(claim).filter((w) => (w.length >= 3 || /\d/.test(w)) && !CLAIM_STOP.has(w))
+  if (!own.length) return null
+  // the words a note says the same with ("height" in the answer, "tall" in the rule)
+  const want = new Map<string, number>()
+  for (const w of own) {
+    want.set(w, weight(w))
+    for (const v of variantsOf(w)) if (!v.includes(' ') && !want.has(v)) want.set(v, 0.5)
+  }
   let best: { line: string; score: number } | null = null
   for (const raw of text.split('\n')) {
     const line = plainLine(raw)
@@ -246,8 +254,7 @@ export function findForClaim(text: string, claim: string): string | null {
     const have = new Set(tokens(line))
     let score = 0
     let shared = 0
-    // a number of two digits or more ("40", "125", "10.5") says most about where it's from
-    for (const w of want) if (have.has(w)) (score += /^\d/.test(w) ? (w.length >= 2 ? 3 : 1) : 1), shared++
+    for (const [w, n] of want) if (have.has(w)) (score += n), shared++
     if (shared >= 2 && score > (best?.score ?? 0)) best = { line, score }
   }
   // a word or two in common is chance, not where it came from

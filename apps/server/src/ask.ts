@@ -341,15 +341,16 @@ Notes:${context}`
 /** Each citation in the answer, in order, with the line its sentence came from. */
 export function citeFinds(answer: string, texts: Map<number, string>): AskCite[] {
   const out: AskCite[] = []
-  let from = 0
-  const re = /((?:\[\d+\])+)/g
-  for (const m of answer.matchAll(re)) {
-    // the claim: back to the end of the sentence (or citation) before it
-    const before = answer.slice(from, m.index)
-    // (a sentence ends at ". " or a new line – not at the point in "10.5")
-    const ends = [...before.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1).filter((i) => before.slice(i).trim())
-    const claim = before.slice(ends.length ? ends[ends.length - 1] : 0)
-    from = m.index! + m[0].length
+  // a sentence ends at ". " or a new line – not at the point in "10.5"
+  const ends = [0, ...[...answer.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1), answer.length]
+  for (const m of answer.matchAll(/(?:\[\d+\])+/g)) {
+    // the claim: the sentence the citation is in (small models cite mid-sentence:
+    // "…based on rule R01 [7], which states that the ROBOT must not…")
+    const at = m.index!
+    let start = 0
+    for (const e of ends) if (e <= at && answer.slice(e, at).trim()) start = e
+    const end = ends.find((e) => e > at + m[0].length && answer.slice(at + m[0].length, e).trim()) ?? answer.length
+    const claim = answer.slice(start, end).replace(/\[\d+\]/g, ' ')
     for (const n of [...m[0].matchAll(/\[(\d+)\]/g)].map((x) => Number(x[1]))) {
       const text = texts.get(n)
       const find = text ? findForClaim(text, claim) : null

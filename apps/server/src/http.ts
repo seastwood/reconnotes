@@ -8,7 +8,7 @@ import { noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteConten
 import type { Config } from './config'
 import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
-import { askNotes } from './ask'
+import { askNotes, citeFinds } from './ask'
 import { EmptyDrawingError, SyncEngine, safeEqual } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, sampleHandwritingPng, type CompilePart } from './ai'
 import {
@@ -295,7 +295,23 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const noteId = url.searchParams.get('noteId')
     const folderId = url.searchParams.get('folderId')
     const scope = noteId ? scopeKey({ notes: [noteId] }) : folderId ? scopeKey({ folders: [folderId] }) : ''
-    json(res, 200, { conversations: listConversations(store, scope) })
+    const conversations = listConversations(store, scope)
+    // answers kept before citations had their own links: worked out now, from the notes as they are
+    for (const c of conversations)
+      for (const t of c.turns) {
+        if (t.cites) continue
+        const texts = new Map<number, string>()
+        for (const s of t.sources) {
+          const doc = sync.getDoc(noteDocName(s.noteId))
+          if (doc) texts.set(s.n, noteToMarkdown(doc))
+        }
+        t.cites = citeFinds(t.answer, texts)
+        for (const s of t.sources) {
+          const first = t.cites.find((x) => x.n === s.n && x.find)
+          if (first) s.find = first.find
+        }
+      }
+    json(res, 200, { conversations })
   })
   route('DELETE', `/api/ask/history/${ID}`, (_req, res, [id]) => {
     deleteConversation(store, id)
