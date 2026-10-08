@@ -80,10 +80,13 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               so it stays even if the site changes). The site’s menus, banners and footers are left out.
             </p>
             <label>
-              Address
+              Link to the page
               <input
                 type="url"
                 inputMode="url"
+                name="page-url"
+                // not "Address": Safari would offer to fill in a street address
+                autoComplete="url"
                 autoFocus
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -95,24 +98,23 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               />
             </label>
             <label className="check">
-              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> It’s a guide split over several pages – import them all
+              <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Import every page of this guide
             </label>
             <p className="hint">
               {follow ? (
                 <>
-                  Imports this page and the guide’s other pages it links to – only those under the same address
+                  For manuals split into chapters on separate pages. Each page becomes its own note, in a new folder
                   {scope ? (
                     <>
                       {' '}
-                      (<code>{scope}…</code>)
+                      – only pages under <code>{scope}</code>
                     </>
                   ) : null}
-                  , so not the site’s blog, home page or other sites. One note per page, in a new folder, in the guide’s order; links between the pages
-                  become links between the notes. At most{' '}
+                  . Up to{' '}
                   <input className="pages-input" type="number" min={1} max={300} value={maxPages} onChange={(e) => setMaxPages(Math.max(1, Math.min(300, Number(e.target.value) || 1)))} /> pages.
                 </>
               ) : (
-                'Only this page. Tick it for a manual whose chapters are separate pages.'
+                'Just this page. Tick the box if the guide continues on other pages.'
               )}
             </p>
             {error && <p className="error-text">{error}</p>}
