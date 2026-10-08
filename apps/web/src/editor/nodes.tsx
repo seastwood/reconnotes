@@ -67,7 +67,7 @@ function useAttachmentText(id: string) {
  * mouse: touch/pen act on pointerup (inside a note, iOS doesn't always
  * deliver the click), the mouse on click.
  */
-function tap(action: () => void) {
+export function tap(action: () => void) {
   let handledAt = 0
   return {
     onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
@@ -303,7 +303,7 @@ export const ImageNode = Node.create({
 })
 
 /** Copy / Cut for a picture, recording or file: to paste it in another note. */
-function BlockCopyButtons({ editor, getPos, doc, what }: { editor: Editor; getPos: () => number | undefined; doc: Y.Doc; what: string }) {
+export function BlockCopyButtons({ editor, getPos, doc, what }: { editor: Editor; getPos: () => number | undefined; doc: Y.Doc; what: string }) {
   return (
     <>
       <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), doc))} title={`Copy this ${what} (paste it in any note)`} aria-label={`Copy ${what}`}>

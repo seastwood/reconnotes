@@ -138,6 +138,13 @@ export function noteToMarkdown(
         attText(id, name === 'audio' ? '🎙️ Transcript of this recording:' : '📄 Text of this file:')
         break
       }
+      case 'video': {
+        // a link to it: plays in other apps and on GitHub, Obsidian…
+        const src = (el.getAttribute('src') as string) ?? ''
+        const title = (el.getAttribute('title') as string) || 'Video'
+        if (src) out.push(`${indent}▶ [${title.replace(/[[\]]/g, '')}](${src})`)
+        break
+      }
       case 'drawing': {
         const id = el.getAttribute('drawingId') as string
         if (opts.drawingPlaceholder) out.push(opts.drawingPlaceholder(id))

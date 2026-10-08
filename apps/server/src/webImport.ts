@@ -1,7 +1,8 @@
 /// <reference lib="dom.iterable" />
 import path from 'node:path'
 import { parseHTML } from 'linkedom'
-import { WORKSPACE_DOC, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
+import * as Y from 'yjs'
+import { WORKSPACE_DOC, videoInfo, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
 import type { Ai } from './ai'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -433,6 +434,9 @@ function pageToMarkdown(main: El, conv: Conv): string {
         } catch {
           return []
         }
+        // a video (YouTube, Vimeo, a video file): one that plays in the note
+        const title = (el.getAttribute('title') ?? '').trim()
+        if (videoInfo(url)) return [videoToken(url, title)]
         const yt = /youtube(?:-nocookie)?\.com\/embed\/([\w-]+)/.exec(url)
         if (yt) url = `https://www.youtube.com/watch?v=${yt[1]}`
         const label = tag === 'AUDIO' ? 'Audio' : yt || tag === 'VIDEO' || /vimeo|video/.test(url) ? 'Video' : (el.getAttribute('title') ?? 'Embedded content')
@@ -480,6 +484,24 @@ function pageToMarkdown(main: El, conv: Conv): string {
   }
 
   return blocks(main).join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * A video, written so that Markdown leaves it alone (no address it could
+ * turn into a link): its own paragraph, made into a video block when the
+ * note is written.
+ */
+const hex = (s: string) => Buffer.from(s).toString('hex')
+function videoToken(url: string, title: string): string {
+  return `⟦VIDEO:${hex(url)}:${hex(title)}⟧`
+}
+export function videoBlock(text: string): Y.XmlElement | null {
+  const m = /^⟦VIDEO:([0-9a-f]*):([0-9a-f]*)⟧$/.exec(text)
+  if (!m) return null
+  const el = new Y.XmlElement('video')
+  el.setAttribute('src', Buffer.from(m[1], 'hex').toString())
+  el.setAttribute('title', Buffer.from(m[2], 'hex').toString())
+  return el
 }
 
 /** A paragraph mustn't start like a list item or a numbered one. */
@@ -708,6 +730,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
           const a = src ? pictures.get(src) : null
           return a ?? null
         },
+        blockFor: videoBlock,
         noteFor: (target) => {
           const m = /^rnpage-(\d+)$/.exec(target)
           return m ? (ids[Number(m[1])] ?? null) : null

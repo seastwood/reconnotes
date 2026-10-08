@@ -196,6 +196,12 @@ export function sharePage(id: string, title: string, doc: Y.Doc, updatedAt: numb
         return `<pre><code>${esc(el.toArray().map((c) => (c instanceof Y.XmlText ? c.toString().replace(/<[^>]+>/g, '') : '')).join(''))}</code></pre>`
       case 'horizontalRule':
         return '<hr>'
+      case 'video': {
+        // a shared page plays nothing of its own: a link to the video
+        const src = String(el.getAttribute('src') ?? '')
+        if (!/^https?:\/\//.test(src)) return ''
+        return `<p>▶ <a href="${esc(src)}" rel="noopener noreferrer">${esc(String(el.getAttribute('title') || src))}</a></p>`
+      }
       case 'table':
         return `<div class="table"><table>${children(el)}</table></div>`
       case 'tableRow':

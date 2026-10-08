@@ -54,7 +54,9 @@ const PAGES: Record<string, string> = {
      <svg width="200" height="100" viewBox="0 0 200 100"><rect width="200" height="100" fill="red"/></svg>
      <p>Prices: 5 * 3 = 15, and _underscores_ stay [as typed].</p>
      <img src="/img/pixel.gif" width="1" height="1">
-     <iframe src="https://www.youtube.com/embed/abc123"></iframe>`,
+     <iframe src="https://www.youtube.com/embed/abc123_x-Y" title="How to wire it"></iframe>
+     <video src="/clips/demo.mp4" controls></video>
+     <iframe src="https://maps.example.com/embed?x=1" title="Map"></iframe>`,
   ),
   '/guide/wiring': layout('Wiring', `<h1>Wiring</h1><h2 id="power">Power</h2><p>Back to the <a href="/guide/">overview</a>.</p>`),
   '/guide/software': layout('Software', `<h1>Software</h1><p>Deploy with Gradle.</p>`),
@@ -133,7 +135,11 @@ describe('importing a web page', () => {
     expect(text).toContain('Check the breaker.')
     expect(text).toContain('Prices: 5 * 3 = 15, and _underscores_ stay [as typed].')
     expect(text).toContain('*Our 2026 robot*')
-    expect(text).toContain('https://www.youtube.com/watch?v=abc123')
+    // videos that play in the note
+    expect(xml).toContain('<video src="https://www.youtube.com/embed/abc123_x-Y" title="How to wire it"></video>')
+    expect(xml).toContain(`<video src="${base}/clips/demo.mp4" title=""></video>`)
+    // other embedded things: a link
+    expect(xml).toMatch(/Map: <link [^>]*href="https:\/\/maps\.example\.com\/embed\?x=1"/)
     // not the site around it
     for (const s of ['Blog', 'Privacy', '© Robot Docs', 'Next →', 'console.log', 'Elsewhere', '#robot-guide']) expect(text).not.toContain(s)
     // pictures: the figure, the largest of the srcset, the SVG drawing – not the tracking pixel

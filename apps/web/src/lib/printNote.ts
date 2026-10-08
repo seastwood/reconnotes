@@ -100,6 +100,12 @@ async function node(n: JSONContent, doc: Y.Doc): Promise<string> {
       return `<pre><code>${esc((n.content ?? []).map((c) => c.text ?? '').join(''))}</code></pre>`
     case 'horizontalRule':
       return '<hr>'
+    case 'video': {
+      // paper can't play it: its address
+      const src = String(n.attrs?.src ?? '')
+      if (!/^https?:\/\//.test(src)) return ''
+      return `<p>▶ ${esc(String(n.attrs?.title || 'Video'))}: <a href="${esc(src)}">${esc(src)}</a></p>`
+    }
     case 'table':
       return `<table>${await inner()}</table>`
     case 'tableRow':

@@ -18,6 +18,7 @@ import { InkToolbar } from '../drawing/InkToolbar'
 import { PencilPalette } from '../drawing/PencilPalette'
 import { inkUi } from '../drawing/toolState'
 import { AudioNode, FileNode, ImageNode, insertFiles } from './nodes'
+import { VideoNode } from './video'
 import { UndoContext, createUndoManager } from './undo'
 import { EditorToolbar, STYLES, applyStyle } from './EditorToolbar'
 import { registerCommands } from '../lib/commands'
@@ -125,6 +126,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         }),
         AudioNode,
         FileNode,
+        VideoNode,
       ],
       editorProps: {
         attributes: { class: 'note-content', spellcheck: 'true' },

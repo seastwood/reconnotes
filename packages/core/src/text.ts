@@ -93,6 +93,12 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
         const alt = (node.getAttribute('alt') as string | undefined) ?? (node.getAttribute('name') as string | undefined)
         if (alt) cur += (cur ? ' ' : '') + alt
       }
+      if (name === 'video') {
+        // found by its title
+        const t = node.getAttribute('title') as string | undefined
+        if (t) cur += (cur ? ' ' : '') + t
+        return
+      }
       if (name === 'dueDate') {
         const d = node.getAttribute('date') as string | undefined
         if (d) cur += ` !${d}`
