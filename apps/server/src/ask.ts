@@ -6,7 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { reportPartial, reportProgress } from './jobs'
-import { claimMatch, findForClaim, findIn, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -275,13 +275,18 @@ export async function askNotes(
     // not read yet, best first: where to look next if the answer isn't in these
     rest = (matched ? order : [...scored].sort((a, b) => b.score - a.score)).filter((x) => !read.has(x) && (pinned.length || x.score > 0))
   }
+  // the lines most about the question, first: what a small model would otherwise skim past
+  const key = (context: string) => {
+    const shown = new Map([...texts].filter(([, t]) => context.includes(t)))
+    const lines = range ? [] : keyLines(shown, words, rules)
+    return lines.length ? `\nThe lines of the notes most about the question (read these first; the notes they're from are below):\n${lines.map((l) => `[${l.n}] ${l.line}`).join('\n')}\n` : ''
+  }
   const promptFor = (context: string) => `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
-- Be brief and direct. Start with the answer, not a restatement of the question.
+- Start with the answer, not a restatement of the question. Then explain it: give every relevant detail the notes give – each value with its unit, and the conditions it applies under (for example one limit at the start and another during a match).
 - When the answer is several things, write a Markdown list, one item per line starting with "- ". Include every item the notes give – don't leave any out or merge them.
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
-- Give the specific details the notes give – numbers, units, limits and conditions – in the notes' own words.
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
@@ -294,7 +299,7 @@ ${
       ? `Earlier in this conversation (the new question may refer to it):\n${history.map((h) => `Q: ${h.question}\nA: ${h.answer.slice(0, 1500)}`).join('\n\n')}\n\n`
       : ''
   }${history.length ? 'Follow-up question' : 'Question'}: ${question}
-
+${key(context)}
 Notes:${context}`
 
   // the answer as it's written: the app shows it growing, with its citations linked
@@ -328,6 +333,8 @@ Notes:${context}`
   }
   // a citation by name ("[4 MATCH PLAY › 4.7 DRIVE TEAM]"): by its number
   text = citeByNumber(text, sources)
+  // a citation to a source that doesn't say it, when another one does: that one
+  text = recite(text, texts)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
   // each citation: the line of its source the sentence before it came from
@@ -384,19 +391,36 @@ export function autoCite(answer: string, texts: Map<number, string>): string {
   })
 }
 
+/** Where a citation's sentence is: (a sentence ends at ". " or a new line – not at the point in "10.5"). */
+function sentenceAround(answer: string, at: number, len: number): string {
+  const ends = [0, ...[...answer.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1), answer.length]
+  // small models cite mid-sentence: "…based on rule R01 [7], which states that the ROBOT must not…"
+  let start = 0
+  for (const e of ends) if (e <= at && answer.slice(e, at).trim()) start = e
+  const end = ends.find((e) => e > at + len && answer.slice(at + len, e).trim()) ?? answer.length
+  return answer.slice(start, end).replace(/\[\d+\]/g, ' ')
+}
+
+/** Citations to a source that doesn't say what the sentence says, when another source plainly does: that one. */
+export function recite(answer: string, texts: Map<number, string>): string {
+  return answer.replace(/(?:\[\d+\])+/g, (group, at: number) => {
+    const claim = sentenceAround(answer, at, group.length)
+    const scores = [...texts].map(([n, t]) => ({ n, score: claimMatch(t, claim)?.score ?? 0 }))
+    const best = scores.reduce((a, b) => (b.score > a.score ? b : a), { n: 0, score: 0 })
+    const ns = [...group.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]))
+    const fixed = ns.map((n) => {
+      const own = scores.find((x) => x.n === n)?.score ?? 0
+      return best.n && best.score >= own + 2 ? best.n : n
+    })
+    return [...new Set(fixed)].map((n) => `[${n}]`).join('')
+  })
+}
+
 /** Each citation in the answer, in order, with the line its sentence came from. */
 export function citeFinds(answer: string, texts: Map<number, string>): AskCite[] {
   const out: AskCite[] = []
-  // a sentence ends at ". " or a new line – not at the point in "10.5"
-  const ends = [0, ...[...answer.matchAll(/[.!?](?=\s)|\n/g)].map((x) => x.index! + 1), answer.length]
   for (const m of answer.matchAll(/(?:\[\d+\])+/g)) {
-    // the claim: the sentence the citation is in (small models cite mid-sentence:
-    // "…based on rule R01 [7], which states that the ROBOT must not…")
-    const at = m.index!
-    let start = 0
-    for (const e of ends) if (e <= at && answer.slice(e, at).trim()) start = e
-    const end = ends.find((e) => e > at + m[0].length && answer.slice(at + m[0].length, e).trim()) ?? answer.length
-    const claim = answer.slice(start, end).replace(/\[\d+\]/g, ' ')
+    const claim = sentenceAround(answer, m.index!, m[0].length)
     for (const n of [...m[0].matchAll(/\[(\d+)\]/g)].map((x) => Number(x[1]))) {
       const text = texts.get(n)
       const find = text ? findForClaim(text, claim) : null

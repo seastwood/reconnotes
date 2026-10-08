@@ -93,7 +93,7 @@ const GROUPS: string[][] = [
   ['height', 'tall', 'taller', 'tallest', 'high', 'vertical'],
   ['width', 'wide', 'wider'],
   ['length', 'long', 'longer'],
-  ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger'],
+  ['max', 'maximum', 'exceed', 'exceeds', 'limit', 'larger than', 'no more than', 'up to', 'no taller', 'no larger', 'not extend beyond', 'within'],
   ['min', 'minimum', 'least', 'fewer than', 'at least'],
   ['size', 'sizes', 'sizing', 'dimension', 'footprint', 'volume', 'fit within', 'fits within', 'starting configuration'],
   ['weight', 'weigh', 'weighs', 'heavy', 'heavier', 'mass', 'lbs', 'pounds', 'kg'],
@@ -294,3 +294,40 @@ export function claimMatch(text: string, claim: string): { find: string; score: 
 const CLAIM_STOP = new Set(
   'the and for are was were with that this from have has had not but can will its into than then they their there which what when where who how all any per also must may should note notes section'.split(' '),
 )
+
+/**
+ * The lines of what's read that are most about the question (most of its
+ * words, or words meaning the same; a rule asked about) – put first for the
+ * AI, so a small model doesn't skim past the one line that answers it.
+ */
+export function keyLines(texts: Map<number, string>, words: string[], rules: string[] = [], limit = 4): { n: number; line: string }[] {
+  const terms = [...new Set(words.filter((w) => w.length >= 3))]
+  const all: { n: number; raw: string; line: string; low: string }[] = []
+  for (const [n, text] of texts)
+    for (const raw of findableLines(text)) {
+      const plain = plainLine(raw)
+      if (plain.length < 20 || /^#{1,6}\s/.test(raw.trim())) continue
+      // a long paragraph by its sentences: the one that says it, not the paragraph that has the words somewhere
+      for (const line of plain.length > 300 ? plain.split(/(?<=[\p{Ll})”"'][.!?])\s+(?=[\p{Lu}\d])/u) : [plain])
+        if (line.length >= 20) all.push({ n, raw: line === plain ? raw : line, line, low: line.toLowerCase() })
+    }
+  // a word in every line ("robot" in a robot manual) says little; a rare one ("tall") a lot
+  const weight = new Map(terms.map((t) => [t, Math.log(1 + all.length / (1 + all.filter((x) => holdsAny(x.low, t)).length))]))
+  const found: { n: number; line: string; score: number }[] = []
+  for (const { n, raw, line, low } of all) {
+    const hit = terms.filter((t) => holdsAny(low, t))
+    const rule = rules.some((r) => definesRule(raw, r)) ? 3 : rules.some((r) => new RegExp(`\\b${r}\\b`).test(line)) ? 1 : 0
+    if (hit.length < 2 && !rule) continue
+    // a line with figures in it is usually the one that says it
+    const score = hit.reduce((sum, t) => sum + weight.get(t)!, 0) + rule * 2 + (/\d/.test(line) ? 0.3 : 0)
+    found.push({ n, line: line.length > 500 ? `${line.slice(0, 500)}…` : line, score })
+  }
+  const seen = new Set<string>()
+  const best = Math.max(0, ...found.map((x) => x.score))
+  return found
+    .sort((a, b) => b.score - a.score)
+    // only lines nearly as much about it as the best: the rest is noise to a small model
+    .filter((x) => x.score >= best * 0.75 && !seen.has(x.line) && seen.add(x.line))
+    .slice(0, limit)
+    .map(({ n, line }) => ({ n, line }))
+}

@@ -7,8 +7,8 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
-import { askNotes, autoCite, citeByNumber, citeFinds } from '../src/ask'
-import { findIn, scoreSections, splitSections } from '../src/sections'
+import { askNotes, autoCite, citeByNumber, citeFinds, recite } from '../src/ask'
+import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 
@@ -521,5 +521,20 @@ describe('answers that cite badly', () => {
     expect(autoCite('Hello there.', texts)).toBe('Hello there.')
     // in a table cell's list: that item
     expect(citeFinds('Being taller than 60-inches is a penalty [2].', texts)[0].find).toBe('Being taller than 60-inches')
+  })
+})
+
+describe('the AI gets the line that answers it, and cites it', () => {
+  const texts = new Map([
+    [1, 'Each ROBOT that completely leaves their ALLIANCE STARTING LINE scores 5 pts.\n\nThe ROBOT may enter the ZONE at the start.'],
+    [2, 'R01. The ROBOT must start a MATCH inside the STARTING VOLUME of 36” long x 36” wide x 40” tall and not extend beyond the ROBOT VOLUME of 36” long x 36” wide x 60” tall during a MATCH.\n\nR02. The ROBOT weight must not exceed 125 lbs.'],
+  ])
+  it('the line most about the question comes first', () => {
+    expect(keyLines(texts, ['maximum', 'height', 'robot'])[0]).toEqual({ n: 2, line: expect.stringMatching(/^R01\. The ROBOT must start/) })
+  })
+  it('a citation to a source that doesn’t say it moves to the one that does', () => {
+    expect(recite('The maximum height of the robot is 60 inches tall [1].', texts)).toBe('The maximum height of the robot is 60 inches tall [2].')
+    // one that does say it stays
+    expect(recite('Leaving the STARTING LINE scores 5 pts [1].', texts)).toBe('Leaving the STARTING LINE scores 5 pts [1].')
   })
 })
