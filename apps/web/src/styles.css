@@ -30,6 +30,22 @@
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
+/* the phone's dark mode before the app has said which theme (the very first paint) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #1c1c1e;
+    --panel: #232325;
+    --paper: #141415;
+    --text: #f2f2f7;
+    --muted: #98989f;
+    --line: #333336;
+    --accent: #ffc83d;
+    --accent-text: #ffd36b;
+    --active: #4a3c12;
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
 
 * {
   box-sizing: border-box;
