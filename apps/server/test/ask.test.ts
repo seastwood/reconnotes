@@ -562,3 +562,17 @@ describe('what the answer left out', () => {
     expect(r.read).toHaveLength(1)
   })
 })
+
+describe('a citation where the sentence names its section', () => {
+  it('goes to that section', () => {
+    const texts = new Map([
+      [3, '| +10 Pts | - Being taller than 60-inches |'],
+      [6, '| Revision | Description | Date |\n| 1.0.0 | Initial Game Release | TBD |'],
+    ])
+    const sources = [
+      { n: 3, noteId: 'm', title: 'Manual', section: '4 MATCH PLAY › 4.6 RULE VIOLATIONS' },
+      { n: 6, noteId: 'm', title: 'Manual', section: 'Revisions' },
+    ]
+    expect(recite('A robot over this limit would be penalized under Rule 4.6 RULE VIOLATIONS [6].', texts, sources)).toBe('A robot over this limit would be penalized under Rule 4.6 RULE VIOLATIONS [3].')
+  })
+})

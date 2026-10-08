@@ -337,14 +337,16 @@ Notes:${context}`
   for (const t of new Set(sources.map((x) => x.title).filter((t) => t.length >= 4)))
     text = text.replace(new RegExp(`\\s*(?:\\b(?:in|from|of|see)\\s+)?(?:the\\s+)?["“'‘]${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["”'’](?:\\s+(?:note|manual|document))?`, 'g'), '')
   // a citation to a source that doesn't say it, when another one does: that one
-  text = recite(text, texts)
+  text = recite(text, texts, sources)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
   // what the answer left out of the lines most about the question (a small model
   // often answers from one passage): added, each linked to where it is
   if (!range) {
-    const more = keyLines(texts, words, rules, 6, 0.9)
-      .filter((l) => !alreadySaid(text, l.line))
+    const key = keyLines(texts, words, rules, 6, 0.9)
+    // the best line gives figures (40”, 60”): only lines that give figures too
+    const figures = /\d/.test(key[0]?.line ?? '')
+    const more = key.filter((l) => (!figures || /\d/.test(l.line)) && !alreadySaid(text, l.line))
       .slice(0, 3)
     if (more.length)
       text += `\n\n${pinned.length === 1 ? 'More in this note' : 'More in your notes'}:\n${more.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
@@ -428,9 +430,16 @@ function sentenceAround(answer: string, at: number, len: number): string {
 }
 
 /** Citations to a source that doesn't say what the sentence says, when another source plainly does: that one. */
-export function recite(answer: string, texts: Map<number, string>): string {
+export function recite(answer: string, texts: Map<number, string>, sources: AskSource[] = []): string {
   return answer.replace(/(?:\[\d+\])+/g, (group, at: number) => {
     const claim = sentenceAround(answer, at, group.length)
+    // the sentence names a section that was read ("under 4.6 RULE VIOLATIONS"): that section
+    const low = norm(claim)
+    const named = sources.find((s) => {
+      const last = s.section ? norm(s.section.split('›').pop()!) : ''
+      return last.length >= 8 && low.includes(last)
+    })
+    if (named) return `[${named.n}]`
     const scores = [...texts].map(([n, t]) => ({ n, score: claimMatch(t, claim)?.score ?? 0 }))
     const best = scores.reduce((a, b) => (b.score > a.score ? b : a), { n: 0, score: 0 })
     const ns = [...group.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]))
