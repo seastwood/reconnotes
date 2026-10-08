@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Redo2, Undo2 } from 'lucide-react'
-import { ColorRow, SizeRow, ToolButtons } from './InkToolbar'
-import { inkUi, switchToPrevious, toggleEraser, useInkUi } from './toolState'
+import { ColorRow, ShapeRow, SizeRow, ToolButtons } from './InkToolbar'
+import { inkUi, switchToPrevious, toggleEraser, useInkUi, useTools } from './toolState'
 import { useUndoManager, useUndoState } from '../editor/undo'
 
 /**
@@ -58,6 +58,7 @@ export function PencilPalette() {
   const palette = useInkUi((s) => s.palette)
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
+  const shapeTool = useTools((s) => s.tool === 'shape')
   if (!palette) return null
   const w = 340
   const left = Math.min(Math.max(8, palette.x - w / 2), innerWidth - w - 8)
@@ -75,6 +76,7 @@ export function PencilPalette() {
           </button>
         </div>
         <ToolButtons compact />
+        {shapeTool && <ShapeRow />}
         <ColorRow />
         <SizeRow />
       </div>

@@ -50,7 +50,7 @@ import { useWorkspace } from '../lib/workspace'
 import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { AiHealthLine, BenchTable } from './AiHealth'
-import { AskAnswer, type AskResult } from './AskPanel'
+import { AskAnswer, AskThread, type AskResult } from './AskPanel'
 import { samplesApi, type BenchResult } from '../lib/agents'
 
 const ICONS: Record<string, typeof Sparkles> = {
@@ -405,6 +405,8 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
               {j.kind === 'ask' && typeof j.result?.answer === 'string' ? (
                 <div className="ask-panel">
                   <AskAnswer result={j.result as unknown as AskResult} onOpen={onOpenNote} />
+                  {/* follow-ups, and ask another (under the first question of a conversation) */}
+                  {!j.input.thread && <AskThread root={j} onOpen={onOpenNote} />}
                 </div>
               ) : (
                 <pre>{text}</pre>

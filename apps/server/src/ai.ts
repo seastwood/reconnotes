@@ -9,6 +9,7 @@ import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
+import { groundMeetingNotes } from './meetingNotes'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -245,29 +246,36 @@ export class Ai {
    * the meeting: a summary, decisions, and the action items as a checklist.
    */
   async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string }> {
-    const prompt = `Write meeting notes from the transcript of a meeting and the notes taken during it. Today is ${today}.
+    const prompt = `Write meeting notes from a recording's transcript and the notes taken during it. Today is ${today}.
 
-Use exactly this Markdown layout, and only what was said or written (no invented names, dates or tasks):
+Rules:
+- Use ONLY what is in the transcript and the notes below. Never invent names, people, projects, dates, numbers or tasks.
+- A short recording gets short notes: one summary bullet is fine. If nothing was decided or assigned, say so.
+- Stop after the Action items section.
+
+Use exactly this Markdown layout:
 
 ## Summary
-- 2 to 6 short bullet points: what was discussed and concluded
+- short bullet points: what was said
 
 ## Decisions
-- each decision made (leave this section out if there were none)
+- each decision that was actually made (leave this section out if none)
 
 ## Action items
-- [ ] who – what to do (by when, in the words used: "by Friday", "next week", "10/22")
+- [ ] each task that was actually said, with the person and the deadline only if they were said
 
-If nobody is named for a task, leave out "who –". If there are no action items, write "- [ ] No action items" under that heading.
+If no task was said, write "- [ ] No action items" under that heading.
 
-Notes taken during the meeting:
+<notes>
 ${notes.slice(0, 8000) || '(none)'}
+</notes>
 
-Transcript of the recording:
-${transcript.slice(0, 16000) || '(no speech recognised)'}`
+<transcript>
+${transcript.slice(0, 16000) || '(no speech recognised)'}
+</transcript>`
     const { result, agent } = await this.agents.run('compile', async (backend) => {
       const raw = await backend.generate([{ text: withExtra(prompt) }], 1500)
-      return collapseRepeats(unwrapModelOutput(raw)).trim()
+      return groundMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim(), transcript, notes)
     })
     log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript → ${result.length})`)
     return { text: result, agent: agent.name }

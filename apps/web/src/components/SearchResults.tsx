@@ -8,6 +8,7 @@ import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/sea
 import { useFolderAccess } from '../lib/folderLock'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { useWorkspace } from '../lib/workspace'
+import { useProgressive } from '../lib/progressive'
 import { AskPanel } from './AskPanel'
 import { Popover } from './Popover'
 
@@ -46,7 +47,9 @@ const KEY = 'reconnotes.searchOptions'
 /** Notes matching the search text (and "Ask your notes" for it), updated as you type. */
 export function SearchResults({ query, activeNoteId, onOpen }: { query: string; activeNoteId: string | null; onOpen: (noteId: string, findText?: string) => void }) {
   const ws = useWorkspace()
-  const q = query.trim()
+  // one letter would match nearly every note in a big library: wait for a second
+  const typed = query.trim()
+  const q = [...typed].length < 2 ? '' : typed
   const scope = useSearchScope()
   const access = useFolderAccess()
   // results depend on where you search, and which locked folders are open here
@@ -131,9 +134,10 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
   const tags = useMemo(() => [...new Set(ws.notes.filter((n) => !n.trashedAt).flatMap((n) => n.tags))].sort(), [ws.notes])
   const folderName = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
 
+  const byId = useMemo(() => new Map(ws.notes.map((n) => [n.id, n])), [ws.notes])
   const results = useMemo(() => {
     if (!found) return null
-    const notes = new Map(ws.notes.map((n) => [n.id, n]))
+    const notes = byId
     const startOfDay = new Date().setHours(0, 0, 0, 0)
     const since = opts.edited === 'any' ? 0 : opts.edited === 'day' ? startOfDay : Date.now() - EDITED_MS[opts.edited]
     const list = found.filter((r) => {
@@ -165,7 +169,9 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     else if (opts.sort === 'created') by((n) => n.createdAt, true)
     else if (opts.sort === 'title') by((n) => n.title || 'Untitled', false)
     return list
-  }, [found, ws.notes, opts, liveFolders, inFolder, access, parsed, syntaxFolders])
+  }, [found, byId, opts, liveFolders, inFolder, access, parsed, syntaxFolders])
+  // a long list of results draws in pieces, more as you scroll
+  const shown = useProgressive(results?.length ?? 0, key)
 
   const filtered = Boolean(scope.length || opts.edited !== 'any' || opts.tag || !opts.related)
   const pick = (patch: Partial<Options>) => {
@@ -173,6 +179,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     setMenu(null)
   }
 
+  if (!q) return typed ? <div className="empty-hint">Keep typing…</div> : null
   return (
     <>
       {q && (
@@ -276,7 +283,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
           </li>
         )}
         {asked && <AskPanel question={q} where={{ folders: scope, unlocked: access.unlockedIds }} onOpen={onOpen} />}
-        {results?.map((r) => (
+        {results?.slice(0, shown.limit).map((r) => (
           <li key={r.noteId} className={`note-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => (addRecentSearch(q), onOpen(r.noteId, findTermFor(r, parsed)))}>
             <div className="note-title">
               {r.title || 'Untitled'}
@@ -287,7 +294,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
               )}
             </div>
             {(() => {
-              const n = ws.notes.find((x) => x.id === r.noteId)
+              const n = byId.get(r.noteId)
               const path = n && paths.get(effectiveFolderId(n, liveFolders) ?? '')
               return path ? (
                 <div className={`note-path${r.inFolder ? ' named' : ''}`}>
@@ -306,6 +313,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
             )}
           </li>
         ))}
+        {results && results.length > shown.limit && <li ref={shown.sentinel} className="empty-hint" />}
         {results && !results.length && (
           <li className="empty-hint">
             {found?.length ? (

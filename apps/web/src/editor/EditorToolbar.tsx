@@ -2,10 +2,19 @@ import { errorText } from '../lib/jobs'
 import { useEffect, useRef, useState } from 'react'
 import { Popover } from '../components/Popover'
 import { useEditorState, type Editor } from '@tiptap/react'
+import { TextSelection } from '@tiptap/pm/state'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import {
   Bold,
   Camera,
+  ChevronDown,
+  Copy,
   ChevronLeft,
+  IndentDecrease,
+  IndentIncrease,
+  List,
+  ListOrdered,
+  Users,
   Italic,
   ListChecks,
   Loader2,
@@ -44,11 +53,12 @@ import {
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
+import { saveBlob } from '../lib/files'
 import { RecordingError, setRecordingTarget, startRecording, stopRecording, useRecorderSaving, useRecording } from '../lib/recorder'
 import { cleanUpSelection, compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { sync } from '../lib/sync'
 import { workspaceDoc } from '../lib/workspace'
-import { newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
+import { duplicateNote, newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
 import { trashNotes } from '../lib/noteActions'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { takeQuickAction } from '../lib/appLinks'
@@ -106,7 +116,48 @@ export const STYLES: { key: StyleKey; label: string; className: string }[] = [
   { key: 'quote', label: '▍ Block quote', className: 'st-body' },
 ]
 
+const LISTS: { key: 'bullet' | 'numbered' | 'check'; label: string; icon: typeof List }[] = [
+  { key: 'bullet', label: 'Bulleted list', icon: List },
+  { key: 'numbered', label: 'Numbered list', icon: ListOrdered },
+  { key: 'check', label: 'Checklist', icon: ListChecks },
+]
+
+/** Indent (1) or outdent (-1) the list item at the cursor – bulleted, numbered or checklist. */
+export function indent(editor: Editor, dir: 1 | -1) {
+  const item = editor.isActive('taskItem') ? 'taskItem' : 'listItem'
+  return dir > 0 ? editor.chain().focus().sinkListItem(item).run() : editor.chain().focus().liftListItem(item).run()
+}
+
+const LIST_TYPES = { bullet: 'bulletList', numbered: 'orderedList', check: 'taskList' } as const
+
+/**
+ * In a list of another kind (bullets → checklist…): the whole list changes,
+ * not just the item the cursor is in.
+ */
+function convertWholeList(editor: Editor, key: keyof typeof LIST_TYPES): boolean {
+  const { state } = editor
+  const { $from } = state.selection
+  for (let d = $from.depth; d > 0; d--) {
+    const list = $from.node(d)
+    const name = list.type.name
+    if (!Object.values(LIST_TYPES).includes(name as never)) continue
+    if (name === LIST_TYPES[key]) return false
+    // the same items, as the other kind (each keeps its text and anything inside it)
+    const itemType = key === 'check' ? state.schema.nodes.taskItem : state.schema.nodes.listItem
+    const items: PMNode[] = []
+    list.forEach((item) => items.push(itemType.create(key === 'check' ? { checked: false } : null, item.content)))
+    const pos = $from.before(d)
+    const tr = state.tr.replaceWith(pos, pos + list.nodeSize, state.schema.nodes[LIST_TYPES[key]].create(null, items))
+    tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(state.selection.head, tr.doc.content.size))))
+    editor.view.dispatch(tr)
+    editor.commands.focus()
+    return true
+  }
+  return false
+}
+
 export function applyStyle(editor: Editor, key: StyleKey) {
+  if ((key === 'bullet' || key === 'numbered' || key === 'check') && convertWholeList(editor, key)) return true
   const c = editor.chain().focus()
   switch (key) {
     case 'title':
@@ -133,7 +184,7 @@ export function applyStyle(editor: Editor, key: StyleKey) {
 export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onShareLink, onPrint }: Props) {
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
-  const [menu, setMenu] = useState<'style' | 'more' | 'table' | null>(null)
+  const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -141,6 +192,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const styleBtn = useRef<HTMLButtonElement>(null)
   const moreBtn = useRef<HTMLButtonElement>(null)
   const tableBtn = useRef<HTMLButtonElement>(null)
+  const listsBtn = useRef<HTMLButtonElement>(null)
+  const formatBtn = useRef<HTMLButtonElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -151,7 +204,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       italic: e.isActive('italic'),
       underline: e.isActive('underline'),
       strike: e.isActive('strike'),
-      check: e.isActive('taskList'),
+      list: e.isActive('taskList') ? 'check' : e.isActive('orderedList') ? 'numbered' : e.isActive('bulletList') ? 'bullet' : null,
+      canIndent: e.can().sinkListItem('listItem') || e.can().sinkListItem('taskItem'),
+      canOutdent: e.can().liftListItem('listItem') || e.can().liftListItem('taskItem'),
       table: e.isActive('table'),
       style: e.isActive('heading', { level: 1 })
         ? 'Title'
@@ -187,15 +242,17 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
     if (files.length) void insertFiles(editor, files)
   }
 
+  /** the note as a Markdown file: the share sheet in the iOS app (Save to Files, AirDrop…), a download on the web */
   const exportMarkdown = async () => {
     const { handle, close } = sync.open(noteDocName(noteId))
-    await handle.loaded
-    const md = noteToMarkdown(handle.doc)
-    close()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-    a.download = `${(meta?.get('title') as string) || 'note'}.md`
-    a.click()
+    try {
+      await handle.loaded
+      const md = noteToMarkdown(handle.doc)
+      const name = (((meta?.get('title') as string) || 'Note').split('\n')[0].replace(/[\\/:*?"<>|#]+/g, ' ').trim().slice(0, 80) || 'Note') + '.md'
+      await saveBlob(new Blob([md], { type: 'text/markdown' }), name)
+    } finally {
+      close()
+    }
   }
 
   return (
@@ -256,9 +313,84 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className={`tb hide-sm${state.strike ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} aria-label="Strikethrough">
         <Strikethrough size={18} />
       </button>
-      <button className={`tb${state.check ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleTaskList().run()} aria-label="Checklist" title="Checklist (or type [ ] )">
-        <ListChecks size={20} />
+      {/* narrow: what doesn't fit is a tap away, in one panel */}
+      <button
+        ref={formatBtn}
+        className={`tb show-sm${menu === 'format' ? ' on' : ''}`}
+        onClick={() => setMenu(menu === 'format' ? null : 'format')}
+        aria-label="More formatting"
+        title="More formatting"
+      >
+        <ChevronDown size={18} />
       </button>
+      {menu === 'format' && (
+        <Popover anchorRef={formatBtn} onClose={() => setMenu(null)} keepFocus>
+          <div className="format-panel">
+            {[
+              { label: 'Italic', icon: Italic, on: state.italic, run: () => editor.chain().focus().toggleItalic().run() },
+              { label: 'Underline', icon: Underline, on: state.underline, run: () => editor.chain().focus().toggleUnderline().run() },
+              { label: 'Strike', icon: Strikethrough, on: state.strike, run: () => editor.chain().focus().toggleStrike().run() },
+              { label: 'Bulleted', icon: List, on: state.list === 'bullet', run: () => applyStyle(editor, 'bullet') },
+              { label: 'Numbered', icon: ListOrdered, on: state.list === 'numbered', run: () => applyStyle(editor, 'numbered') },
+              { label: 'Checklist', icon: ListChecks, on: state.list === 'check', run: () => applyStyle(editor, 'check') },
+              { label: 'Outdent', icon: IndentDecrease, disabled: !state.canOutdent, run: () => indent(editor, -1) },
+              { label: 'Indent', icon: IndentIncrease, disabled: !state.canIndent, run: () => indent(editor, 1) },
+              { label: state.table ? 'Table…' : 'Table', icon: Table2, on: state.table, run: () => (state.table ? setTimeout(() => setMenu('table')) : editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()) },
+              { label: 'Redo', icon: Redo2, disabled: !canRedo, run: () => um?.redo() },
+              { label: 'Camera', icon: Camera, run: () => cameraRef.current?.click() },
+            ].map((b) => (
+              <button
+                key={b.label}
+                className={b.on ? 'on' : ''}
+                disabled={b.disabled}
+                onClick={() => {
+                  setMenu(null)
+                  b.run()
+                }}
+              >
+                <b.icon size={18} />
+                <span>{b.label}</span>
+              </button>
+            ))}
+          </div>
+        </Popover>
+      )}
+      <button
+        ref={listsBtn}
+        className={`tb${state.list || menu === 'lists' ? ' on' : ''}`}
+        onClick={() => setMenu(menu === 'lists' ? null : 'lists')}
+        aria-label="Lists and indent"
+        title="Bulleted, numbered and check lists; indent"
+      >
+        {state.list === 'bullet' ? <List size={20} /> : state.list === 'numbered' ? <ListOrdered size={20} /> : <ListChecks size={20} />}
+      </button>
+      {menu === 'lists' && (
+        <Popover anchorRef={listsBtn} onClose={() => setMenu(null)} keepFocus>
+          {LISTS.map((l) => (
+            <button key={l.key} className={state.list === l.key ? 'checked' : ''} onClick={() => (applyStyle(editor, l.key), setMenu(null))}>
+              <l.icon size={16} /> {l.label}
+            </button>
+          ))}
+          <div className="menu-sep" />
+          <button disabled={!state.canIndent} onClick={() => indent(editor, 1)}>
+            <IndentIncrease size={16} /> Indent <span className="menu-shortcut">Tab</span>
+          </button>
+          <button disabled={!state.canOutdent} onClick={() => indent(editor, -1)}>
+            <IndentDecrease size={16} /> Outdent <span className="menu-shortcut">⇧Tab</span>
+          </button>
+        </Popover>
+      )}
+      {/* in a list: indent / outdent right here (always in the lists menu too) */}
+      {state.list && (
+        <>
+          <button className="tb hide-xs" disabled={!state.canOutdent} onClick={() => indent(editor, -1)} aria-label="Outdent" title="Outdent (⇧Tab)">
+            <IndentDecrease size={19} />
+          </button>
+          <button className="tb hide-xs" disabled={!state.canIndent} onClick={() => indent(editor, 1)} aria-label="Indent" title="Indent (Tab)">
+            <IndentIncrease size={19} />
+          </button>
+        </>
+      )}
       <button
         ref={tableBtn}
         className={`tb hide-xs${state.table || menu === 'table' ? ' on' : ''}`}
@@ -275,7 +407,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
         <Table2 size={19} />
       </button>
       {menu === 'table' && (
-        <Popover anchorRef={tableBtn} onClose={() => setMenu(null)} keepFocus>
+        <Popover anchorRef={tableBtn.current?.offsetParent ? tableBtn : formatBtn} onClose={() => setMenu(null)} keepFocus>
           {TABLE_ACTIONS.map((a, i) =>
             a === '-' ? (
               <div key={i} className="menu-sep" />
@@ -387,6 +519,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 <LayoutTemplate size={16} /> Save as template
               </button>
             )}
+            <button onClick={() => (setMenu(null), void run('Duplicating…', async () => onOpenNote(await duplicateNote(noteId))))}>
+              <Copy size={16} /> Duplicate note
+            </button>
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>
               {pinned ? <PinOff size={16} /> : <Pin size={16} />} {pinned ? 'Unpin' : 'Pin to top'}
             </button>
@@ -431,7 +566,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 <Printer size={16} /> {isNativeApp ? 'Share as PDF…' : 'Print / Save as PDF…'}
               </button>
             )}
-            <button onClick={exportMarkdown}>
+            <button onClick={() => (setMenu(null), void run('Exporting…', exportMarkdown))}>
               <Download size={16} /> Export Markdown
             </button>
             <button className="danger" onClick={() => trashNotes([noteId])}>
@@ -466,10 +601,12 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
     return () => setRecordingTarget(noteId, null)
   }, [editor, noteId])
 
-  const start = async () => {
+  const micBtn = useRef<HTMLButtonElement>(null)
+  const [choosing, setChoosing] = useState(false)
+  const start = async (opts: { meeting?: boolean } = {}) => {
     if (active) return onError('Another recording is running – stop it first.')
     try {
-      await startRecording(noteId)
+      await startRecording(noteId, opts)
     } catch (e) {
       const err = e as RecordingError
       if (err.code === 'insecure')
@@ -493,7 +630,7 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
   useEffect(() => {
     const t = setTimeout(() => {
       if (takeQuickAction(noteId, 'record')) void startRef.current()
-      else if (takeQuickAction(noteId, 'meeting')) void startRecording(noteId, { meeting: true }).catch((e) => onError((e as Error).message))
+      else if (takeQuickAction(noteId, 'meeting')) void startRef.current({ meeting: true })
     }, 400)
     return () => clearTimeout(t)
   }, [noteId])
@@ -515,8 +652,8 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
   if (mine) {
     const secs = Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000))
     return (
-      <button className="tb recording" onClick={() => void stopRecording()} aria-label="Stop recording">
-        <Square size={16} /> {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
+      <button className="tb recording" onClick={() => void stopRecording()} aria-label={active.meeting ? 'Stop the meeting recording' : 'Stop recording'}>
+        <Square size={16} /> {active.meeting && <Users size={14} />} {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
       </button>
     )
   }
@@ -528,9 +665,27 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
     )
   return (
     <>
-      <button className="tb" onClick={start} aria-label="Record audio" title="Record audio">
+      <button ref={micBtn} className={`tb${choosing ? ' on' : ''}`} onClick={() => setChoosing(!choosing)} aria-label="Record" title="Record audio or a meeting">
         <Mic size={20} />
       </button>
+      {choosing && (
+        <Popover anchorRef={micBtn} onClose={() => setChoosing(false)}>
+          <button onClick={() => (setChoosing(false), void start())}>
+            <Mic size={16} /> Record audio
+          </button>
+          <button onClick={() => (setChoosing(false), void start({ meeting: true }))}>
+            <Users size={16} />
+            <span>
+              Record a meeting
+              <span className="menu-sub">When you stop: the transcript, a summary, decisions and action items</span>
+            </span>
+          </button>
+          <div className="menu-sep" />
+          <button onClick={() => (setChoosing(false), pickRef.current?.click())}>
+            <Paperclip size={16} /> Add a recording from a file…
+          </button>
+        </Popover>
+      )}
       {picker}
     </>
   )

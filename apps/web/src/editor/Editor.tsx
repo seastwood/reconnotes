@@ -9,6 +9,7 @@ import { TableKit } from '@tiptap/extension-table'
 import { JobTag } from './jobTag'
 import { Uncertain } from './uncertain'
 import { ChecklistClipboard } from './checklistCopy'
+import { ItemCopyButton } from './ItemCopyButton'
 import { BlockClipboard } from './blockClipboard'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
@@ -304,6 +305,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
               <RelatedNotes noteId={noteId} onOpen={onFollowLink} />
             </div>
           </div>
+          <ItemCopyButton editor={editor} doc={doc} />
           {tagChip && onOpenTag && (
             <button
               className="tag-chip-action"

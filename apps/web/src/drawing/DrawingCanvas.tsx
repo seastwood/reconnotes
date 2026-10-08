@@ -8,6 +8,7 @@ import {
   getStrokes,
   newId,
   recognizeShape,
+  shapeInBox,
   round1,
   round2,
   scaleStroke,
@@ -17,6 +18,7 @@ import {
   strokePath,
   translateStroke,
   unionBounds,
+  type DrawnShape,
   type Rect,
   type Stroke,
   type Tool,
@@ -206,7 +208,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   // --- Input --------------------------------------------------------------
   type Gesture =
     /** focusTap: the drawing was opened by this touch – a mere tap leaves no dot */
-    | { kind: 'ink'; stroke: Stroke; focusTap?: boolean; snapped?: boolean }
+    /** shape: the shapes tool – the stroke is redrawn as that shape from where it started to the pen */
+    | { kind: 'ink'; stroke: Stroke; focusTap?: boolean; snapped?: boolean; shape?: { kind: DrawnShape; a: [number, number] } }
     | { kind: 'erase' }
     | { kind: 'lasso'; poly: number[] }
     | { kind: 'move'; startX: number; startY: number; dx: number; dy: number }
@@ -424,6 +427,13 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
         setSelection(null)
         gesture.current = { kind: 'lasso', poly: [x, y] }
       }
+    } else if (t.tool === 'shape') {
+      gesture.current = {
+        kind: 'ink',
+        stroke: { id: newId(), tool: 'pen', color: t.colors.pen, size: t.sizes.pen, pts: [round1(x), round1(y), 0.5], t: Date.now() },
+        focusTap: opening,
+        shape: { kind: t.shape ?? 'rectangle', a: [x, y] },
+      }
     } else {
       const inkTool = t.tool as Tool
       gesture.current = {
@@ -478,7 +488,10 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     const events = e.nativeEvent.getCoalescedEvents?.() ?? [e.nativeEvent]
     for (const ev of events.length ? events : [e.nativeEvent]) {
       const { x, y } = toLocal(ev)
-      if (g.kind === 'ink') {
+      if (g.kind === 'ink' && g.shape) {
+        // the shape fills what's been dragged (Shift: a square, a circle, a straight angle)
+        g.stroke.pts = shapeInBox(g.shape.kind, g.shape.a, [x, y], e.shiftKey).flatMap(([px, py]) => [round1(px), round1(py), 0.5])
+      } else if (g.kind === 'ink') {
         const p = g.stroke.pts
         const lx = p[p.length - 3]
         const ly = p[p.length - 2]
@@ -507,8 +520,8 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
     const g = gesture.current
     gesture.current = null
     if (!g) return
-    if (g.kind === 'ink' && g.focusTap && isTap(g.stroke, scale)) {
-      // just opened the drawing with a tap: no dot
+    if (g.kind === 'ink' && ((g.focusTap && isTap(g.stroke, scale)) || (g.shape && g.stroke.pts.length <= 3))) {
+      // just opened the drawing with a tap, or a shape tapped rather than dragged: no dot
     } else if (g.kind === 'ink' && g.stroke.pts.length >= 3) {
       undoManager?.stopCapturing()
       doc.transact(() => strokes.push([g.stroke]), DRAW_ORIGIN)

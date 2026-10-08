@@ -79,3 +79,14 @@ export async function saveAsTemplate(noteId: string): Promise<string> {
   await copyContent(noteId, id, false)
   return id
 }
+
+/** A copy of a note (text, drawings, pictures, recordings) next to it; returns the copy's id. */
+export async function duplicateNote(noteId: string): Promise<string> {
+  const ws = sync.workspace.doc
+  const meta = getNotes(ws).get(noteId)
+  const n = meta ? readNote(meta) : null
+  const id = createNote(ws, { folderId: n?.folderId ?? null, title: n?.title ?? '' })
+  if (n?.file) updateNote(ws, id, { file: n.file })
+  await copyContent(noteId, id, false)
+  return id
+}

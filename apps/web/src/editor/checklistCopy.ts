@@ -156,6 +156,31 @@ export function sortItem(view: EditorView, li: HTMLElement) {
   view.dispatch(tr.setMeta('addToHistory', true))
 }
 
+/** Copy the checklist item at `pos` (and its sub-items, with their pictures). */
+export function copyChecklistItem(view: EditorView, pos: number, doc: Y.Doc | null) {
+  if (pos > view.state.doc.content.size) return
+  const $pos = view.state.doc.resolve(pos)
+  for (let d = $pos.depth; d > 0; d--) {
+    const node = $pos.node(d)
+    if (node.type.name !== 'taskItem') continue
+    const children: PMNode[] = []
+    node.forEach((c) => children.push(c))
+    const [first, ...rest] = children
+    const text = [first?.isTextblock ? inlineText(first) : '', ...blocksToText(rest, '  ')].join('\n').trim()
+    const label = text ? `“${text.length > 40 ? text.slice(0, 40) + '…' : text}”` : 'the item'
+    let pictures = 0
+    node.descendants((n) => void (n.type.name === 'image' && pictures++))
+    const done = (ok: boolean) =>
+      showToast(ok ? `Copied ${label}${pictures ? ` with ${pictures} picture${pictures === 1 ? '' : 's'}` : ''}` : 'Couldn’t copy – select the text and use Copy instead')
+    if (doc) {
+      // the item in its checklist, so it pastes back as a checklist item
+      const slice = new PMSlice(Fragment.from(view.state.schema.nodes.taskList.create($pos.node(d - 1).attrs, node)), 0, 0)
+      void copyRich(view, slice, doc).then(done)
+    } else if (text) void copyText(text).then(() => done(true))
+    return
+  }
+}
+
 export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
   name: 'checklistClipboard',
   addOptions() {
@@ -178,31 +203,6 @@ export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
     const disarm = () => {
       armed?.mark.remove()
       armed = null
-    }
-
-    /** Press and hold a checkbox, then let go: copy that item (with its pictures). */
-    const copyItem = (view: EditorView, pos: number) => {
-      if (pos > view.state.doc.content.size) return
-      const $pos = view.state.doc.resolve(pos)
-      for (let d = $pos.depth; d > 0; d--) {
-        const node = $pos.node(d)
-        if (node.type.name !== 'taskItem') continue
-        const children: PMNode[] = []
-        node.forEach((c) => children.push(c))
-        const [first, ...rest] = children
-        const text = [first?.isTextblock ? inlineText(first) : '', ...blocksToText(rest, '  ')].join('\n').trim()
-        const label = text ? `“${text.length > 40 ? text.slice(0, 40) + '…' : text}”` : 'the item'
-        let pictures = 0
-        node.descendants((n) => void (n.type.name === 'image' && pictures++))
-        const done = (ok: boolean) =>
-          showToast(ok ? `Copied ${label}${pictures ? ` with ${pictures} picture${pictures === 1 ? '' : 's'}` : ''}` : 'Couldn’t copy – select the text and use Copy instead')
-        if (doc) {
-          // the item in its checklist, so it pastes back as a checklist item
-          const slice = new PMSlice(Fragment.from(view.state.schema.nodes.taskList.create($pos.node(d - 1).attrs, node)), 0, 0)
-          void copyRich(view, slice, doc).then(done)
-        } else if (text) void copyText(text).then(() => done(true))
-        return
-      }
     }
 
     return [
@@ -257,7 +257,7 @@ export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
               const was = armed
               disarm()
               if (!was) return false
-              copyItem(view, was.pos)
+              copyChecklistItem(view, was.pos, doc)
               // the click that ends the hold mustn't tick the box
               const swallow = (ev: Event) => {
                 ev.preventDefault()

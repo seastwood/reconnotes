@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Eraser, Highlighter, Lasso, PenLine, Pencil, Redo2, Trash2, Undo2, X, Brush, Copy, Scissors, ClipboardPaste, CopyPlus, Type } from 'lucide-react'
+import { Eraser, Highlighter, Lasso, PenLine, Pencil, Redo2, Trash2, Undo2, X, Brush, Copy, Scissors, ClipboardPaste, CopyPlus, Type, Square, Circle, Triangle, Minus, MoveUpRight, Shapes } from 'lucide-react'
 import { useInkClipboard } from './inkClipboard'
-import type { Tool } from '@reconnotes/core'
+import type { DrawnShape, Tool } from '@reconnotes/core'
 import {
   HIGHLIGHT_PALETTE,
   INK_TOOLS,
@@ -25,6 +25,29 @@ export const TOOL_ICONS: Record<DrawTool, typeof PenLine> = {
   highlighter: Highlighter,
   eraser: Eraser,
   lasso: Lasso,
+  shape: Shapes,
+}
+
+export const SHAPES: { kind: DrawnShape; label: string; icon: typeof Square }[] = [
+  { kind: 'rectangle', label: 'Rectangle', icon: Square },
+  { kind: 'ellipse', label: 'Circle / oval', icon: Circle },
+  { kind: 'triangle', label: 'Triangle', icon: Triangle },
+  { kind: 'line', label: 'Line', icon: Minus },
+  { kind: 'arrow', label: 'Arrow', icon: MoveUpRight },
+]
+
+/** The shapes tool's shapes: pick one, then drag to draw it (Shift keeps it square / straight). */
+export function ShapeRow() {
+  const shape = useTools((s) => s.shape ?? 'rectangle')
+  return (
+    <div className="ink-shapes">
+      {SHAPES.map(({ kind, label, icon: Icon }) => (
+        <button key={kind} className={`ink-tool${shape === kind ? ' on' : ''}`} onClick={() => toolState.set({ shape: kind })} aria-label={label} title={`${label} – drag to draw it`}>
+          <Icon size={18} />
+        </button>
+      ))}
+    </div>
+  )
 }
 
 const TOOL_LABELS: Record<DrawTool, string> = {
@@ -34,16 +57,18 @@ const TOOL_LABELS: Record<DrawTool, string> = {
   highlighter: 'Highlighter',
   eraser: 'Eraser',
   lasso: 'Lasso select',
+  shape: 'Shapes – pick one, then drag',
 }
 
 export function ToolButtons({ compact = false }: { compact?: boolean }) {
   const tool = useTools((s) => s.tool)
   const colors = useTools((s) => s.colors)
   const eraserMode = useTools((s) => s.eraserMode)
+  const shape = useTools((s) => s.shape)
   return (
     <div className="ink-tools">
-      {(['pen', 'pencil', 'marker', 'highlighter', 'eraser', 'lasso'] as DrawTool[]).map((t) => {
-        const Icon = TOOL_ICONS[t]
+      {(['pen', 'pencil', 'marker', 'highlighter', 'shape', 'eraser', 'lasso'] as DrawTool[]).map((t) => {
+        const Icon = t === 'shape' ? (SHAPES.find((x) => x.kind === (shape ?? 'rectangle'))?.icon ?? Shapes) : TOOL_ICONS[t]
         const color = INK_TOOLS.includes(t as Tool) ? colors[t as Tool] : undefined
         return (
           <button
@@ -115,6 +140,7 @@ export function InkToolbar() {
   const [selCount, setSelCount] = useState(0)
   const clipCount = useInkClipboard()
   const lasso = useTools((s) => s.tool === 'lasso')
+  const shapeTool = useTools((s) => s.tool === 'shape')
 
   useEffect(() => {
     const on = (e: Event) => {
@@ -171,6 +197,7 @@ export function InkToolbar() {
               <ClipboardPaste size={19} />
             </button>
           )}
+          {shapeTool && <ShapeRow />}
           <ColorRow />
           <SizeRow />
         </>

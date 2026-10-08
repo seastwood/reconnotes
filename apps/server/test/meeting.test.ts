@@ -9,6 +9,7 @@ import { WORKSPACE_DOC, createNote, getContent, noteDocName } from '@reconnotes/
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
 import { dueDateIn } from '../src/timeRange'
+import { groundMeetingNotes, meetingNotesText } from '../src/meetingNotes'
 
 const TOKEN = 'test-token-0123456789abcdef'
 let app: App
@@ -26,7 +27,7 @@ beforeAll(async () => {
     if (req.url === '/api/ps' || req.url === '/api/tags') return res.end('{"models":[]}')
     const j = JSON.parse(body)
     prompts.push(j.messages?.[0]?.content ?? '')
-    const content = '## Summary\n- Planned the build season\n\n## Action items\n- [ ] Doug – order the parts by Friday\n- [ ] Book the gym'
+    const content = '## Summary\n- Doug orders the parts; the gym needs booking\n\n## Action items\n- [ ] Doug – order the parts by Friday\n- [ ] Book the gym'
     res.end(JSON.stringify({ message: { role: 'assistant', content }, done_reason: 'stop', eval_count: 5 }))
   })
   await new Promise<void>((r) => llm.listen(0, '127.0.0.1', () => r()))
@@ -74,9 +75,54 @@ describe('meeting notes', () => {
     expect(prompts[0]).toContain('Attendees: Doug, Sophie')
     const doc = app.sync.getDoc(noteDocName('notemeeting00001'))!
     const xml = getContent(doc).toString()
-    expect(xml).toContain('Planned the build season')
+    expect(xml).toContain('Doug orders the parts; the gym needs booking')
     expect(xml).toMatch(/<taskitem[^>]*><paragraph>Doug – order the parts by Friday <duedate date="\d{4}-\d{2}-\d{2}"/)
     // no day said: no due date
     expect(xml).toMatch(/Book the gym<\/paragraph>/)
+  })
+})
+
+describe('meeting notes stay with what was said', () => {
+  it('leaves out invented people, projects and dates, and the echoed prompt', () => {
+    // a 9-second recording, and what a small model made of it
+    const transcript = 'Did you find new mortgages? Oh, I forgot you needed that.'
+    const made = `## Summary
+- Review progress on project X by next week.
+- Schedule a team meeting for October 15th to discuss ongoing issues and solutions.
+- Update financial reports by Friday.
+
+## Decisions
+
+## Action items
+- [ ] John – review project status report (by Wednesday)
+- [ ] Jane – schedule the team meeting for Oct 15th (next week)
+
+Notes taken during the meeting:
+Attendees:
+John, Jane, Mike`
+    const out = groundMeetingNotes(made, transcript, '')
+    expect(out).not.toMatch(/John|Jane|Mike|project X|October|financial/)
+    expect(out).toContain('## Summary\n- “Did you find new mortgages? Oh, I forgot you needed that.”')
+    expect(out).toContain('## Action items\nNo action items.')
+    expect(out).not.toContain('## Decisions')
+  })
+
+  it('keeps what was said, in other words', () => {
+    const transcript = 'Doug will order the motor controllers by Friday. Sophie said the gym booking is done, so we keep Thursday practice.'
+    const made = `## Summary
+- Doug is ordering the motor controllers
+- The gym is booked; Thursday practice stays
+
+## Decisions
+- Keep Thursday practice
+
+## Action items
+- [ ] Doug – order the motor controllers by Friday`
+    expect(groundMeetingNotes(made, transcript, '')).toBe(made)
+  })
+
+  it('doesn\'t count the meeting template as notes', () => {
+    expect(meetingNotesText('# Meeting – Wed, Oct 7 at 7:32 PM\n\nAttendees:\n\n## Notes\n')).toBe('')
+    expect(meetingNotesText('# Meeting – Wed\n\nAttendees: Doug\n\n## Notes\nParts list')).toContain('Attendees: Doug')
   })
 })

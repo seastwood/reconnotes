@@ -157,3 +157,55 @@ export function recognizeShape(pts: P[]): { kind: ShapeKind; points: P[] } | nul
   }
   return null
 }
+
+export type DrawnShape = 'rectangle' | 'ellipse' | 'triangle' | 'line' | 'arrow'
+
+/**
+ * The shapes tool: a clean shape filling the box dragged from `a` to `b`
+ * (a line or arrow goes from `a` to `b`). `square` keeps it as wide as it is
+ * tall (a circle, a square) – or a line at 0/45/90°.
+ */
+export function shapeInBox(kind: DrawnShape, a: P, b0: P, square = false): P[] {
+  let b = b0
+  if (square) {
+    if (kind === 'line' || kind === 'arrow') {
+      const ang = Math.round(Math.atan2(b[1] - a[1], b[0] - a[0]) / (Math.PI / 4)) * (Math.PI / 4)
+      const len = dist(a, b)
+      b = [a[0] + Math.cos(ang) * len, a[1] + Math.sin(ang) * len]
+    } else {
+      const s = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))
+      b = [a[0] + Math.sign(b[0] - a[0] || 1) * s, a[1] + Math.sign(b[1] - a[1] || 1) * s]
+    }
+  }
+  const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])]
+  const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])]
+  switch (kind) {
+    case 'rectangle':
+      return polyline([
+        [x0, y0],
+        [x1, y0],
+        [x1, y1],
+        [x0, y1],
+        [x0, y0],
+      ])
+    case 'ellipse':
+      return ellipse((x0 + x1) / 2, (y0 + y1) / 2, Math.max(0.5, (x1 - x0) / 2), Math.max(0.5, (y1 - y0) / 2))
+    case 'triangle':
+      return polyline([
+        [(x0 + x1) / 2, y0],
+        [x1, y1],
+        [x0, y1],
+        [(x0 + x1) / 2, y0],
+      ])
+    case 'line':
+      return polyline([a, b])
+    case 'arrow': {
+      const len = dist(a, b)
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0])
+      const head = Math.min(24, Math.max(8, 0.25 * len))
+      const h1: P = [b[0] - Math.cos(ang - 0.5) * head, b[1] - Math.sin(ang - 0.5) * head]
+      const h2: P = [b[0] - Math.cos(ang + 0.5) * head, b[1] - Math.sin(ang + 0.5) * head]
+      return polyline([a, b, h1, b, h2])
+    }
+  }
+}

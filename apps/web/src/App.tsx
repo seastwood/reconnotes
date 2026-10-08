@@ -375,6 +375,7 @@ export function App() {
         .filter((n) => n.template && !n.trashedAt)
         .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
       { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
+      { id: 'unfiled', label: 'Not in a folder', section: G, run: () => a().showView({ kind: 'unfiled' }) },
       { id: 'jobs', label: 'Jobs (AI and processing)', section: G, keywords: 'queue ai running tasks progress', run: () => a().showView({ kind: 'jobs' }) },
       { id: 'tasks', label: 'Tasks', section: G, keywords: 'to-dos todo checklist all', run: () => a().showView({ kind: 'tasks' }) },
       { id: 'due', label: 'Due items', section: G, keywords: 'reminders deadlines calendar', run: () => a().showView({ kind: 'due' }) },

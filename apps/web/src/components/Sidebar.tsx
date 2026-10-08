@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
 import { SearchResults, SearchSuggestions } from './SearchResults'
+import { ErrorBoundary } from './ErrorBoundary'
 import {
   ChevronDown,
   ChevronRight,
@@ -9,6 +10,7 @@ import {
   Inbox,
   MoreHorizontal,
   Search,
+  FolderMinus,
   PanelLeftClose,
   Settings as SettingsIcon,
   Trash2,
@@ -38,6 +40,7 @@ import {
   type SortMode,
   type TreeNode,
   daysUntil,
+  effectiveFolderId,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { isKeptOffline, setKeepOffline, useOffline } from '../lib/offline'
@@ -54,6 +57,8 @@ import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 
 export type View =
   | { kind: 'all' }
+  /** notes in no folder */
+  | { kind: 'unfiled' }
   | { kind: 'trash' }
   | { kind: 'folder'; folderId: string }
   | { kind: 'tag'; tag: string }
@@ -150,6 +155,8 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     return c
   }, [ws.notes])
   const liveCount = ws.notes.filter((n) => !n.trashedAt && !n.template).length
+  const liveFolderIds = new Set(ws.folders.filter((f) => !f.trashedAt).map((f) => f.id))
+  const unfiledCount = ws.notes.filter((n) => !n.trashedAt && !n.template && !effectiveFolderId(n, liveFolderIds)).length
   const templateCount = ws.notes.filter((n) => !n.trashedAt && n.template).length
   // open due items, and how many are due today or overdue
   const dueOpen = ws.notes.filter((n) => !n.trashedAt && !n.template).flatMap((n) => n.due.filter((d) => !d.done))
@@ -442,7 +449,9 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
       )}
       {search.trim() ? (
         <div className="folders sidebar-results">
-          <SearchResults query={search} activeNoteId={activeNoteId} onOpen={onOpenResult} />
+          <ErrorBoundary inline resetKey={search}>
+            <SearchResults query={search} activeNoteId={activeNoteId} onOpen={onOpenResult} />
+          </ErrorBoundary>
         </div>
       ) : (
       <nav className="folders">
@@ -450,6 +459,12 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           <Inbox size={16} /> <span className="folder-name">All Notes</span>
           <span className="count">{liveCount}</span>
         </div>
+        {(unfiledCount > 0 || view.kind === 'unfiled') && (
+          <div className={`folder-row special${view.kind === 'unfiled' ? ' active' : ''}`} onClick={() => onView({ kind: 'unfiled' })} title="Notes that aren’t in any folder">
+            <FolderMinus size={16} /> <span className="folder-name">Not in a folder</span>
+            <span className="count">{unfiledCount}</span>
+          </div>
+        )}
         {dueOpen.length > 0 && (
           <div className={`folder-row special${view.kind === 'due' ? ' active' : ''}`} onClick={() => onView({ kind: 'due' })}>
             <CalendarDays size={16} /> <span className="folder-name">Due</span>

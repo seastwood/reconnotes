@@ -32,9 +32,9 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
     onClose()
   }
   const tryBiometric = async () => {
-    const secret = await readBiometricPassword(folderId, folderName)
+    const secret = await readBiometricPassword(folderId, folderName).catch(() => null)
     if (secret === null) return
-    if (await unlockFolder(folderId, secret)) return finish()
+    if (await unlockFolder(folderId, secret).catch(() => false)) return finish()
     // the password was changed on another device
     forgetBiometricPassword(folderId)
     setError(`The password has changed – type it once more to use ${bio ?? 'Face ID'} again.`)
@@ -67,6 +67,9 @@ export function PasswordDialog({ folderId, folderName, mode, onClose, onDone }: 
         await saveBiometricPassword(folderId, keep).catch(() => forgetBiometricPassword(folderId))
       } else if (mode === 'change') forgetBiometricPassword(folderId)
       finish()
+    } catch (e) {
+      // never fail silently: say what went wrong
+      setError(`Couldn’t ${mode === 'unlock' ? 'unlock it' : 'do that'}: ${(e as Error).message || String(e)}`)
     } finally {
       setBusy(false)
     }

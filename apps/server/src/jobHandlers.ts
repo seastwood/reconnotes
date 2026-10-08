@@ -31,6 +31,7 @@ import { scopeFromInput } from './access'
 import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
+import { meetingNotesText } from './meetingNotes'
 
 /**
  * What each kind of job does. Results that belong in a note are written into
@@ -404,7 +405,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       sync.reindexNotesFor(att.id)
     }
     const tzOffset = Number(job.input.tzOffset) || 0
-    const notes = noteToMarkdown(doc).replace(/^#+ Meeting.*$/m, '').trim()
+    const notes = meetingNotesText(noteToMarkdown(doc))
     if (!transcript.trim() && !notes.replace(/\W/g, '')) throw new Error('No speech was recognised in this recording, and nothing was written.')
     const r = await ai.meetingNotes(notes, transcript, todayLabel(Date.now(), tzOffset))
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)

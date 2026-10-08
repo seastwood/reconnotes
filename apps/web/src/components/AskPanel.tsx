@@ -78,31 +78,10 @@ export function AskPanel({
     return () => watchingJob(job.id, false)
   }, [job?.id])
 
-  // follow-up questions asked under this answer, oldest first
-  const thread = job ? jobs.filter((j) => j.kind === 'ask' && j.input.thread === job.id && j.status !== 'cancelled').sort((a, b) => a.createdAt - b.createdAt) : []
-  useEffect(() => {
-    thread.forEach((j) => watchingJob(j.id, true))
-    return () => thread.forEach((j) => watchingJob(j.id, false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread.map((j) => j.id).join(',')])
-
   const retry = () =>
     void submitJob({ kind: 'ask', title: question, input })
       .then((j) => watchingJob(j.id, true))
       .catch((e) => setError((e as Error).message))
-
-  const askFollowUp = async (q: string) => {
-    // the conversation so far: each question with its answer and the notes it used
-    const history = [job!, ...thread]
-      .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
-      .map((j) => {
-        const r = j.result as unknown as AskResult
-        return { question: String(j.input.question), answer: r.answer, sources: r.sources.map((s) => s.noteId) }
-      })
-    const j = await submitJob({ kind: 'ask', title: q, input: { ...input, question: q, thread: job!.id, history } })
-    watchingJob(j.id, true)
-  }
-  const busy = !job || !isFinished(job) || thread.some((j) => !isFinished(j))
 
   return (
     <li className="ask-panel">
@@ -110,6 +89,47 @@ export function AskPanel({
         <Sparkles size={16} /> {question}
       </div>
       <Turn job={job} error={error} onRetry={retry} onOpen={onOpen} />
+      {job && <AskThread root={job} onOpen={onOpen} />}
+    </li>
+  )
+}
+
+/**
+ * The follow-up questions asked under an answer (oldest first), and the box to
+ * ask another – under "Ask your notes" in search, and under the answer in Jobs.
+ */
+export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string) => void }) {
+  const jobs = useJobs((s) => s.jobs)
+  const [error, setError] = useState<string | null>(null)
+  const thread = jobs.filter((j) => j.kind === 'ask' && j.input.thread === root.id && j.status !== 'cancelled').sort((a, b) => a.createdAt - b.createdAt)
+  // while they're on screen, no "finished" toast for them
+  useEffect(() => {
+    thread.forEach((j) => watchingJob(j.id, true))
+    return () => thread.forEach((j) => watchingJob(j.id, false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.map((j) => j.id).join(',')])
+
+  const askFollowUp = async (q: string) => {
+    setError(null)
+    // the conversation so far: each question with its answer and the notes it used
+    const history = [root, ...thread]
+      .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
+      .map((j) => {
+        const r = j.result as unknown as AskResult
+        return { question: String(j.input.question), answer: r.answer, sources: r.sources.map((s) => s.noteId) }
+      })
+    const { history: _h, thread: _t, ...base } = root.input as Record<string, unknown>
+    try {
+      const j = await submitJob({ kind: 'ask', title: q, input: { ...base, tzOffset: new Date().getTimezoneOffset(), question: q, thread: root.id, history } })
+      watchingJob(j.id, true)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  const busy = !isFinished(root) || thread.some((j) => !isFinished(j))
+
+  return (
+    <>
       {thread.map((j) => (
         <div key={j.id} className="ask-followup">
           <div className="ask-q">
@@ -126,8 +146,9 @@ export function AskPanel({
           />
         </div>
       ))}
-      {job?.status === 'done' && !busy && <FollowUpBox onAsk={askFollowUp} />}
-    </li>
+      {error && <p className="error-text">{error}</p>}
+      {root.status === 'done' && !busy && <FollowUpBox onAsk={askFollowUp} />}
+    </>
   )
 }
 

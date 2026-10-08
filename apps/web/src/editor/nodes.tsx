@@ -163,8 +163,10 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     markUp()
   }
 
-  // A tap on the picture (finger or mouse) opens it full screen; the Pencil marks it up instead.
-  const tapStart = useRef<{ x: number; y: number; t: number } | null>(null)
+  // A tap on the picture (finger or mouse) selects it – its corner handle
+  // resizes it – and a tap on the selected picture opens it full screen. The
+  // Pencil marks it up instead. (Read-only: a tap opens it.)
+  const tapStart = useRef<{ x: number; y: number; t: number; selected: boolean } | null>(null)
   const openViewer = () => {
     if (!url || !ctx) return
     openImageViewer({
@@ -183,12 +185,15 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     })
   }
   const onImgPointerDown = (e: React.PointerEvent) => {
-    tapStart.current = e.pointerType === 'pen' || markingUp ? null : { x: e.clientX, y: e.clientY, t: Date.now() }
+    tapStart.current = e.pointerType === 'pen' || markingUp ? null : { x: e.clientX, y: e.clientY, t: Date.now(), selected }
   }
   const onImgPointerUp = (e: React.PointerEvent) => {
     const s = tapStart.current
     tapStart.current = null
-    if (s && Date.now() - s.t < 500 && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 8) openViewer()
+    if (!s || Date.now() - s.t >= 500 || Math.hypot(e.clientX - s.x, e.clientY - s.y) >= 8) return
+    if (s.selected || !editor.isEditable) return openViewer()
+    const pos = getPos()
+    if (typeof pos === 'number') editor.chain().setNodeSelection(pos).run()
   }
 
   const width = node.attrs.width as number | null

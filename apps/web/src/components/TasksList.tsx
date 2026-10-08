@@ -116,13 +116,13 @@ export function TasksList({ activeNoteId, onOpen }: { activeNoteId: string | nul
       {switcher}
       {groups.map((list) => (
         <li key={list[0].noteId} className="due-group">
-          <div className="due-group-label tasks-note" onClick={() => onOpen(list[0].noteId)}>
+          <div className={`due-group-label tasks-note${list[0].noteId === activeNoteId ? ' current' : ''}`} title={list[0].noteId === activeNoteId ? 'The note that’s open' : undefined} onClick={() => onOpen(list[0].noteId)}>
             {list[0].title || 'Untitled'}
             {list[0].folder.length > 0 && <span className="muted"> · {list[0].folder.join(' › ')}</span>}
           </div>
           <ul>
             {list.map((t) => (
-              <li key={`${t.i}|${t.text}`} className={`note-row due-row${t.noteId === activeNoteId ? ' active' : ''}${t.done ? ' done' : ''}`} onClick={() => onOpen(t.noteId)}>
+              <li key={`${t.i}|${t.text}`} className={`note-row due-row${t.done ? ' done' : ''}`} onClick={() => onOpen(t.noteId)}>
                 <input type="checkbox" checked={t.done} aria-label={t.done ? 'Mark not done' : 'Mark done'} onClick={(e) => e.stopPropagation()} onChange={() => void toggle(t)} />
                 <div>
                   <div className="note-title">{t.text}</div>

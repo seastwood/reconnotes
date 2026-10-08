@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, Copy, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -28,6 +28,7 @@ import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
+import { duplicateNote } from '../lib/templates'
 
 interface Props {
   view: View
@@ -80,7 +81,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   const access = useFolderAccess()
   const lockedBy = view.kind === 'folder' && access.lockedFolder(view.folderId) ? access.lockOwner(view.folderId) : null
   const allSort = (getSettings(workspaceDoc).get('allSort') as SortMode) ?? 'updated'
-  const sort: SortMode = folder ? folder.sort : view.kind === 'all' ? allSort : 'updated'
+  const sort: SortMode = folder ? folder.sort : view.kind === 'all' || view.kind === 'unfiled' ? allSort : 'updated'
 
   const notes: NoteData[] = useMemo(() => {
     if (view.kind === 'trash') return sortNotes(ws.notes.filter((n) => n.trashedAt), 'updated')
@@ -91,6 +92,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
         sort === 'manual' ? 'manual' : sort,
       )
     if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template), sort)
+    if (view.kind === 'unfiled') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && !effectiveFolderId(n, liveFolders)), sort)
     if (view.kind === 'tag') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && n.tags.includes(view.tag)), 'updated')
     return []
   }, [ws.notes, view, sort, liveFolders])
@@ -98,6 +100,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   const title =
     view.kind === 'all'
       ? 'All Notes'
+      : view.kind === 'unfiled'
+        ? 'Not in a folder'
       : view.kind === 'trash'
         ? 'Recently Deleted'
         : view.kind === 'tag'
@@ -122,7 +126,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   }
   // Add files straight into the folder (each becomes an item holding the file)
   const filesInput = useRef<HTMLInputElement>(null)
-  const canAddFiles = view.kind === 'folder' || view.kind === 'all'
+  const canAddFiles = view.kind === 'folder' || view.kind === 'all' || view.kind === 'unfiled'
   const addFiles = async (files: File[]) => {
     if (!files.length) return
     const ids = await addFilesToFolder(files, view.kind === 'folder' ? view.folderId : null)
@@ -369,6 +373,9 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                 <button onClick={(e) => (e.stopPropagation(), pinNotes([n.id], !n.pinned))} aria-label="Pin">
                   <Pin size={14} />
                 </button>
+                <button onClick={(e) => (e.stopPropagation(), void duplicateNote(n.id))} aria-label="Duplicate" title="Duplicate">
+                  <Copy size={14} />
+                </button>
                 <button onClick={(e) => (e.stopPropagation(), trashNotes([n.id]))} aria-label="Delete">
                   <Trash2 size={14} />
                 </button>
@@ -429,6 +436,9 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                 }}
               >
                 <Hash size={16} /> Tag
+              </button>
+              <button disabled={!ids.length} onClick={() => void Promise.all(ids.map(duplicateNote)).then(stopSelecting)} title="Make a copy of each">
+                <Copy size={16} /> Duplicate
               </button>
               <button className="danger" disabled={!ids.length} onClick={() => (trashNotes(ids), stopSelecting())}>
                 <Trash2 size={16} /> Delete

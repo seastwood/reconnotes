@@ -1,7 +1,7 @@
-import type { Tool } from '@reconnotes/core'
+import type { DrawnShape, Tool } from '@reconnotes/core'
 import { Store, safeLocalGet, safeLocalSet, useStore } from '../lib/store'
 
-export type DrawTool = Tool | 'eraser' | 'lasso'
+export type DrawTool = Tool | 'eraser' | 'lasso' | 'shape'
 export type EraserMode = 'object' | 'pixel'
 
 export interface ToolState {
@@ -13,6 +13,8 @@ export interface ToolState {
   sizes: Record<Tool, number>
   /** recently used colours, newest first */
   recentColors: string[]
+  /** the shapes tool's shape (drawn in the pen's colour and size) */
+  shape?: DrawnShape
 }
 
 export const INK_TOOLS: Tool[] = ['pen', 'pencil', 'marker', 'highlighter']

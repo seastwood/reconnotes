@@ -418,6 +418,24 @@ button.text {
   padding: 3px 6px;
   background: var(--paper);
 }
+.app-error {
+  max-width: 520px;
+  margin: 15vh auto 0;
+  padding: 24px;
+  color: var(--text);
+}
+.app-error pre {
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface, rgba(127, 127, 127, 0.1));
+  padding: 10px;
+  border-radius: 8px;
+}
+.app-error-actions {
+  display: flex;
+  gap: 10px;
+}
 .empty-hint {
   color: var(--muted);
   font-size: 14px;
@@ -504,6 +522,12 @@ button.text {
 }
 .menu button:hover {
   background: rgba(127, 127, 127, 0.12);
+}
+.menu-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
 }
 .menu button.checked::after {
   content: '✓';
@@ -731,9 +755,38 @@ button.text {
 .editor {
   container-type: inline-size;
 }
+.editor-toolbar .show-sm {
+  display: none;
+}
+.format-panel {
+  display: grid;
+  grid-template-columns: repeat(4, 68px);
+  gap: 4px;
+  padding: 4px;
+}
+.menu .format-panel button {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: 58px;
+  padding: 4px 2px;
+  font-size: 11px;
+  border-radius: 10px;
+  text-align: center;
+}
+.menu .format-panel button.on {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--accent-text);
+}
+.format-panel button:disabled {
+  opacity: 0.35;
+}
 @container (max-width: 760px) {
   .hide-sm {
     display: none;
+  }
+  .editor-toolbar .show-sm {
+    display: inline-flex;
   }
   .tb-label {
     display: none;
@@ -1070,6 +1123,9 @@ button.link {
   user-select: none;
   -webkit-touch-callout: none;
 }
+.ink-input.tool-shape {
+  cursor: crosshair;
+}
 .ink-input.tool-eraser {
   cursor: cell;
 }
@@ -1225,9 +1281,15 @@ button.link {
   color: var(--accent-text);
   flex-shrink: 0;
 }
-.ink-tools {
+.ink-tools,
+.ink-shapes {
   display: flex;
   gap: 2px;
+}
+.ink-shapes {
+  padding: 0 4px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.1);
 }
 .ink-tool {
   width: 42px;
@@ -1357,9 +1419,13 @@ button.link {
   overscroll-behavior: contain;
 }
 .keyboard-open .dialog-backdrop {
-  /* little room: from the top, so the field and its buttons are both in view */
-  place-items: start center;
+  /* centred between the top of the screen and the keyboard; from the top
+     when it doesn't fit (auto margins never push it off the top) */
+  display: flex;
   padding-bottom: 8px;
+}
+.keyboard-open .dialog-backdrop > .dialog {
+  margin: auto;
 }
 .keyboard-open .dialog-backdrop .dialog {
   max-height: calc(var(--app-height, 100vh) - 32px);
@@ -3995,6 +4061,28 @@ a.button {
 }
 
 /* a held checkbox: let go to copy the item */
+.tasks-note.current {
+  /* the open note's group: marked by its heading, not every row filled in */
+  color: var(--accent-text);
+}
+.item-copy {
+  position: fixed;
+  z-index: 30;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--accent-text);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  opacity: 0.85;
+}
+.item-copy:active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 20%, var(--paper));
+}
 .copy-armed {
   position: fixed;
   z-index: 50;
