@@ -5219,3 +5219,152 @@ a.button {
   flex: 1;
   min-width: 120px;
 }
+
+/* -------------------------------------------------------------- settings
+   A page of its own: categories down the side on a wide screen, a strip of
+   tabs along the top on a phone. (It keeps .dialog for its fields' styles.) */
+.settings-page.dialog {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100%);
+  width: auto;
+  max-height: none;
+  z-index: 100;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'head head'
+    'nav pane';
+}
+.settings-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(20px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.settings-head h2 {
+  margin: 0;
+}
+.settings-nav {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+  overflow-y: auto;
+}
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.settings-nav button svg {
+  flex: none;
+  color: var(--muted);
+}
+.settings-nav button:hover:not(.on) {
+  background: rgba(127, 127, 127, 0.1);
+}
+.settings-nav button.on {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  font-weight: 600;
+}
+.settings-nav button.on svg {
+  color: var(--accent-text);
+}
+.settings-pane {
+  grid-area: pane;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px max(24px, env(safe-area-inset-right)) max(40px, calc(env(safe-area-inset-bottom) + 24px)) 28px;
+}
+/* a readable line length on a big screen */
+.settings-pane > * {
+  max-width: 720px;
+}
+.settings-pane > .hint:first-of-type {
+  margin-top: 2px;
+}
+.settings-title {
+  font-size: 22px;
+  margin: 4px 0 0;
+}
+.settings-pane > section {
+  margin-top: 14px;
+  padding: 2px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.settings-pane > .setup-problem {
+  margin-top: 14px;
+}
+.settings-pane > .ai-agents h3:first-child,
+.settings-pane > section > .ai-agents > h3:first-of-type {
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  .settings-page.dialog {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      'head'
+      'nav'
+      'pane';
+  }
+  .settings-head {
+    border-bottom: none;
+    padding-bottom: 2px;
+  }
+  .settings-nav {
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .settings-nav button {
+    flex: none;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .settings-nav button.on {
+    border-color: transparent;
+  }
+  .settings-pane {
+    padding: 12px max(16px, env(safe-area-inset-right)) max(32px, calc(env(safe-area-inset-bottom) + 20px)) max(16px, env(safe-area-inset-left));
+  }
+  .settings-pane > section {
+    padding: 2px 14px 12px;
+  }
+}

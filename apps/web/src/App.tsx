@@ -6,7 +6,7 @@ import { Sidebar, type View } from './components/Sidebar'
 import { NoteList } from './components/NoteList'
 import { JobsPanel } from './components/JobsPanel'
 import { setJobNavigator } from './lib/jobs'
-import { SettingsDialog } from './components/SettingsDialog'
+import { SETTINGS_TABS, SettingsDialog, type SettingsTab } from './components/SettingsDialog'
 import { MoveDialog, type MoveTarget } from './components/MoveDialog'
 import { NoteEditor } from './editor/Editor'
 import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
@@ -150,7 +150,8 @@ export function App() {
   }
   /** medium screens: the folder list slides over the notes */
   const [overlay, setOverlay] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // open: on the category you were last in (true), or a given one
+  const [settingsOpen, setSettingsOpen] = useState<boolean | SettingsTab>(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   /** Import a web page (from ⌘K): the folder it goes in */
   const [webImport, setWebImport] = useState<{ folderId: string | null } | null>(null)
@@ -445,6 +446,7 @@ export function App() {
       { id: 'trash', label: 'Recently Deleted', section: G, keywords: 'trash bin', run: () => a().showView({ kind: 'trash' }) },
       { id: 'tips', label: 'Show the tips again', section: 'App', keywords: 'help tour welcome how', run: () => setTourOpen(true) },
       { id: 'settings', label: 'Settings', section: 'App', keywords: 'preferences server backups devices export import', run: () => setSettingsOpen(true) },
+      ...SETTINGS_TABS.map((t) => ({ id: `settings-${t.id}`, label: `Settings › ${t.label}`, section: 'App', keywords: `preferences ${t.blurb}`, run: () => setSettingsOpen(t.id) })),
       { id: 'theme-light', label: 'Light appearance', section: 'App', keywords: 'theme', run: () => a().setTheme('light') },
       { id: 'theme-dark', label: 'Dark appearance', section: 'App', keywords: 'theme night', run: () => a().setTheme('dark') },
       { id: 'theme-system', label: 'Match system appearance', section: 'App', keywords: 'theme auto', run: () => a().setTheme('system') },
@@ -564,7 +566,7 @@ export function App() {
           )}
         </main>
       </Panel>
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog tab={settingsOpen === true ? undefined : settingsOpen} onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       {/* the way back from a link: centred on the whole screen, where "Back to chat" sits (above it when both show) */}
       {backTo.length > 0 &&
@@ -588,7 +590,7 @@ export function App() {
       <ImageViewerHost />
       <AskChatHost onOpen={followLink} />
       <ReferencesHost onOpen={followLink} />
-      {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
+      {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen('sync')} />}
       {webImport && <WebImportDialog folderId={webImport.folderId} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
       {paletteOpen && (
         <CommandPalette

@@ -25,8 +25,10 @@ import { AiHealthBox, TestBenchSection } from './AiHealth'
  * Settings › AI agents: add Claude / Ollama / OpenAI-compatible endpoints,
  * enable or disable them, and choose per task which agent is tried first.
  * If an agent fails, the server automatically tries the next one in the list.
+ * `part: 'recognition'`: the server's side of Settings › Handwriting & speech instead –
+ * what's read automatically, speaker labels, your words, re-reading everything.
  */
-export function AiAgentsSection() {
+export function AiAgentsSection({ part = 'agents' }: { part?: 'agents' | 'recognition' }) {
   const [state, setState] = useState<AgentsState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<ApiError | null>(null)
@@ -83,6 +85,37 @@ export function AiAgentsSection() {
   }
   const setTask = (task: AiTask, list: string[]) =>
     void apply(agentsApi.updateSettings({ routing: { ...state.settings.routing, [task]: list } }))
+
+  if (part === 'recognition')
+    return (
+      <div className="ai-agents">
+        {error && <p className="status error-text">{error}</p>}
+        <h3>Read automatically</h3>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={state.settings.autoHandwriting}
+            onChange={(e) => void apply(agentsApi.updateSettings({ autoHandwriting: e.target.checked }))}
+          />
+          Recognise handwriting automatically so it's searchable (runs after you stop writing)
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={state.settings.autoImageText}
+            onChange={(e) => void apply(agentsApi.updateSettings({ autoImageText: e.target.checked }))}
+          />
+          Extract text from new images and PDFs for search
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={state.settings.autoAudio} onChange={(e) => void apply(agentsApi.updateSettings({ autoAudio: e.target.checked }))} />
+          Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
+        </label>
+        <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
+        <VocabularySection />
+        <RereadButton />
+      </div>
+    )
 
   return (
     <div className="ai-agents">
@@ -215,34 +248,6 @@ export function AiAgentsSection() {
             )
           })}
 
-          <h3>Automatic</h3>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={state.settings.autoHandwriting}
-              onChange={(e) => void apply(agentsApi.updateSettings({ autoHandwriting: e.target.checked }))}
-            />
-            Recognise handwriting automatically so it's searchable (runs after you stop writing)
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={state.settings.autoImageText}
-              onChange={(e) => void apply(agentsApi.updateSettings({ autoImageText: e.target.checked }))}
-            />
-            Extract text from new images and PDFs for search
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={state.settings.autoAudio}
-              onChange={(e) => void apply(agentsApi.updateSettings({ autoAudio: e.target.checked }))}
-            />
-            Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
-          </label>
-          <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
-          <RereadButton />
-          <VocabularySection />
           <TestBenchSection />
         </>
       )}
