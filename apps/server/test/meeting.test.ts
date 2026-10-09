@@ -118,7 +118,7 @@ John, Jane, Mike`
   it('leaves out placeholders for what wasn’t said ([TBD], not specified)', () => {
     const t = 'Finish the gate. Move the cottage box after the project. Charlie to look into Summit.'
     const out = groundMeetingNotes(
-      '## Action items\n- [ ] Finish the gate by [TBD]\n- [ ] Move the cottage box after the project (TBD)\n- [ ] Charlie to look into Summit (deadline: not specified)',
+      '## Action items\n- [ ] Finish the gate by [TBD]\n- [ ] Move the cottage box after the project (undisclosed person)\n- [ ] Charlie to look into Summit (deadline: not specified)',
       t,
       '',
     )
