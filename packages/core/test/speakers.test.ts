@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeSpeakers, labelledTranscript, parseSpeakerNames, parseSpeakers, speakerAt, speakerTurns, voiceCount } from '../src/speakers'
+import { encodeSpeakers, mergeMinorVoices, labelledTranscript, parseSpeakerNames, parseSpeakers, speakerAt, speakerTurns, voiceCount } from '../src/speakers'
 
 const seg = [
   { start: 0.3, end: 3.0, speaker: 0 },
@@ -40,5 +40,33 @@ describe('the people at a meeting', () => {
     expect(attendeeNames('**Attendees:** Q; Brandon & Seth')).toEqual(['Q', 'Brandon', 'Seth'])
     expect(attendeeNames('Attendees: ')).toEqual([])
     expect(attendeeNames('No list here')).toEqual([])
+  })
+})
+
+describe('voices heard for a moment', () => {
+  it('fold into the voice around them, and the rest are numbered again', () => {
+    const segs = [
+      { start: 0, end: 30, speaker: 0 },
+      { start: 30.5, end: 31.5, speaker: 5 }, // a cough
+      { start: 32, end: 60, speaker: 0 },
+      { start: 61, end: 62, speaker: 7 }, // a word from someone passing
+      { start: 62.2, end: 120, speaker: 2 },
+      { start: 121, end: 160, speaker: 0 },
+    ]
+    const out = mergeMinorVoices(segs)
+    expect(new Set(out.map((s) => s.speaker))).toEqual(new Set([0, 1]))
+    // the cough joins the turn around it: one turn from 0 to 60
+    expect(out[0]).toEqual({ start: 0, end: 60, speaker: 0 })
+    // the passing word goes to the nearer voice (the one right after it)
+    expect(out[1]).toEqual({ start: 61, end: 120, speaker: 1 })
+    expect(out[2]).toEqual({ start: 121, end: 160, speaker: 0 })
+  })
+
+  it('leave a short clip as it is', () => {
+    const segs = [
+      { start: 0, end: 3, speaker: 0 },
+      { start: 3.5, end: 6, speaker: 1 },
+    ]
+    expect(mergeMinorVoices(segs)).toEqual(segs)
   })
 })

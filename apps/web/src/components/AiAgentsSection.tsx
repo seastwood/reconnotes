@@ -111,6 +111,21 @@ export function AiAgentsSection({ part = 'agents' }: { part?: 'agents' | 'recogn
           <input type="checkbox" checked={state.settings.autoAudio} onChange={(e) => void apply(agentsApi.updateSettings({ autoAudio: e.target.checked }))} />
           Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
         </label>
+        <h3>Recordings</h3>
+        <label>
+          Language spoken
+          <select value={state.settings.speechLanguage ?? ''} onChange={(e) => void apply(agentsApi.updateSettings({ speechLanguage: e.target.value }))}>
+            {SPEECH_LANGUAGES.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">
+          Told to your speech-to-text server, so it doesn’t guess from the first few seconds (a noisy start can make it guess wrong). “Detect” suits recordings in
+          more than one language.
+        </p>
         <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
         <VocabularySection />
         <RereadButton />
@@ -254,6 +269,33 @@ export function AiAgentsSection({ part = 'agents' }: { part?: 'agents' | 'recogn
     </div>
   )
 }
+
+/** Languages Whisper knows, the commonest first ('' – it detects the language itself). */
+const SPEECH_LANGUAGES: [string, string][] = [
+  ['', 'Detect automatically'],
+  ['en', 'English'],
+  ['es', 'Spanish'],
+  ['fr', 'French'],
+  ['de', 'German'],
+  ['it', 'Italian'],
+  ['pt', 'Portuguese'],
+  ['nl', 'Dutch'],
+  ['sv', 'Swedish'],
+  ['no', 'Norwegian'],
+  ['da', 'Danish'],
+  ['fi', 'Finnish'],
+  ['pl', 'Polish'],
+  ['uk', 'Ukrainian'],
+  ['ru', 'Russian'],
+  ['tr', 'Turkish'],
+  ['ar', 'Arabic'],
+  ['hi', 'Hindi'],
+  ['zh', 'Chinese'],
+  ['ja', 'Japanese'],
+  ['ko', 'Korean'],
+  ['vi', 'Vietnamese'],
+  ['tl', 'Tagalog'],
+]
 
 /**
  * How readily the speaker-label service (deploy/diarize.py) counts two stretches of speech as

@@ -229,6 +229,8 @@ describe('a long meeting, heard by the server', () => {
   it('writes notes on each part, then puts them together – and Whisper is used over the phone’s own reading', async () => {
     // a Whisper server: says what it heard, and what words it was told to expect
     let hint = ''
+    let language = ''
+    let vad = ''
     const unloaded: string[] = []
     const whisper = http.createServer(async (req, res) => {
       // Speaches: lets go of the model once it's done, so the notes model gets the whole GPU
@@ -238,6 +240,8 @@ describe('a long meeting, heard by the server', () => {
       for await (const c of req) chunks.push(c as Buffer)
       const body = Buffer.concat(chunks).toString('latin1')
       hint = /name="prompt"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? ''
+      language = /name="language"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? ''
+      vad = /name="vad_filter"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? ''
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: long }))
     })
     await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
@@ -263,6 +267,9 @@ describe('a long meeting, heard by the server', () => {
       expect(done.error ?? done.status).toBe('done')
       // Whisper's reading, with your words as a hint – not the phone's
       expect(hint).toBe('Doug, MinneTrials.')
+      // the silences skipped; the language guessed (none set)
+      expect(vad).toBe('true')
+      expect(language).toBe('')
       // plenty of room beside it here: Whisper stays loaded for the next recording
       expect(unloaded).toEqual([])
       expect(prompts.join('\n')).not.toContain('Locates try to keep up')
@@ -293,11 +300,20 @@ describe('a long meeting, heard by the server', () => {
       app.store.setAttachmentText('meetingaudio0001', 'Locates try to keep up with the gas.', 'done')
       setTranscribedBy(app.store, 'meetingaudio0001', APPLE_SPEECH)
       hint = ''
+      // the language set: told to Whisper
+      app.ai.agents.updateSettings({ speechLanguage: 'en' })
+      prompts.length = 0
       const redo = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'meetingaudio0001' } })).job
       const again = (await api('GET', `/api/jobs/${redo.id}/wait`)).job
       expect(again.error ?? again.status).toBe('done')
       expect(again.agent).toMatch(/^Whisper \+ /)
       expect(hint).toBe('Doug, MinneTrials.')
+      expect(language).toBe('en')
+      app.ai.agents.updateSettings({ speechLanguage: '' })
+      // the same words heard again: each part's notes from before – only putting them together is done again
+      expect(prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))).toEqual([])
+      expect(prompts.some((p) => p.startsWith('Write meeting notes from notes on each part'))).toBe(true)
+      expect(again.result.draft.how[0]).toMatch(/^Part 1: read before – reused/)
       expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
 
       // the recording's ⋯ menu: "Redo from a fresh transcript" – Whisper hears it again though its transcript is saved

@@ -33,6 +33,8 @@ export interface AiSettings {
   autoHandwriting: boolean
   autoImageText: boolean
   autoAudio: boolean
+  /** the language recordings are in ("en"); '' – speech-to-text guesses */
+  speechLanguage: string
   /** speaker labels: how alike two voices must be to count as one person (0.5–1) */
   speakerThreshold: number
 }

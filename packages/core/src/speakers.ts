@@ -47,6 +47,55 @@ export function parseSpeakers(text: string | null | undefined): SpeakerSegment[]
   }
 }
 
+/**
+ * Voices heard for only a few seconds – a cough, a word from someone passing, two people at
+ * once – are usually not real extra people, and a "Speaker 8" confuses who said what. Each of
+ * their turns goes to the voice speaking around it (the longer neighbour); then the voices are
+ * numbered again in the order they first speak. A voice counts as real with at least `minSeconds`
+ * of speech, or `minShare` of all of it.
+ */
+export function mergeMinorVoices(segments: SpeakerSegment[], minSeconds = 8, minShare = 0.02): SpeakerSegment[] {
+  if (!segments.length) return segments
+  const sorted = [...segments].sort((a, b) => a.start - b.start)
+  const talk = new Map<number, number>()
+  for (const s of sorted) talk.set(s.speaker, (talk.get(s.speaker) ?? 0) + Math.max(0, s.end - s.start))
+  const total = [...talk.values()].reduce((a, b) => a + b, 0)
+  const real = new Set([...talk].filter(([, t]) => t >= minSeconds || t >= total * minShare).map(([v]) => v))
+  // nobody spoke long enough to count (a short clip): leave it as it is
+  if (!real.size || real.size === talk.size) return renumber(sorted)
+  const out = sorted.map((s) => ({ ...s }))
+  for (let i = 0; i < out.length; i++) {
+    if (real.has(out[i].speaker)) continue
+    // the nearest real voice before and after it
+    let before = i - 1
+    while (before >= 0 && !real.has(out[before].speaker)) before--
+    let after = i + 1
+    while (after < out.length && !real.has(out[after].speaker)) after++
+    const b = before >= 0 ? out[before] : null
+    const n = after < out.length ? out[after] : null
+    const gap = (x: SpeakerSegment | null) => (x ? Math.max(0, x.start > out[i].start ? x.start - out[i].end : out[i].start - x.end) : Infinity)
+    const pick = !n || (b && (gap(b) < gap(n) || (gap(b) === gap(n) && b.end - b.start >= n.end - n.start))) ? b : n
+    if (pick) out[i].speaker = pick.speaker
+  }
+  // a voice's turns that now run on into each other: one turn
+  const merged: SpeakerSegment[] = []
+  for (const s of out) {
+    const last = merged[merged.length - 1]
+    if (last && last.speaker === s.speaker && s.start - last.end <= 1) last.end = Math.max(last.end, s.end)
+    else merged.push(s)
+  }
+  return renumber(merged)
+}
+
+/** Voices numbered 0, 1, 2… in the order they first speak. */
+function renumber(segments: SpeakerSegment[]): SpeakerSegment[] {
+  const order = new Map<number, number>()
+  return segments.map((s) => {
+    if (!order.has(s.speaker)) order.set(s.speaker, order.size)
+    return { ...s, speaker: order.get(s.speaker)! }
+  })
+}
+
 /** The names you gave a recording's voices ({ "0": "Jesse" }). */
 export function parseSpeakerNames(text: string | null | undefined): Record<number, string> {
   if (!text) return {}

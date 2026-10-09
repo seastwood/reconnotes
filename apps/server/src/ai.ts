@@ -301,7 +301,7 @@ If no task was said, write "- [ ] No action items" under that heading.`
 - Stop after the Action items section.
 
 ${reasoning}`
-    const { result, agent } = await this.agents.run('compile', async (backend) => {
+    const { result, agent } = await this.agents.run('compile', async (backend, model) => {
       const partNotesAll: string[] = []
       // how each step was answered (thinking or not, reloads, the CPU): kept with the job
       const how: string[] = []
@@ -333,11 +333,7 @@ ${said || '(no speech recognised)'}
           reportProgress(`Reading part ${i + 1} of ${parts.length} of the meeting…`)
           const from = Math.round((minutes * i) / parts.length)
           const to = Math.round((minutes * (i + 1)) / parts.length)
-          const raw = await ask(
-            `Part ${i + 1}`,
-            [
-              {
-                text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.${people}${speakers}
+          const prompt = withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.${people}${speakers}
 
 Write notes on this part, topic by topic, in the order they came up:
 
@@ -356,14 +352,21 @@ Use ONLY what is in this part; leave out small talk and what makes no sense. Nev
 
 <transcript part="${i + 1}">
 ${parts[i]}
-</transcript>`),
-              },
-            ],
-            1500,
+</transcript>`)
+          // read before – the same words, the same instructions, the same model (a redo of the notes):
+          // what it made of it then. Most of a long meeting's time is here, so a redo only puts it together again.
+          const key = createHash('sha256').update(`meeting-part|${model.kind}|${model.baseUrl}|${model.model}|${prompt}`).digest('hex')
+          const saved = this.savedReading(key)
+          let t: string
+          if (saved !== null) {
+            t = saved
+            how.push(`Part ${i + 1}: read before – reused`)
+          } else {
             // reasoning first: who suggested what, what replaced it, what was agreed
-            { think: true },
-          )
-          const t = collapseRepeats(unwrapModelOutput(raw)).trim()
+            const raw = await ask(`Part ${i + 1}`, [{ text: prompt }], 1500, { think: true })
+            t = collapseRepeats(unwrapModelOutput(raw)).trim()
+            if (t) this.saveReading(key, t)
+          }
           if (t) partNotes.push(`Part ${i + 1} (about minutes ${from}–${to}):\n${t}`)
         }
         reportProgress('Putting the meeting notes together…')
@@ -422,7 +425,9 @@ ${partNotes.join('\n\n')}
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
       const prompt = (this.vocabulary ? this.vocabulary.speechPrompt(names) : names.length ? `${names.join(', ')}.` : '') || undefined
       // with each word's time, where the server gives it (to follow along as it plays)
-      const once = async () => (backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt) : { text: await backend.transcribe!(data, mime, filename, prompt) })
+      const language = this.agents.settings().speechLanguage || undefined
+      const once = async () =>
+        backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt, language) : { text: await backend.transcribe!(data, mime, filename, prompt, language) }
       // Whisper on the same GPU as Ollama: room made first if it's needed it before
       const ollama = this.agents.agents().filter((a) => a.enabled && a.kind === 'ollama').map((a) => a.baseUrl)
       const shared = agent.kind === 'openai' && ollama.length > 0

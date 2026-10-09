@@ -118,6 +118,8 @@ export interface AiSettings {
   autoImageText: boolean
   /** transcribe new recordings and audio files in the background (for search) */
   autoAudio: boolean
+  /** the language recordings are in ("en"), told to speech-to-text; '' – it guesses */
+  speechLanguage: string
   /**
    * Speaker labels: how alike two stretches of speech must be to count as one person
    * (0.5–1). Higher: fewer voices; lower: more.
@@ -162,9 +164,10 @@ export interface Backend {
   generate(parts: Part[], maxTokens: number, opts?: { think?: boolean; thinkRoom?: number }): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
   /** `prompt`: words to expect (names, terms) – a hint, where the server takes one */
-  transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string>
+  /** `language`: what's spoken ("en"), so it isn't guessed from the first seconds; none: guessed */
+  transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string, language?: string): Promise<string>
   /** …with when each word is said (Whisper's word timestamps), where the server gives them */
-  transcribeTimed?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<TimedTranscript>
+  transcribeTimed?(audio: Buffer, mime: string, filename: string, prompt?: string, language?: string): Promise<TimedTranscript>
   /** Text → vectors that capture meaning (embedding models, e.g. nomic-embed-text), for search by meaning. */
   embed?(texts: string[]): Promise<number[][]>
 }
@@ -910,12 +913,15 @@ class OpenAiBackend implements Backend {
    * OpenAI's /audio/transcriptions API, which self-hosted Whisper servers
    * (Speaches / faster-whisper-server, whisper.cpp, LocalAI…) also offer.
    */
-  async transcribe(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string> {
-    return (await this.transcribeTimed(audio, mime, filename, prompt)).text
+  async transcribe(audio: Buffer, mime: string, filename: string, prompt?: string, language?: string): Promise<string> {
+    return (await this.transcribeTimed(audio, mime, filename, prompt, language)).text
   }
 
-  async transcribeTimed(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<TimedTranscript> {
-    const send = async (timed: boolean) => {
+  async transcribeTimed(audio: Buffer, mime: string, filename: string, prompt?: string, language?: string): Promise<TimedTranscript> {
+    // a self-hosted Whisper (Speaches, faster-whisper) skips the silences: faster, and no phrases
+    // made up in the quiet ("Thank you.") – OpenAI's own service doesn't take the option
+    const selfHosted = !/api\.openai\.com/i.test(this.agent.baseUrl)
+    const send = async (timed: boolean, extras = true) => {
       const form = new FormData()
       form.append('file', new Blob([new Uint8Array(audio)], { type: mime || 'application/octet-stream' }), filename || audioFileName(mime))
       form.append('model', this.agent.model || 'whisper-1')
@@ -924,6 +930,8 @@ class OpenAiBackend implements Backend {
       if (timed) form.append('timestamp_granularities[]', 'word')
       // your names and terms: Whisper spells what it hears like the words it was "told" before
       if (prompt) form.append('prompt', prompt)
+      if (language) form.append('language', language)
+      if (extras && selfHosted) form.append('vad_filter', 'true')
       return fetchWithHints(trimSlash(this.agent.baseUrl) + '/audio/transcriptions', {
         method: 'POST',
         headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},
@@ -933,8 +941,9 @@ class OpenAiBackend implements Backend {
       })
     }
     let res = await send(true)
-    // a server without word times (some whisper.cpp builds): the words alone
-    if (res.status === 400 || res.status === 422) res = await send(false)
+    // a server that doesn't know the silence option, or has no word times (some whisper.cpp builds)
+    if ((res.status === 400 || res.status === 422) && selfHosted) res = await send(true, false)
+    if (res.status === 400 || res.status === 422) res = await send(false, false)
     if (!res.ok) throw new Error(`server returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
     const body = await res.text()
     try {
@@ -1304,7 +1313,7 @@ export class AgentRegistry {
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
     const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ask: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
-    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true, speakerThreshold: s.speakerThreshold ?? SPEAKER_THRESHOLD }
+    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true, speechLanguage: s.speechLanguage ?? '', speakerThreshold: s.speakerThreshold ?? SPEAKER_THRESHOLD }
   }
 
   get(id: string): AgentConfig | undefined {
@@ -1358,6 +1367,7 @@ export class AgentRegistry {
     if (typeof patch.autoHandwriting === 'boolean') s.autoHandwriting = patch.autoHandwriting
     if (typeof patch.autoImageText === 'boolean') s.autoImageText = patch.autoImageText
     if (typeof patch.autoAudio === 'boolean') s.autoAudio = patch.autoAudio
+    if (typeof patch.speechLanguage === 'string' && /^([a-z]{2,3})?$/.test(patch.speechLanguage)) s.speechLanguage = patch.speechLanguage
     if (typeof patch.speakerThreshold === 'number' && Number.isFinite(patch.speakerThreshold))
       s.speakerThreshold = Math.round(Math.min(1, Math.max(0.5, patch.speakerThreshold)) * 100) / 100
     this.store.setSetting(SETTINGS_KEY, s)
