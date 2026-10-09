@@ -285,13 +285,78 @@ For language models, ReconNotes handles this by itself too: while Whisper is loa
 
 Ollama says how much GPU memory each of its models takes, but neither Ollama nor Speaches says how big the GPU is or how full it is. Inside an LXC container, `nvidia-smi` can't say which program uses what either. A tiny monitor that comes with ReconNotes fills the gap. Run it on the machine (or container) with the GPU, and the **In memory** line in **Jobs** gets a bar: each model's share in its own colour, the rest free, and Whisper's real size. Without it, Whisper's size is an estimate (shown with a `~`).
 
-It uses Python's standard library only. Copy `deploy/gpu-stats.py` from the ReconNotes folder to `/opt/gpu-stats.py` on the GPU machine. For example, from the ReconNotes machine:
+It's a short Python script that comes with ReconNotes, at `deploy/gpu-stats.py` inside your ReconNotes folder (the one you run `git pull` in). It uses Python's standard library only, so there's nothing to install. Put it on the GPU machine at `/opt/gpu-stats.py`, in either of two ways.
+
+**Either copy it from the ReconNotes machine**, from inside the ReconNotes folder:
 
 ```bash
 scp deploy/gpu-stats.py root@<speaches address>:/opt/gpu-stats.py
 ```
 
-(Or open `nano /opt/gpu-stats.py` on the GPU machine and paste the file's contents.) Then, on the GPU machine:
+**Or paste it.** On the GPU machine, open an empty file:
+
+```bash
+nano /opt/gpu-stats.py
+```
+
+Paste all of this into it, then save with **Ctrl+O**, **Enter**, **Ctrl+X**:
+
+```python
+#!/usr/bin/env python3
+"""
+GPU memory for ReconNotes
+=========================
+
+Ollama and Speaches don't say how big the GPU is or how full it is, and inside
+an LXC container nvidia-smi can't tell which program uses what. This tiny
+server, run on the machine (or container) with the GPU, answers with each
+card's total and used memory, so ReconNotes' Jobs view can show how much room
+is left. Python's standard library only; nothing to install.
+
+    python3 gpu-stats.py            # serves http://0.0.0.0:9401/
+
+ReconNotes looks for it on port 9401 of each Ollama / speech-to-text address.
+"""
+import json
+import os
+import subprocess
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = int(os.environ.get("GPU_STATS_PORT", "9401"))
+
+
+def gpus():
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, timeout=5, check=True,
+    ).stdout
+    cards = []
+    for line in out.strip().splitlines():
+        index, name, total, used = [p.strip() for p in line.split(",")]
+        cards.append({"index": int(index), "name": name, "totalMb": int(total), "usedMb": int(used)})
+    return cards
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            body, status = json.dumps({"gpus": gpus()}), 200
+        except Exception as e:  # no nvidia-smi, driver gone…
+            body, status = json.dumps({"error": str(e)}), 500
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def log_message(self, *args):
+        pass
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+```
+
+Then, on the GPU machine, start it to try it:
 
 ```bash
 python3 /opt/gpu-stats.py
