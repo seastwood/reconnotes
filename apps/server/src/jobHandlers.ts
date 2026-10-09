@@ -241,7 +241,11 @@ const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * (b[i] ??
  * Voices heard for a moment folded into the ones around them (mergeMinorVoices) – and what each
  * remaining voice sounds like carried over to its new number (from the one that spoke the most).
  */
-export function mergeVoices(found: { start: number; end: number; speaker: number }[], voices: Voices): { segments: { start: number; end: number; speaker: number }[]; voices: Voices } {
+export function mergeVoices(
+  found: { start: number; end: number; speaker: number }[],
+  voices: Voices,
+  most = 0,
+): { segments: { start: number; end: number; speaker: number }[]; voices: Voices } {
   // a voice heard for a short while that sounds like one of the main voices is that person, split
   // off (in a real meeting, a 21-minute one, the service found 28 voices for about 6 people)
   const talked = new Map<number, number>()
@@ -256,6 +260,24 @@ export function mergeVoices(found: { start: number; end: number; speaker: number
     if (best.sim >= SOUNDS_LIKE) into.set(v, best.m)
   }
   found = found.map((s) => (into.has(s.speaker) ? { ...s, speaker: into.get(s.speaker)! } : s))
+  // at most as many voices as people were there: the one heard least joins the voice it sounds
+  // most like, until there are that many. (Not asked of the service: told a number, it forces that
+  // many groups – noise takes some, and real people are lumped together.)
+  if (most > 0) {
+    for (;;) {
+      const talk = new Map<number, number>()
+      for (const s of found) talk.set(s.speaker, (talk.get(s.speaker) ?? 0) + s.end - s.start)
+      if (talk.size <= most) break
+      const [least] = [...talk.keys()].sort((a, b) => talk.get(a)! - talk.get(b)!)
+      const others = [...talk.keys()].filter((v) => v !== least)
+      // by how it sounds; without that, the voice speaking most
+      const target = voices[least]
+        ? others.filter((v) => voices[v]).sort((a, b) => dot(voices[least], voices[b]) - dot(voices[least], voices[a]))[0]
+        : undefined
+      const to = target ?? others.sort((a, b) => talk.get(b)! - talk.get(a)!)[0]
+      found = found.map((s) => (s.speaker === least ? { ...s, speaker: to } : s))
+    }
+  }
   // then what's still only a few seconds goes to whoever was speaking around it
   const segments = mergeMinorVoices(found)
   const talk = new Map<number, number>()
@@ -306,8 +328,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       let voices: Voices = {}
       if (speech && store.hasBlob(att.id) && (await diarizeAvailable(speech.baseUrl))) {
         reportProgress('Telling the voices apart…')
-        const found = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most, threshold)
-        if (found) ({ segments, voices } = mergeVoices(found.segments, found.voices))
+        const found = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), threshold)
+        if (found) ({ segments, voices } = mergeVoices(found.segments, found.voices, most))
       }
       // the service couldn't be asked again: the voices as they were
       if (!segments && kept && !newReading) segments = kept

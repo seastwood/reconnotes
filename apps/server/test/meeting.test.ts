@@ -557,7 +557,7 @@ describe('who said what', () => {
       expect(done.error ?? done.status).toBe('done')
       // the attendees: Whisper's hint, and at most three voices
       expect(hint.startsWith('Seth, Jesse, Charlie')).toBe(true)
-      expect(asked).toBe('/diarize?speakers=3&threshold=1')
+      expect(asked).toBe('/diarize?threshold=1')
       expect(done.result.voices).toBe(2)
       // how the model answered each step, kept with the job
       expect(done.result.draft.how.some((h: string) => h.startsWith('Final notes: '))).toBe(true)
@@ -584,7 +584,7 @@ describe('who said what', () => {
       expect(app.ai.agents.settings().speakerThreshold).toBe(0.95)
       const third = (await fetch(`${base}/api/jobs/${again.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
       expect((await api('GET', `/api/jobs/${third.id}/wait`)).job.status).toBe('done')
-      expect(asked).toBe('/diarize?speakers=3&threshold=0.95')
+      expect(asked).toBe('/diarize?threshold=0.95')
       // …and not again after that
       asked = ''
       const fourth = (await fetch(`${base}/api/jobs/${third.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
@@ -628,7 +628,7 @@ describe('who said what', () => {
       prompts.length = 0
       const counted = (await fetch(`${base}/api/jobs/${next.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
       expect((await api('GET', `/api/jobs/${counted.id}/wait`)).job.status).toBe('done')
-      expect(asked).toBe('/diarize?speakers=5&threshold=0.9')
+      expect(asked).toBe('/diarize?threshold=0.9')
       expect(prompts.at(-1)).toContain('5 people were at the meeting')
       // …and not again while it stays the same
       asked = ''
@@ -700,6 +700,9 @@ describe('voices heard for a moment, when the service tells them apart', () => {
     ]
     const { segments } = mergeVoices(found, { 0: [1, 0, 0], 1: [0, 1, 0], 2: [0.95, 0.31, 0], 3: [0, 0, 1] })
     const at = (t: number) => segments.find((s) => s.start <= t && s.end >= t)?.speaker
+    // at most two people there: the quietest voice (the radio) joins the one it sounds most like
+    const two = mergeVoices(found, { 0: [1, 0, 0], 1: [0, 1, 0], 2: [0.95, 0.31, 0], 3: [0.1, 0.3, 0.95] }, 2)
+    expect(new Set(two.segments.map((s) => s.speaker)).size).toBe(2)
     expect(at(310)).toBe(at(50))
     expect(at(430)).not.toBe(at(50))
     expect(at(430)).not.toBe(at(150))

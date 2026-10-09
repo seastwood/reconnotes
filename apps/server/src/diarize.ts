@@ -40,19 +40,18 @@ export async function diarizeAvailable(speechUrl: string): Promise<boolean> {
 
 /**
  * The recording's turns by voice, or null when there's no service (or it failed – the
- * transcript is then just without speakers). `most`: at most this many people spoke;
- * `threshold`: how alike two voices must be to count as one person.
+ * transcript is then just without speakers). `threshold`: how alike two voices must be to count
+ * as one person.
  */
 export async function diarize(
   speechUrl: string,
   audio: Buffer,
-  most = 0,
   threshold?: number,
 ): Promise<{ segments: SpeakerSegment[]; voices: Record<number, number[]> } | null> {
   if (!(await diarizeAvailable(speechUrl))) return null
   try {
+    // (how many people were there isn't asked of it: see mergeVoices)
     const q = new URLSearchParams()
-    if (most > 0) q.set('speakers', String(most))
     // set in ReconNotes' AI settings (an older diarize.py ignores it and uses its own)
     if (threshold !== undefined) q.set('threshold', String(threshold))
     const res = await fetch(`${base(hostOf(speechUrl))}/diarize${q.size ? `?${q}` : ''}`, {
