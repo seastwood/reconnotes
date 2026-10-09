@@ -134,7 +134,8 @@ export type Part = { text: string } | { image: Buffer; mime: string } | { pdf: B
 export interface Backend {
   generate(parts: Part[], maxTokens: number): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
-  transcribe?(audio: Buffer, mime: string, filename: string): Promise<string>
+  /** `prompt`: words to expect (names, terms) – a hint, where the server takes one */
+  transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string>
   /** Text → vectors that capture meaning (embedding models, e.g. nomic-embed-text), for search by meaning. */
   embed?(texts: string[]): Promise<number[][]>
 }
@@ -660,11 +661,13 @@ class OpenAiBackend implements Backend {
    * OpenAI's /audio/transcriptions API, which self-hosted Whisper servers
    * (Speaches / faster-whisper-server, whisper.cpp, LocalAI…) also offer.
    */
-  async transcribe(audio: Buffer, mime: string, filename: string): Promise<string> {
+  async transcribe(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string> {
     const form = new FormData()
     form.append('file', new Blob([new Uint8Array(audio)], { type: mime || 'application/octet-stream' }), filename || audioFileName(mime))
     form.append('model', this.agent.model || 'whisper-1')
     form.append('response_format', 'json')
+    // your names and terms: Whisper spells what it hears like the words it was "told" before
+    if (prompt) form.append('prompt', prompt)
     const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/audio/transcriptions', {
       method: 'POST',
       headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},

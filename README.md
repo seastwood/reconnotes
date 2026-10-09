@@ -250,6 +250,12 @@ note below it. In the iPhone/iPad app Apple's speech recognition does this on th
 web app, and the iPad app when Apple can't read a file, use the server's **Audio to text**
 agents: any OpenAI-compatible speech-to-text server. Ollama and Claude can't transcribe audio.
 
+**Meetings** are always transcribed by the server's Audio to text agent when there is one (Apple's
+recognition is made for dictation, not a room of people – it's only used when the server can't).
+The names and terms in *Settings › AI agents › Your words* are passed to Whisper as a hint, so it spells them
+right. A long meeting is read in parts of about eight minutes, each written up, then put together –
+so the end of a long meeting is covered as well as its start.
+
 A self-hosted Whisper server next to ReconNotes (uses the GPU if Docker has access to it):
 
 ```bash
@@ -261,7 +267,14 @@ curl -X POST http://localhost:8000/v1/models/Systran/faster-whisper-small
 
 Then add an agent: kind **OpenAI-compatible**, address `http://<server-ip>:8000/v1`, model
 `Systran/faster-whisper-small` (or `-medium` / `deepdml/faster-whisper-large-v3-turbo-ct2` for
-better accuracy). Agents whose model name contains "whisper" are put on *Audio to text*
+better accuracy).
+
+Which model: for meetings, use **`deepdml/faster-whisper-large-v3-turbo-ct2`** – far more accurate
+than *small* or *medium* on several people talking at a distance, and fast. It needs about 2 GB of
+GPU memory (int8), so it fits next to an 8B language model on an 8 GB card. On an older NVIDIA card
+(GTX 10-series) start the container with `-e WHISPER__COMPUTE_TYPE=int8`: those cards are slow at
+16-bit maths. Without a GPU, use `Systran/faster-whisper-small` – large models are too slow on a CPU
+for a long meeting. Agents whose model name contains "whisper" are put on *Audio to text*
 automatically. OpenAI itself works too (`https://api.openai.com/v1`, model `whisper-1`).
 With an agent set up, new recordings are also transcribed in the background so search finds
 them. The old `RECON_TRANSCRIBE_URL` setting is turned into such an agent on start.

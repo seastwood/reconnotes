@@ -444,17 +444,34 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const { noteId, attachmentId } = job.input as { noteId: string; attachmentId: string }
     const doc = noteDoc(noteId)
     const att = store.getAttachment(String(attachmentId))
-    let transcript = String(job.input.transcript ?? '').trim()
+    // the phone's own reading (Apple's speech recognition: made for dictation, not a room of people)
+    const onDevice = String(job.input.transcript ?? '').trim()
+    let transcript = ''
     let agent: string | null = null
-    if (!transcript && att?.text_status === 'done' && att.text?.trim()) transcript = att.text
+    // the server's speech-to-text (Whisper) reads a meeting far better: it comes first when there is one
+    const serverHears = ai.agents.available('audio')
+    const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
+    // already read by the server (in the background): that; the phone's reading saved earlier doesn't count
+    if (serverHears && saved && saved !== onDevice) transcript = saved
+    else if (serverHears && att && store.hasBlob(att.id)) {
+      reportProgress('Transcribing the recording…')
+      try {
+        const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
+        transcript = r.text
+        agent = r.agent
+      } catch (e) {
+        if (!onDevice && !saved) throw e
+      }
+    }
+    if (!transcript) transcript = onDevice || saved
     if (!transcript) {
       if (!att || !store.hasBlob(att.id)) throw new Error("The recording hasn't reached the server yet – try again once it has synced.")
       const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
       transcript = r.text
       agent = r.agent
     }
-    // the recording becomes searchable by what was said
-    if (att && transcript && !(att.text_status === 'done' && att.text?.trim())) {
+    // the recording becomes searchable by what was said – the better reading replacing the phone's
+    if (att && transcript && transcript !== att.text) {
       store.setAttachmentText(att.id, transcript, 'done')
       sync.reindexNotesFor(att.id)
     }

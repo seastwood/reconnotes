@@ -62,6 +62,21 @@ export class Vocabulary {
   }
 
   /** The words to tell the AI about ('' when there are none). */
+  /**
+   * For speech-to-text (Whisper's "prompt"): your names and terms, as text it has "already heard" –
+   * it then spells them like that. Short: Whisper only reads the last ~220 tokens of it.
+   */
+  speechPrompt(): string {
+    const s = this.load()
+    const words = [...new Set([...s.learned.map((l) => l.to), ...s.words])].filter((w) => w.length <= 30)
+    let out = ''
+    for (const w of words) {
+      if (out.length + w.length + 2 > 600) break
+      out += (out ? ', ' : '') + w
+    }
+    return out ? `${out}.` : ''
+  }
+
   hint(): string {
     const s = this.load()
     const words = [...new Set([...s.words, ...s.learned.map((l) => l.to)])].slice(0, 150)

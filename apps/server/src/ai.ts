@@ -2,6 +2,7 @@ import { Resvg } from '@resvg/resvg-js'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
 import type { Store } from './store'
 import { Vocabulary } from './vocabulary'
+import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
 import { EmptyReplyError, NoTextError, readingMode, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
@@ -246,17 +247,14 @@ export class Ai {
    * the meeting: a summary, decisions, and the action items as a checklist.
    */
   async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string }> {
-    const prompt = `Write meeting notes from a recording's transcript and the notes taken during it. Today is ${today}.
-
-Rules:
-- Use ONLY what is in the transcript and the notes below. Never invent names, people, projects, dates, numbers or tasks.
-- A short recording gets short notes: one summary bullet is fine. If nothing was decided or assigned, say so.
-- Stop after the Action items section.
-
-Use exactly this Markdown layout:
+    const said = transcript.replace(/\s+/g, ' ').trim()
+    // how long it was, from how much was said (people speak ~140 words a minute)
+    const minutes = Math.round(said.split(' ').filter(Boolean).length / 140)
+    const parts = meetingParts(said, PART_CHARS)
+    const layout = `Use exactly this Markdown layout:
 
 ## Summary
-- short bullet points: what was said
+- one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons)
 
 ## Decisions
 - each decision that was actually made (leave this section out if none)
@@ -264,20 +262,77 @@ Use exactly this Markdown layout:
 ## Action items
 - [ ] each task that was actually said, with the person and the deadline only if they were said
 
-If no task was said, write "- [ ] No action items" under that heading.
+If no task was said, write "- [ ] No action items" under that heading.`
+    const length =
+      minutes >= 5
+        ? `The meeting lasted about ${minutes} minutes: cover every topic that came up – a meeting this long usually has ${Math.min(15, Math.max(4, Math.round(minutes / 3)))} or more summary bullets. Don't leave the later parts out.`
+        : 'A short recording gets short notes: one summary bullet is fine. If nothing was decided or assigned, say so.'
+    const rules = `Rules:
+- Use ONLY what is in the transcript and the notes. Never invent names, people, projects, dates, numbers or tasks.
+- The transcript is from speech recognition: words can be misheard. Write what was clearly meant; leave out what makes no sense, rather than guessing.
+- ${length}
+- Stop after the Action items section.`
+    const { result, agent } = await this.agents.run('compile', async (backend) => {
+      let body: string
+      if (parts.length === 1) {
+        body = `Write meeting notes from a recording's transcript and the notes taken during it. Today is ${today}.
+
+${rules}
+
+${layout}
 
 <notes>
 ${notes.slice(0, 8000) || '(none)'}
 </notes>
 
 <transcript>
-${transcript.slice(0, 16000) || '(no speech recognised)'}
+${said || '(no speech recognised)'}
 </transcript>`
-    const { result, agent } = await this.agents.run('compile', async (backend) => {
-      const raw = await backend.generate([{ text: withExtra(prompt) }], 1500)
+      } else {
+        // a long meeting: each part read on its own (a small model skims a long transcript and
+        // writes up only its start), then the parts' notes put together
+        const partNotes: string[] = []
+        for (let i = 0; i < parts.length; i++) {
+          reportProgress(`Reading part ${i + 1} of ${parts.length} of the meeting…`)
+          const from = Math.round((minutes * i) / parts.length)
+          const to = Math.round((minutes * (i + 1)) / parts.length)
+          const raw = await backend.generate(
+            [
+              {
+                text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.
+
+Write notes on this part: a bullet for each thing discussed, with the details that were said (numbers, names, dates, places, reasons); then any decision made ("Decision: …") and any task someone said they or someone would do ("Task: …", with who and when only if said). Use ONLY what is in this part; leave out small talk and what makes no sense. Bullets only, no headings.
+
+<transcript part="${i + 1}">
+${parts[i]}
+</transcript>`),
+              },
+            ],
+            1200,
+          )
+          const t = collapseRepeats(unwrapModelOutput(raw)).trim()
+          if (t) partNotes.push(`Part ${i + 1} (about minutes ${from}–${to}):\n${t}`)
+        }
+        reportProgress('Putting the meeting notes together…')
+        body = `Write meeting notes from notes on each part of a meeting (made from its recording) and the notes taken during it. Today is ${today}.
+
+${rules}
+- Every part's points belong in the notes: merge what's the same, keep the order.
+
+${layout}
+
+<notes>
+${notes.slice(0, 8000) || '(none)'}
+</notes>
+
+<parts>
+${partNotes.join('\n\n')}
+</parts>`
+      }
+      const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000)
       return groundMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim(), transcript, notes)
     })
-    log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript → ${result.length})`)
+    log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.length})`)
     return { text: result, agent: agent.name }
   }
 
@@ -298,7 +353,7 @@ ${transcript.slice(0, 16000) || '(no speech recognised)'}
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
       if (!backend.transcribe)
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
-      const text = collapseRepeats(await backend.transcribe(data, mime, filename))
+      const text = collapseRepeats(await backend.transcribe(data, mime, filename, this.vocabulary?.speechPrompt() || undefined))
       return text
     })
     log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.length} chars)`)
@@ -699,3 +754,27 @@ export type CompilePart =
   | { text: string }
   | { image: Buffer; mime: string; kind: 'drawing'; strokes: Stroke[]; id: string }
   | { image: Buffer; mime: string; kind: 'photo'; id: string }
+
+/** How much of a meeting's transcript a part is (about 8 minutes of talk): a small model reads that well. */
+const PART_CHARS = 7000
+
+/** A transcript in parts of about `size` characters, cut between sentences. */
+export function meetingParts(text: string, size: number): string[] {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length <= size * 1.4) return [t]
+  const n = Math.ceil(t.length / size)
+  const each = t.length / n
+  const out: string[] = []
+  let from = 0
+  for (let i = 1; i < n; i++) {
+    const aim = Math.round(each * i)
+    // the nearest sentence end to where it should be cut
+    const after = t.slice(aim).search(/[.!?]\s/)
+    const before = t.slice(0, aim).search(/[.!?]\s[^.!?]*$/)
+    const cut = after >= 0 && after < 400 ? aim + after + 1 : before >= 0 && aim - before < 400 ? before + 1 : aim
+    out.push(t.slice(from, cut).trim())
+    from = cut
+  }
+  out.push(t.slice(from).trim())
+  return out.filter(Boolean)
+}

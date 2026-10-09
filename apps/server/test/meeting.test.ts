@@ -126,3 +126,61 @@ John, Jane, Mike`
     expect(meetingNotesText('# Meeting – Wed\n\nAttendees: Doug\n\n## Notes\nParts list')).toContain('Attendees: Doug')
   })
 })
+
+describe('a long meeting, heard by the server', () => {
+  // ~25 minutes of talk: 3,500 words
+  const sentence = (i: number) => `Topic ${i} was about the fence and the gate, and we agreed on item ${i}.`
+  const long = Array.from({ length: 250 }, (_, i) => sentence(i + 1)).join(' ')
+
+  it('is read in parts, cut between sentences, nothing lost', async () => {
+    const { meetingParts } = await import('../src/ai')
+    const parts = meetingParts(long, 7000)
+    expect(parts.length).toBeGreaterThanOrEqual(2)
+    for (const p of parts.slice(0, -1)) expect(p).toMatch(/\.$/)
+    expect(parts.join(' ')).toBe(long)
+  })
+
+  it('writes notes on each part, then puts them together – and Whisper is used over the phone’s own reading', async () => {
+    // a Whisper server: says what it heard, and what words it was told to expect
+    let hint = ''
+    const whisper = http.createServer(async (req, res) => {
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      const body = Buffer.concat(chunks).toString('latin1')
+      hint = /name="prompt"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? ''
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: long }))
+    })
+    await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
+    try {
+      app.ai.agents.save({ name: 'Whisper', kind: 'openai', baseUrl: `http://127.0.0.1:${(whisper.address() as AddressInfo).port}/v1`, model: 'faster-whisper-large-v3-turbo', vision: false })
+      app.ai.vocabulary!.setWords(['Doug', 'MinneTrials'])
+      app.store.putAttachment({ id: 'meetingaudio0001', mime: 'audio/mp4', name: 'Recording.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notemeeting00002', title: 'Long meeting' }))
+      await app.sync.change(noteDocName('notemeeting00002'), (doc) => {
+        const p = new Y.XmlElement('paragraph')
+        p.insert(0, [new Y.XmlText('Attendees: Doug')])
+        getContent(doc).insert(0, [p])
+      })
+      prompts.length = 0
+      const api = (m: string, p: string, b?: unknown) =>
+        fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+      const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'meetingaudio0001', transcript: 'Locates try to keep up with the gas.' } })).job
+      const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+      expect(done.error ?? done.status).toBe('done')
+      // Whisper's reading, with your words as a hint – not the phone's
+      expect(hint).toBe('Doug, MinneTrials.')
+      expect(prompts.join('\n')).not.toContain('Locates try to keep up')
+      // each part read, then all of them put together – the last minutes included
+      const partPrompts = prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))
+      expect(partPrompts.length).toBeGreaterThanOrEqual(2)
+      expect(partPrompts.at(-1)).toContain('Topic 250 was about')
+      const final = prompts.at(-1)!
+      expect(final).toContain('<parts>')
+      expect(Number(/about (\d+) minutes/.exec(final)?.[1])).toBeGreaterThanOrEqual(20)
+      // the recording is searchable by Whisper's reading
+      expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
+    } finally {
+      whisper.close()
+    }
+  })
+})
