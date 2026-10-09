@@ -56,4 +56,11 @@ describe('"Let it think" on an Ollama thinking model', () => {
     expect(chats[0].think).toBe(true)
     expect(chats[0].options.num_predict).toBeGreaterThan(3000)
   })
+  it('meeting notes think even with "Let it think" off – working out what was decided is reasoning', async () => {
+    for (const a of app.ai.agents.agents()) app.ai.agents.remove(a.id)
+    app.ai.agents.save({ name: 'qwen3', kind: 'ollama', baseUrl: `http://127.0.0.1:${(ollama.address() as AddressInfo).port}`, model: 'qwen3:8b', vision: false })
+    chats.length = 0
+    await app.ai.meetingNotes('', 'We could put the box by the fence. Actually no, put it in the middle of the lot. Yep, done.', 'Friday')
+    expect(chats[0].think).toBe(true)
+  })
 })

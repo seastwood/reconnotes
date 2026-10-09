@@ -115,6 +115,16 @@ John, Jane, Mike`
     expect(out).not.toContain('## Decisions')
   })
 
+  it('leaves out placeholders for what wasn’t said ([TBD], not specified)', () => {
+    const t = 'Finish the gate. Move the cottage box after the project. Charlie to look into Summit.'
+    const out = groundMeetingNotes(
+      '## Action items\n- [ ] Finish the gate by [TBD]\n- [ ] Move the cottage box after the project (TBD)\n- [ ] Charlie to look into Summit (deadline: not specified)',
+      t,
+      '',
+    )
+    expect(out).toBe('## Action items\n- [ ] Finish the gate\n- [ ] Move the cottage box after the project\n- [ ] Charlie to look into Summit')
+  })
+
   it('keeps what was said, in other words', () => {
     const transcript = 'Doug will order the motor controllers by Friday. Sophie said the gym booking is done, so we keep Thursday practice.'
     const made = `## Summary
@@ -192,6 +202,12 @@ describe('a long meeting, heard by the server', () => {
       const partPrompts = prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))
       expect(partPrompts.length).toBeGreaterThanOrEqual(2)
       expect(partPrompts.at(-1)).toContain('Topic 250 was about')
+      // each part read for how its topics ended – a suggestion isn't a decision; the last agreed idea is
+      expect(partPrompts[0]).toContain('Outcome:')
+      expect(partPrompts[0]).toContain('A suggestion')
+      const together = prompts.find((p) => p.startsWith('Write meeting notes from notes on each part'))!
+      expect(together).toContain('only the last one agreed on is the decision')
+      expect(together).toContain('## Open questions')
       const final = prompts.at(-1)!
       expect(final).toContain('<parts>')
       expect(Number(/about (\d+) minutes/.exec(final)?.[1])).toBeGreaterThanOrEqual(20)

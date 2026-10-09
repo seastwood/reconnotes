@@ -138,7 +138,8 @@ export interface TimedTranscript {
 }
 
 export interface Backend {
-  generate(parts: Part[], maxTokens: number): Promise<string>
+  /** `think`: reason before answering, where the model can (overrides the agent's "Let it think" for this request) */
+  generate(parts: Part[], maxTokens: number, opts?: { think?: boolean }): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
   /** `prompt`: words to expect (names, terms) – a hint, where the server takes one */
   transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string>
@@ -587,7 +588,8 @@ class OllamaBackend implements Backend {
     return info
   }
 
-  async generate(parts: Part[], maxTokens: number): Promise<string> {
+  async generate(parts: Part[], maxTokens: number, opts?: { think?: boolean }): Promise<string> {
+    const think = opts?.think ?? this.agent.think
     if (parts.some((p) => 'pdf' in p)) throw new Error('Ollama models cannot read PDFs')
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
@@ -609,7 +611,7 @@ class OllamaBackend implements Backend {
       return ctx
     }
     // room on the GPU – sized for the first request (the context it'll be loaded with)
-    await makeRoomOnGpu(this.agent, ctxFor(info.thinking && this.agent.think ? limit + THINK_ROOM_ASKED : limit))
+    await makeRoomOnGpu(this.agent, ctxFor(info.thinking && think ? limit + THINK_ROOM_ASKED : limit))
     const tried: string[] = []
     let thoughtTooLong = 0
 
@@ -626,7 +628,7 @@ class OllamaBackend implements Backend {
     // Qwen's "/no_think" switch, which some models honour instead of think:false
     const noThinkText = `${text}\n\n/no_think`
 
-    if (info.thinking && this.agent.think) {
+    if (info.thinking && think) {
       // asked to think ("Let it think"): reason first, with room for it – a bounded amount, so a
       // small model that would think forever still gets to answer (below, without thinking)
       const roomy = limit + THINK_ROOM_ASKED

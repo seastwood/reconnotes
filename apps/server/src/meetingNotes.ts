@@ -28,6 +28,10 @@ export function meetingNotesText(markdown: string): string {
     .trim()
 }
 
+/** "[TBD]", "by TBD", "(deadline: not specified)", "– N/A"… with what led into it */
+const PLACEHOLDER =
+  /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none)\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
+
 export function groundMeetingNotes(text: string, transcript: string, notes: string): string {
   const source = `${transcript}\n${notes}`
   const have = new Set(words(source))
@@ -49,6 +53,11 @@ export function groundMeetingNotes(text: string, transcript: string, notes: stri
     return hits > 0 && hits / content.length >= 1 / 3
   }
 
+  // placeholders for what wasn't said ("by [TBD]", "(deadline: not specified)") – left out instead
+  text = text
+    .split('\n')
+    .map((l) => l.replace(PLACEHOLDER, '').replace(/\s+([.,;:])/g, '$1').replace(/\s+$/, ''))
+    .join('\n')
   // a model that carries on past its answer repeats the prompt: cut it there
   const cut = text.search(/^\s*(Notes taken during the meeting|Transcript of the recording)\b/im)
   const lines = (cut >= 0 ? text.slice(0, cut) : text).split('\n')

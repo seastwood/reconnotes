@@ -254,24 +254,36 @@ export class Ai {
     const layout = `Use exactly this Markdown layout:
 
 ## Summary
-- one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons)
+- one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as)
 
 ## Decisions
-- each decision that was actually made (leave this section out if none)
+- each thing that was actually settled: the final outcome only (leave this section out if nothing was settled)
+
+## Open questions
+- each thing raised but left unsettled or to be found out (leave this section out if none)
 
 ## Action items
-- [ ] each task that was actually said, with the person and the deadline only if they were said
+- [ ] each task someone took on or was given, with the person and the deadline only if they were said
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
       minutes >= 5
         ? `The meeting lasted about ${minutes} minutes: cover every topic that came up – a meeting this long usually has ${Math.min(15, Math.max(4, Math.round(minutes / 3)))} or more summary bullets. Don't leave the later parts out.`
         : 'A short recording gets short notes: one summary bullet is fine. If nothing was decided or assigned, say so.'
+    // what a small model gets wrong most: taking every idea floated for a decision
+    const reasoning = `How to tell what was decided:
+- A suggestion ("we could…", "what if…", "another thought is…", "maybe…") is not a decision. A decision is what people agreed on and the talk moved on from ("yep", "done", "let's do that", "you got it", or it was simply acted on).
+- People change their minds: when a later idea replaces an earlier one, only the last one agreed on is the decision. The earlier ideas belong in the Summary ("first suggested X; settled on Y"), never in Decisions or Action items.
+- A task taken back later ("load the crate… actually, no, don't load it up") is not a task.
+- When something wasn't settled, or someone is to find something out, it's an open question (with who looks into it, if said).`
     const rules = `Rules:
 - Use ONLY what is in the transcript and the notes. Never invent names, people, projects, dates, numbers or tasks.
 - The transcript is from speech recognition: words can be misheard. Write what was clearly meant; leave out what makes no sense, rather than guessing.
+- Never write placeholders like [TBD], "unspecified" or "N/A": what wasn't said is left out.
 - ${length}
-- Stop after the Action items section.`
+- Stop after the Action items section.
+
+${reasoning}`
     const { result, agent } = await this.agents.run('compile', async (backend) => {
       let body: string
       if (parts.length === 1) {
@@ -301,14 +313,28 @@ ${said || '(no speech recognised)'}
               {
                 text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.
 
-Write notes on this part: a bullet for each thing discussed, with the details that were said (numbers, names, dates, places, reasons); then any decision made ("Decision: …") and any task someone said they or someone would do ("Task: …", with who and when only if said). Use ONLY what is in this part; leave out small talk and what makes no sense. Bullets only, no headings.
+Write notes on this part, topic by topic, in the order they came up:
+
+- Topic: a few words naming it
+  - Said: the details (numbers, names, dates, places, reasons)
+  - Ideas: suggestions made along the way, in order (who, if said)
+  - Outcome: how it was left by the end of this part – "Agreed: …" if people agreed; "Changed: … (instead of …)" if a later idea replaced an earlier one; "Open: …" if it wasn't settled
+  - Tasks: who took on or was given what (and when, only if said); leave out a task that was taken back
+
+Leave out a line that has nothing (no "Ideas" if there were none). Read the whole part before writing an outcome: what's said later can change it.
+
+${reasoning}
+
+Use ONLY what is in this part; leave out small talk and what makes no sense. Never write placeholders like [TBD].
 
 <transcript part="${i + 1}">
 ${parts[i]}
 </transcript>`),
               },
             ],
-            1200,
+            1500,
+            // reasoning first: who suggested what, what replaced it, what was agreed
+            { think: true },
           )
           const t = collapseRepeats(unwrapModelOutput(raw)).trim()
           if (t) partNotes.push(`Part ${i + 1} (about minutes ${from}–${to}):\n${t}`)
@@ -318,6 +344,8 @@ ${parts[i]}
 
 ${rules}
 - Every part's points belong in the notes: merge what's the same, keep the order.
+- A topic can carry on into a later part: its last outcome is the one that counts.
+- Decisions come only from the parts' "Agreed" and "Changed" outcomes; Open questions from their "Open" ones; Action items from their "Tasks".
 
 ${layout}
 
@@ -329,7 +357,7 @@ ${notes.slice(0, 8000) || '(none)'}
 ${partNotes.join('\n\n')}
 </parts>`
       }
-      const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000)
+      const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true })
       return groundMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim(), transcript, notes)
     })
     log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.length})`)
