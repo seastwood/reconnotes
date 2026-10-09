@@ -98,6 +98,35 @@ describe('meeting notes', () => {
     expect(yours).not.toContain('Action items')
     // and the note has the new notes once, in place of the old
     expect(getContent(app.sync.getDoc(noteDocName('notemeeting00001'))!).toString().split('the gym needs booking').length - 1).toBe(1)
+
+    // you add a to-do of your own to its checklist, then redo it again: yours stays
+    await app.sync.change(noteDocName('notemeeting00001'), (doc) => {
+      const find = (el: Y.XmlFragment | Y.XmlElement): Y.XmlElement | null => {
+        for (const c of el.toArray()) {
+          if (!(c instanceof Y.XmlElement)) continue
+          if (c.nodeName.toLowerCase() === 'tasklist') return c
+          const f = find(c)
+          if (f) return f
+        }
+        return null
+      }
+      const list = find(getContent(doc))!
+      const item = new Y.XmlElement('taskitem')
+      item.setAttribute('checked', 'false')
+      const para = new Y.XmlElement('paragraph')
+      para.insert(0, [new Y.XmlText('Sophie brings the projector')])
+      item.insert(0, [para])
+      list.push([item])
+    })
+    const third = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00001', input: { attachmentId: 'nonexistent00001', transcript: 'Doug will order the parts by Friday. We need to book the gym.', replace: again.id } })).job
+    expect((await api('GET', `/api/jobs/${third.id}/wait`)).job.status).toBe('done')
+    const after = getContent(app.sync.getDoc(noteDocName('notemeeting00001'))!).toString()
+    expect(after).toContain('Sophie brings the projector')
+    // the summary you didn't touch was replaced, not doubled – nor the AI's own to-dos beside yours
+    expect(after.split('the gym needs booking').length - 1).toBe(1)
+    expect(after.split('Book the gym').length - 1).toBe(1)
+    // the note as it was before each redo is in its history
+    expect(app.store.listVersions(noteDocName('notemeeting00001')).filter((v) => v.label === 'Before a redo').length).toBe(2)
   })
 
   it('leaves ▶ links into the recording out of what you wrote', () => {

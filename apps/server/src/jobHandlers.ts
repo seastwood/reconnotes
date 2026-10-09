@@ -1,4 +1,6 @@
+import crypto from 'node:crypto'
 import { log } from './log'
+import { snapshotNow } from './versions'
 import { addListenLinks } from './listen'
 import fs from 'node:fs'
 import * as Y from 'yjs'
@@ -81,12 +83,52 @@ function find(parent: Parent, test: (el: Y.XmlElement) => boolean): Spot | null 
   return null
 }
 
-/** Remove the blocks a job wrote; returns where the first one was. */
+/** what a block a job wrote says (its fingerprint left out), to tell later whether you changed it */
+const blockPrint = (el: Y.XmlElement) =>
+  crypto
+    .createHash('sha1')
+    // the words and their structure (and ticked to-dos) – not attributes the app may add on its own
+    .update(el.toString().replace(/ (?!checked=)[\w-]+="[^"]*"/g, ''))
+    .digest('hex')
+    .slice(0, 16)
+
+const LIST = /^(bulletlist|orderedlist|tasklist)$/i
+
+/**
+ * Remove the blocks a job wrote, for its redo; returns where the first one was. A block you've
+ * changed since – a bullet reworded, a to-do added to its checklist – stays: it's yours now
+ * (no longer the job's), and the new result goes in before it. Results written before blocks
+ * had fingerprints are replaced as before.
+ */
 function removeTagged(frag: Y.XmlFragment, jobId: string): Spot | null {
   let first: Spot | null = null
+  const fingerprinted = Boolean(find(frag, (el) => el.getAttribute('job') === jobId && Boolean(el.getAttribute('jobHash'))))
   for (;;) {
     const spot = find(frag, (el) => el.getAttribute('job') === jobId)
     if (!spot) return first
+    const el = spot.parent.get(spot.index) as Y.XmlElement
+    const hash = el.getAttribute('jobHash')
+    if (fingerprinted && (!hash || hash !== blockPrint(el))) {
+      // edited: kept as yours – of a list, only the items you added, ticked or changed
+      el.removeAttribute('job')
+      el.removeAttribute('jobHash')
+      if (LIST.test(el.nodeName)) {
+        for (let i = el.length - 1; i >= 0; i--) {
+          const item = el.get(i)
+          if (!(item instanceof Y.XmlElement)) continue
+          const h = item.getAttribute('jobHash')
+          if (h && h === blockPrint(item)) el.delete(i, 1)
+          else item.removeAttribute('jobHash')
+        }
+        if (!el.length) {
+          spot.parent.delete(spot.index, 1)
+          first ??= spot
+          continue
+        }
+      }
+      first ??= spot
+      continue
+    }
     spot.parent.delete(spot.index, 1)
     first ??= spot
   }
@@ -100,6 +142,11 @@ type Where = { after: (el: Y.XmlElement) => boolean } | 'top' | 'end'
  * the top (under the title) or the end.
  */
 async function writeResult(sync: SyncEngine, noteId: string, jobId: string, markdown: string, where: Where, replace: string | null, ctx: Partial<Ctx> = {}) {
+  // a redo: the note as it was kept in its history first (Note › History), whatever happens next
+  if (replace && versionStore) {
+    const before = sync.getDoc(noteDocName(noteId))
+    if (before) snapshotNow(versionStore, noteDocName(noteId), before, 'Before a redo')
+  }
   await sync.change(noteDocName(noteId), (doc) => {
     const frag = getContent(doc)
     let spot = replace ? removeTagged(frag, replace) : null
@@ -112,6 +159,12 @@ async function writeResult(sync: SyncEngine, noteId: string, jobId: string, mark
     const nodes = markdownToNodes(markdown, { attach: () => null, noteFor: () => null, ...ctx })
     for (const n of nodes) n.setAttribute('job', jobId)
     if (nodes.length) spot.parent.insert(spot.index, nodes)
+    // each block's fingerprint as written: a redo can tell what you've changed since
+    for (const n of nodes) {
+      n.setAttribute('jobHash', blockPrint(n))
+      // a list's items too: a redo keeps just the ones you've touched
+      if (LIST.test(n.nodeName)) for (const item of n.toArray()) if (item instanceof Y.XmlElement) item.setAttribute('jobHash', blockPrint(item))
+    }
   })
 }
 
@@ -166,7 +219,11 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'web-refresh': null,
 }
 
+/** for snapshots before a redo replaces a result */
+let versionStore: Store | null = null
+
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
+  versionStore = store
   const modelOf = (task: AiTask | null) => {
     const a = task ? ai.agents.chain(task)[0] : undefined
     return a ? `${a.kind}|${a.baseUrl}|${a.model}` : null
