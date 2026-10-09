@@ -72,6 +72,8 @@ describe('meeting notes', () => {
     const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
     expect(done.status).toBe('done')
     expect(prompts[0]).toContain('Doug will order the parts by Friday')
+    // no speech-to-text on the server: the phone's reading, and the job says so
+    expect(done.agent).toMatch(/^Apple speech recognition \(on the phone\) \+ /)
     expect(prompts[0]).toContain('Attendees: Doug, Sophie')
     const doc = app.sync.getDoc(noteDocName('notemeeting00001'))!
     const xml = getContent(doc).toString()
@@ -177,6 +179,8 @@ describe('a long meeting, heard by the server', () => {
       const final = prompts.at(-1)!
       expect(final).toContain('<parts>')
       expect(Number(/about (\d+) minutes/.exec(final)?.[1])).toBeGreaterThanOrEqual(20)
+      // the job says who heard it
+      expect(done.agent).toMatch(/^Whisper \+ /)
       // the recording is searchable by Whisper's reading
       expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
     } finally {

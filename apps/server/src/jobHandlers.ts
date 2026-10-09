@@ -490,7 +490,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       })
       .join('\n')
     await writeResult(sync, noteId, job.id, md, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
-    return { result: { noteId, text: preview(md) }, agent: agent ? `${agent} + ${r.agent}` : r.agent }
+    // who heard it: the server's speech-to-text, or the phone (Apple) – shown on the job
+    const heardBy = agent ?? (transcript === onDevice ? 'Apple speech recognition (on the phone)' : saved && transcript === saved ? 'the recording’s saved transcript' : null)
+    return { result: { noteId, text: preview(md), heardBy }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
   jobs.register('extract-text', async (job) => {
