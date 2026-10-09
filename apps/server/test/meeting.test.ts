@@ -557,7 +557,7 @@ describe('who said what', () => {
       expect(done.error ?? done.status).toBe('done')
       // the attendees: Whisper's hint, and at most three voices
       expect(hint.startsWith('Seth, Jesse, Charlie')).toBe(true)
-      expect(asked).toBe('/diarize?speakers=3&threshold=0.9')
+      expect(asked).toBe('/diarize?speakers=3&threshold=1')
       expect(done.result.voices).toBe(2)
       // how the model answered each step, kept with the job
       expect(done.result.draft.how.some((h: string) => h.startsWith('Final notes: '))).toBe(true)
@@ -590,9 +590,9 @@ describe('who said what', () => {
       const fourth = (await fetch(`${base}/api/jobs/${third.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
       expect((await api('GET', `/api/jobs/${fourth.id}/wait`)).job.status).toBe('done')
       expect(asked).toBe('')
-      // out of range: kept within 0.5–1
+      // out of range: kept within 0.5–1.3
       app.ai.agents.updateSettings({ speakerThreshold: 3 })
-      expect(app.ai.agents.settings().speakerThreshold).toBe(1)
+      expect(app.ai.agents.settings().speakerThreshold).toBe(1.3)
       app.ai.agents.updateSettings({ speakerThreshold: 0.9 })
 
       // the voices you named are known now: a new recording of the same people is named by itself
@@ -685,6 +685,25 @@ describe('voices heard for a moment, when the service tells them apart', () => {
     const { segments, voices } = mergeVoices(found, { 0: [1, 0], 1: [0.5, 0.5], 2: [0, 1] })
     expect(new Set(segments.map((s) => s.speaker))).toEqual(new Set([0, 1]))
     expect(voices).toEqual({ 0: [1, 0], 1: [0, 1] })
+  })
+
+  it('a voice heard for a short while that sounds like a main voice is that person – wherever they spoke', async () => {
+    const { mergeVoices } = await import('../src/jobHandlers')
+    const found = [
+      { start: 0, end: 100, speaker: 0 },
+      { start: 101, end: 200, speaker: 1 },
+      // 20 s, far from speaker 0's turns, but sounds like them
+      { start: 300, end: 320, speaker: 2 },
+      { start: 321, end: 420, speaker: 1 },
+      // 20 s sounding like nobody (a radio): stays its own
+      { start: 421, end: 441, speaker: 3 },
+    ]
+    const { segments } = mergeVoices(found, { 0: [1, 0, 0], 1: [0, 1, 0], 2: [0.95, 0.31, 0], 3: [0, 0, 1] })
+    const at = (t: number) => segments.find((s) => s.start <= t && s.end >= t)?.speaker
+    expect(at(310)).toBe(at(50))
+    expect(at(430)).not.toBe(at(50))
+    expect(at(430)).not.toBe(at(150))
+    expect(new Set(segments.map((s) => s.speaker)).size).toBe(3)
   })
 })
 

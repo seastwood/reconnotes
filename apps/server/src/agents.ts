@@ -122,12 +122,13 @@ export interface AiSettings {
   speechLanguage: string
   /**
    * Speaker labels: how alike two stretches of speech must be to count as one person
-   * (0.5–1). Higher: fewer voices; lower: more.
+   * (0.5–1.3). Higher: fewer voices; lower: more.
    */
   speakerThreshold: number
 }
 
-export const SPEAKER_THRESHOLD = 0.9
+/** tried on a real 21-minute meeting (6 people, one phone): 0.9 found 28 voices, 1.0 found 15 – 7 once short ones were merged */
+export const SPEAKER_THRESHOLD = 1.0
 
 /**
  * Set while a caller wants the reply as it's written (e.g. "Ask your notes"):
@@ -1369,7 +1370,7 @@ export class AgentRegistry {
     if (typeof patch.autoAudio === 'boolean') s.autoAudio = patch.autoAudio
     if (typeof patch.speechLanguage === 'string' && /^([a-z]{2,3})?$/.test(patch.speechLanguage)) s.speechLanguage = patch.speechLanguage
     if (typeof patch.speakerThreshold === 'number' && Number.isFinite(patch.speakerThreshold))
-      s.speakerThreshold = Math.round(Math.min(1, Math.max(0.5, patch.speakerThreshold)) * 100) / 100
+      s.speakerThreshold = Math.round(Math.min(1.3, Math.max(0.5, patch.speakerThreshold)) * 100) / 100
     this.store.setSetting(SETTINGS_KEY, s)
     return s
   }

@@ -127,7 +127,7 @@ export function AiAgentsSection({ part = 'agents' }: { part?: 'agents' | 'recogn
           Told to your speech-to-text server, so it doesn’t guess from the first few seconds (a noisy start can make it guess wrong). “Detect” suits recordings in
           more than one language.
         </p>
-        <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
+        <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 1} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
         <KnownVoices />
         <VocabularySection />
         <RereadButton />
@@ -319,7 +319,7 @@ function SpeakerLabelsSetting({ value, onSave }: { value: number; onSave: (v: nu
         <input
           type="range"
           min={0.7}
-          max={1}
+          max={1.2}
           step={0.01}
           value={draft}
           onChange={(e) => setDraft(Number(e.target.value))}
@@ -327,14 +327,14 @@ function SpeakerLabelsSetting({ value, onSave }: { value: number; onSave: (v: nu
         />
         <span className="muted">Fewer voices</span>
         <b>{draft.toFixed(2)}</b>
-        {draft !== 0.9 && (
-          <button className="text" onClick={() => setDraft(0.9)}>
+        {draft !== 1 && (
+          <button className="text" onClick={() => setDraft(1)}>
             Default
           </button>
         )}
       </div>
       <p className="hint">
-        For the speaker-label service: how alike two voices must be to count as one person (0.90 by default). One person shown as two speakers? Move it toward Fewer
+        For the speaker-label service: how alike two voices must be to count as one person (1.00 by default). One person shown as two speakers? Move it toward Fewer
         voices. Two people merged into one? Toward More voices. A recording gets new labels the next time you redo its meeting notes.
       </p>
     </>

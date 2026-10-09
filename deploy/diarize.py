@@ -18,7 +18,7 @@ TitaNet voice model, downloaded once on first start.
                                   the recording (any format ffmpeg reads) as the body;
                                   N (optional): at most this many people spoke;
                                   T (optional): how alike voices must be to count as one
-                                  person, 0.5–1 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
+                                  person, 0.5–1.5 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
     -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3,
         "voices": {"0": [0.012, -0.08, ...], ...}}
 
@@ -45,7 +45,7 @@ import sherpa_onnx
 PORT = int(os.environ.get("DIARIZE_PORT", "9402"))
 MODELS = os.environ.get("DIARIZE_MODELS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "diarize-models"))
 # how alike two stretches of speech must be to count as one person (higher: fewer speakers)
-THRESHOLD = float(os.environ.get("DIARIZE_THRESHOLD", "0.9"))
+THRESHOLD = float(os.environ.get("DIARIZE_THRESHOLD", "1.0"))
 THREADS = int(os.environ.get("DIARIZE_THREADS", str(max(1, (os.cpu_count() or 2) - 1))))
 
 RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
@@ -154,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             query = urllib.parse.parse_qs(url.query)
             most = int(query.get("speakers", ["0"])[0] or 0)
-            threshold = min(1.0, max(0.5, float(query.get("threshold", [THRESHOLD])[0] or THRESHOLD)))
+            threshold = min(1.5, max(0.5, float(query.get("threshold", [THRESHOLD])[0] or THRESHOLD)))
             with lock:  # one recording at a time: it uses every CPU core it's given
                 sd = diarizer(threshold=threshold)
                 samples = decode(data, sd.sample_rate)

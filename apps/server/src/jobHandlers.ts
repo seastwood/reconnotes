@@ -230,11 +230,33 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'web-refresh': null,
 }
 
+/** a voice heard for less than this (seconds, or share of all the talk) isn't one of the meeting's main voices */
+const MINOR_SECONDS = 30
+const MINOR_SHARE = 0.03
+/** …and is taken for the main voice it's at least this like (TitaNet; the same room makes everyone sound a bit alike – main voices of different people scored 0.34–0.84 there) */
+const SOUNDS_LIKE = 0.6
+const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * (b[i] ?? 0), 0)
+
 /**
  * Voices heard for a moment folded into the ones around them (mergeMinorVoices) – and what each
  * remaining voice sounds like carried over to its new number (from the one that spoke the most).
  */
 export function mergeVoices(found: { start: number; end: number; speaker: number }[], voices: Voices): { segments: { start: number; end: number; speaker: number }[]; voices: Voices } {
+  // a voice heard for a short while that sounds like one of the main voices is that person, split
+  // off (in a real meeting, a 21-minute one, the service found 28 voices for about 6 people)
+  const talked = new Map<number, number>()
+  for (const s of found) talked.set(s.speaker, (talked.get(s.speaker) ?? 0) + s.end - s.start)
+  const total = [...talked.values()].reduce((a, b) => a + b, 0)
+  const minor = (v: number) => (talked.get(v) ?? 0) < Math.max(MINOR_SECONDS, total * MINOR_SHARE)
+  const main = [...talked.keys()].filter((v) => !minor(v) && voices[v])
+  const into = new Map<number, number>()
+  for (const v of talked.keys()) {
+    if (!minor(v) || !voices[v] || !main.length) continue
+    const [best] = main.map((m) => ({ m, sim: dot(voices[v], voices[m]) })).sort((a, b) => b.sim - a.sim)
+    if (best.sim >= SOUNDS_LIKE) into.set(v, best.m)
+  }
+  found = found.map((s) => (into.has(s.speaker) ? { ...s, speaker: into.get(s.speaker)! } : s))
+  // then what's still only a few seconds goes to whoever was speaking around it
   const segments = mergeMinorVoices(found)
   const talk = new Map<number, number>()
   const longest = new Map<number, { start: number; end: number }>()

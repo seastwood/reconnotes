@@ -463,7 +463,7 @@ TitaNet voice model, downloaded once on first start.
                                   the recording (any format ffmpeg reads) as the body;
                                   N (optional): at most this many people spoke;
                                   T (optional): how alike voices must be to count as one
-                                  person, 0.5–1 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
+                                  person, 0.5–1.5 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
     -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3,
         "voices": {"0": [0.012, -0.08, ...], ...}}
 
@@ -490,7 +490,7 @@ import sherpa_onnx
 PORT = int(os.environ.get("DIARIZE_PORT", "9402"))
 MODELS = os.environ.get("DIARIZE_MODELS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "diarize-models"))
 # how alike two stretches of speech must be to count as one person (higher: fewer speakers)
-THRESHOLD = float(os.environ.get("DIARIZE_THRESHOLD", "0.9"))
+THRESHOLD = float(os.environ.get("DIARIZE_THRESHOLD", "1.0"))
 THREADS = int(os.environ.get("DIARIZE_THREADS", str(max(1, (os.cpu_count() or 2) - 1))))
 
 RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
@@ -599,7 +599,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             query = urllib.parse.parse_qs(url.query)
             most = int(query.get("speakers", ["0"])[0] or 0)
-            threshold = min(1.0, max(0.5, float(query.get("threshold", [THRESHOLD])[0] or THRESHOLD)))
+            threshold = min(1.5, max(0.5, float(query.get("threshold", [THRESHOLD])[0] or THRESHOLD)))
             with lock:  # one recording at a time: it uses every CPU core it's given
                 sd = diarizer(threshold=threshold)
                 samples = decode(data, sd.sample_rate)
@@ -696,10 +696,12 @@ ReconNotes looks for it on port 9402 at your speech-to-text agent's address, so 
 
 ### Too many or too few speakers
 
-The **threshold** decides how alike two stretches of speech must be to count as one person. It's 0.9 to start.
+The **threshold** decides how alike two stretches of speech must be to count as one person. It's 1.0 to start (tried on a real 21-minute meeting of six people recorded on one phone: 0.9 found 28 voices, 1.0 found 15 – and 7 once short ones that sound like one of the main voices were merged into it).
 
-- One person shown as two speakers → raise it (0.93, then 0.95).
-- Two people merged into one → lower it (0.85, then 0.8).
+- One person shown as two speakers → raise it (1.05, then 1.1).
+- Two people merged into one → lower it (0.95, then 0.9).
+
+Or, quicker: say how many people were there – in the meeting's setup, or the recording's **⋯ → How many people spoke…** – and it finds at most that many.
 
 Listing the attendees when you start a meeting also stops one person being counted twice.
 
@@ -715,7 +717,7 @@ In the editor that opens, type these two lines in the blank space near the top (
 
 ```ini
 [Service]
-Environment=DIARIZE_THRESHOLD=0.95
+Environment=DIARIZE_THRESHOLD=1.1
 ```
 
 Restart it and check the new value:
@@ -725,7 +727,7 @@ systemctl restart diarize
 curl -s http://localhost:9402/
 ```
 
-It should answer `{"ok": true, "threshold": 0.95}`. To go back to 0.9, run `systemctl revert diarize && systemctl restart diarize`.
+It should answer `{"ok": true, "threshold": 1.1}`. To go back to the default, run `systemctl revert diarize && systemctl restart diarize`.
 
 Recordings that already have labels keep them until you redo them:
 

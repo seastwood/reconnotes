@@ -11,9 +11,10 @@ import type { Store } from './store'
  * clearly like someone you've named gets their name straight away.
  *
  * Measured with the TitaNet model the service uses: the same person in two
- * different clips scores 0.6–0.7 (higher with more speech); different people
- * 0.1–0.35. A name is given at 0.5 or more, and only when it's clearly ahead of
- * the next best.
+ * clips of a test recording scored 0.6–0.7, different people 0.1–0.35 – but in
+ * a real meeting, everyone recorded on one phone in one room, different
+ * people's voices scored as high as 0.84. So a name is given only at 0.7 or
+ * more, and only when it's clearly (0.1) ahead of anyone else's.
  */
 
 /** a recording's voices: speaker number → embedding */
@@ -29,8 +30,8 @@ interface Sample {
 const PRINTS = 'voiceprints'
 /** the last few recordings a person was named in: their voice as it sounds lately */
 const SAMPLES_PER_NAME = 12
-export const MATCH = 0.5
-const MARGIN = 0.08
+export const MATCH = 0.7
+const MARGIN = 0.1
 
 const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * (b[i] ?? 0), 0)
 const unit = (v: number[]) => {
