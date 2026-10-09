@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WORKSPACE_DOC, createFolder, getContent, getFolders, noteDocName, readFolder, updateNote } from '@reconnotes/core'
+import { WORKSPACE_DOC, createFolder, createNote, getContent, getFolders, noteDocName, noteToMarkdown, readFolder, updateNote } from '@reconnotes/core'
 import type { Ai } from './ai'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -17,8 +17,9 @@ import { importNotes, markdownToNodes } from './importNotes'
  * backups) come with the server as notes in a "ReconNotes Setup" folder,
  * so they're at hand in the app itself. Each guide is added once: delete it
  * and it stays deleted. When an update improves a guide, its note is brought
- * up to date – unless you've edited that note, which then stays yours. A
- * guide added in a later version appears after updating.
+ * up to date – unless you've edited that note's text, which then stays
+ * yours, and the new version arrives beside it as "<title> (latest version)".
+ * A guide added in a later version appears after updating.
  */
 
 export const GUIDES_FOLDER = 'ReconNotes Setup'
@@ -39,6 +40,10 @@ interface Guide {
   hash: string
   /** when it was written (a later edit in the note = yours: left alone) */
   at: number
+  /** the note's text as written (to tell an edit from anything else touching the note) */
+  md?: string
+  /** the newer version, beside the one you edited */
+  latest?: { noteId: string; hash: string; md: string }
 }
 interface State {
   folderId?: string
@@ -76,19 +81,44 @@ export async function seedSetupGuides(config: Config, store: Store, ai: Ai, sync
   // 1. newer versions of guides you haven't touched
   const titles = new Map<string, string>()
   for (const [f, g] of Object.entries(guides)) titles.set(titleOf(f).toLowerCase(), g.noteId)
+  const textOf = (noteId: string) => {
+    const doc = sync.getDoc(noteDocName(noteId))
+    return doc ? hashOf(noteToMarkdown(doc)) : ''
+  }
+  const write = (noteId: string, md: string) =>
+    sync.change(noteDocName(noteId), (doc) => {
+      const content = getContent(doc)
+      content.delete(0, content.length)
+      content.insert(0, markdownToNodes(md, { attach: () => null, noteFor: (t) => titles.get(t.toLowerCase()) ?? null }))
+    })
   for (const f of files) {
     const g = guides[f]
     const m = g && meta.get(g.noteId)
-    if (!g || !m || m.trashedAt || g.hash === hashOf(text.get(f)!)) continue
-    // edited since it was written (a few seconds' grace for the first sync)
-    if (m.updatedAt > g.at + 10_000) continue
-    await sync.change(noteDocName(g.noteId), (doc) => {
-      const content = getContent(doc)
-      content.delete(0, content.length)
-      content.insert(0, markdownToNodes(text.get(f)!, { attach: () => null, noteFor: (t) => titles.get(t.toLowerCase()) ?? null }))
-    })
-    guides[f] = { noteId: g.noteId, hash: hashOf(text.get(f)!), at: Date.now() }
-    changed.push(g.noteId)
+    const hash = hashOf(text.get(f)!)
+    if (!g || !m || m.trashedAt || g.hash === hash) continue
+    // edited since it was written: its text changed (older records: its modified time, with a few seconds' grace)
+    const edited = g.md ? textOf(g.noteId) !== g.md : m.updatedAt > g.at + 10_000
+    if (!edited) {
+      await write(g.noteId, text.get(f)!)
+      guides[f] = { noteId: g.noteId, hash, at: Date.now(), md: textOf(g.noteId) }
+      changed.push(g.noteId)
+      continue
+    }
+    // yours now: the new version beside it (once per version; kept up to date while you leave it as it is)
+    const l = g.latest
+    const lm = l && meta.get(l.noteId)
+    if (l && lm && !lm.trashedAt && l.hash === hash) continue
+    if (l && lm && !lm.trashedAt && textOf(l.noteId) === l.md) {
+      await write(l.noteId, text.get(f)!)
+      guides[f] = { ...g, latest: { noteId: l.noteId, hash, md: textOf(l.noteId) } }
+      changed.push(l.noteId)
+      continue
+    }
+    let id = ''
+    await sync.change(WORKSPACE_DOC, (ws) => void (id = createNote(ws, { title: `${titleOf(f)} (latest version)`, folderId: m.folderId ?? state.folderId ?? null })))
+    await write(id, text.get(f)!.replace(/^# (.+)$/m, '# $1 (latest version)'))
+    guides[f] = { ...g, latest: { noteId: id, hash, md: textOf(id) } }
+    changed.push(id)
   }
 
   // 2. guides not added before
@@ -108,7 +138,7 @@ export async function seedSetupGuides(config: Config, store: Store, ai: Ai, sync
       fresh.map((f) => ({ path: f, data: Buffer.from(text.get(f)!) })),
       folderId,
     )
-    fresh.forEach((f, i) => (guides[f] = { noteId: r.noteIds[i], hash: hashOf(text.get(f)!), at: Date.now() }))
+    fresh.forEach((f, i) => (guides[f] = { noteId: r.noteIds[i], hash: hashOf(text.get(f)!), at: Date.now(), md: textOf(r.noteIds[i]) }))
     // "Start here" at the top of the folder
     const first = fresh.indexOf(FIRST)
     if (first >= 0 && r.noteIds[first]) await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, r.noteIds[first], { pinned: true }))

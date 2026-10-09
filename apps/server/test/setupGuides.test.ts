@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, getContent, listFolders, listNotes, noteDocName, updateNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
@@ -58,25 +59,41 @@ describe('setup guides', () => {
     fs.rmSync(next, { recursive: true, force: true })
   })
 
-  it('bring an improved guide up to date, unless you edited that note', async () => {
+  it('bring an improved guide up to date – and when you edited it, the new version arrives beside it', async () => {
     const next = fs.mkdtempSync(path.join(os.tmpdir(), 'reconnotes-guides-v2-'))
     for (const f of fs.readdirSync(guidesDir()!)) fs.copyFileSync(path.join(guidesDir()!, f), path.join(next, f))
     fs.writeFileSync(path.join(next, 'Something new.md'), '# Something new\n\nA new guide.')
-    // you edited "Install the server" (its note was changed after it was written)
+    // you edited "Install the server"'s text
     const install = guideNotes().find((n) => n.title === 'Install the server')!
-    await app.sync.change(WORKSPACE_DOC, (d) => updateNote(d, install.id, { updatedAt: Date.now() + 60_000 }))
+    await app.sync.change(noteDocName(install.id), (doc) => {
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText('My own note about my server.')])
+      getContent(doc).insert(0, [p])
+    })
+    // "Connect your devices" was only touched (opened, synced…), not edited
+    const connect = guideNotes().find((n) => n.title === 'Connect your devices')!
+    await app.sync.change(WORKSPACE_DOC, (d) => updateNote(d, connect.id, { updatedAt: Date.now() + 60_000 }))
     // the new version improves both guides
     fs.appendFileSync(path.join(next, 'Connect your devices.md'), '\nA brand new tip.\n')
     fs.appendFileSync(path.join(next, 'Install the server.md'), '\nAnother new tip.\n')
     const changed = await seedSetupGuides(app.config, app.store, app.ai, app.sync, next)
-    const connect = guideNotes().find((n) => n.title === 'Connect your devices')!
-    expect(changed).toEqual([connect.id])
+    const latest = guideNotes().find((n) => n.title === 'Install the server (latest version)')!
+    expect(latest).toBeTruthy()
+    expect(changed.sort()).toEqual([connect.id, latest.id].sort())
     expect(getContent(app.sync.getDoc(noteDocName(connect.id))!).toString()).toContain('A brand new tip.')
+    // yours stays yours; the new version is beside it
+    expect(getContent(app.sync.getDoc(noteDocName(install.id))!).toString()).toContain('My own note about my server.')
     expect(getContent(app.sync.getDoc(noteDocName(install.id))!).toString()).not.toContain('Another new tip.')
+    expect(getContent(app.sync.getDoc(noteDocName(latest.id))!).toString()).toContain('Another new tip.')
     // and its links still point at the other guides
     expect(getContent(app.sync.getDoc(noteDocName(connect.id))!).toString()).toMatch(/<notelink/i)
     // nothing changes the next time
     expect(await seedSetupGuides(app.config, app.store, app.ai, app.sync, next)).toEqual([])
+    // a later version again: the "latest version" note is brought up to date, not a second one made
+    fs.appendFileSync(path.join(next, 'Install the server.md'), '\nA third tip.\n')
+    expect(await seedSetupGuides(app.config, app.store, app.ai, app.sync, next)).toEqual([latest.id])
+    expect(getContent(app.sync.getDoc(noteDocName(latest.id))!).toString()).toContain('A third tip.')
+    expect(guideNotes().filter((n) => n.title.startsWith('Install the server')).length).toBe(2)
     fs.rmSync(next, { recursive: true, force: true })
   })
 })
