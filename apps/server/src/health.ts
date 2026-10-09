@@ -1,5 +1,5 @@
 import type { AgentConfig, AgentRegistry } from './agents'
-import { observeOllama, spentThisMonth } from './agents'
+import { observeOllama, speechLoaded, spentThisMonth } from './agents'
 import { wyomingDescribe } from './wyoming'
 import type { Jobs } from './jobs'
 
@@ -41,6 +41,8 @@ export interface Health {
   checkedAt: number
   agents: AgentHealth[]
   ollama: OllamaHealth[]
+  /** speech-to-text models in memory (Speaches): they take GPU memory the language models then lack */
+  speech: { agent: string; model: string }[]
   queue: { running: number; queued: number; paused: number; waitingToRetry: number }
   /** one line for the app to show */
   summary: string
@@ -79,6 +81,9 @@ export async function aiHealth(agents: AgentRegistry, jobs: Jobs, fresh = false)
     }),
   )
   const byUrl = new Map(ollama.map((o) => [o.url, o]))
+  // what the speech-to-text servers have in memory (Speaches says; others can't)
+  const speechAgents = all.filter((a) => a.enabled && a.kind === 'openai' && agents.chain('audio').some((c) => c.id === a.id))
+  const speech = (await Promise.all(speechAgents.map(async (a) => ((await speechLoaded(a)) ?? []).map((model) => ({ agent: a.name, model }))))).flat()
 
   const agentHealth: AgentHealth[] = await Promise.all(
     all.map(async (a): Promise<AgentHealth> => {
@@ -121,7 +126,7 @@ export async function aiHealth(agents: AgentRegistry, jobs: Jobs, fresh = false)
         : status === 'degraded'
           ? `${down.map((a) => a.name).join(', ')} unreachable – others working`
           : `AI ready${loadedNames.length ? ` · loaded: ${loadedNames.join(', ')}` : ''}`
-  const value: Health = { checkedAt: Date.now(), agents: agentHealth, ollama, queue: { ...c, waitingToRetry }, summary, status }
+  const value: Health = { checkedAt: Date.now(), agents: agentHealth, ollama, speech, queue: { ...c, waitingToRetry }, summary, status }
   cache = { at: Date.now(), value }
   return value
 }

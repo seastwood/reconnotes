@@ -48,6 +48,7 @@ export function AiHealthLine({ trigger }: { trigger?: string }) {
   }, [trigger])
   if (!h || h.status === 'none') return null
   const loaded = h.ollama.flatMap((o) => o.loaded)
+  const speech = h.speech ?? []
   return (
     <>
       {h.status !== 'ok' && (
@@ -55,10 +56,10 @@ export function AiHealthLine({ trigger }: { trigger?: string }) {
           <CircleAlert size={14} /> {h.summary}
         </div>
       )}
-      {h.ollama.some((o) => o.ok) && (
-        <div className="ai-loaded-line" title="Models in your Ollama server’s memory. A job using another model loads it first, which takes longer.">
+      {(h.ollama.some((o) => o.ok) || speech.length > 0) && (
+        <div className="ai-loaded-line" title="Models in your AI servers’ memory (Ollama, and speech-to-text). A job using another model loads it first, which takes longer.">
           <Cpu size={14} />
-          {loaded.length ? (
+          {loaded.length || speech.length ? (
             <span>
               In memory:{' '}
               {loaded.map((m, i) => (
@@ -73,6 +74,12 @@ export function AiHealthLine({ trigger }: { trigger?: string }) {
                     gb(m.sizeMb)
                   )}
                   {unloadsIn(m.until) && <span className="muted"> · {unloadsIn(m.until)}</span>}
+                </span>
+              ))}
+              {speech.map((m, i) => (
+                <span key={`speech:${m.model}`} className="ai-model">
+                  {(loaded.length > 0 || i > 0) && ', '}
+                  <b>{m.model.split('/').pop()}</b> <span className="muted">(speech-to-text)</span>
                 </span>
               ))}
             </span>

@@ -129,6 +129,8 @@ export interface AiHealth {
   summary: string
   agents: { id: string; name: string; kind: AgentKind; model: string; enabled: boolean; ok: boolean | null; error: string | null; ms: number | null; loaded?: boolean; spentUsd?: number }[]
   ollama: { url: string; ok: boolean; version: string | null; loaded: { name: string; vramMb: number; sizeMb: number; until: string | null }[] }[]
+  /** speech-to-text models in memory (Speaches), taking GPU memory too */
+  speech?: { agent: string; model: string }[]
   queue: { running: number; queued: number; paused: number; waitingToRetry: number }
 }
 /** Can the AI agents be reached right now, and what's loaded? */

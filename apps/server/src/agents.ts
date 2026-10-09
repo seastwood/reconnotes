@@ -356,6 +356,42 @@ async function diskSizeMb(base: string, model: string): Promise<number | null> {
 }
 
 /**
+ * A speech-to-text server's own address, without the OpenAI path ("http://host:8000/v1" → "http://host:8000"):
+ * Speaches keeps its list of loaded models there (/api/ps).
+ */
+const speechRoot = (agent: AgentConfig) => trimSlash(agent.baseUrl).replace(/\/v1$/, '')
+
+/** The models a speech-to-text server (Speaches) has in memory; null when it can't say (other servers). */
+export async function speechLoaded(agent: AgentConfig): Promise<string[] | null> {
+  if (agent.kind !== 'openai') return null
+  try {
+    const res = await fetch(`${speechRoot(agent)}/api/ps`, { headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {}, signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return null
+    const models = ((await res.json()) as { models?: unknown }).models
+    return Array.isArray(models) ? models.map((m) => (typeof m === 'string' ? m : String((m as { id?: string; name?: string }).id ?? (m as { name?: string }).name ?? ''))).filter(Boolean) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * After a transcription: Whisper out of the GPU's memory straight away. On an 8 GB card it would
+ * otherwise sit there (Speaches keeps it a few minutes) while the language model that writes the
+ * meeting notes loads – which then doesn't fit, and runs partly on the CPU, many times slower.
+ * Only Speaches can be asked; other servers are left alone.
+ */
+export async function unloadSpeech(agent: AgentConfig): Promise<boolean> {
+  if (agent.kind !== 'openai' || !agent.model) return false
+  try {
+    const res = await fetch(`${speechRoot(agent)}/api/ps/${agent.model}`, { method: 'DELETE', headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {}, signal: AbortSignal.timeout(5000) })
+    if (res.ok) log.info(`unloaded ${agent.model} from ${speechRoot(agent)} (room on the GPU for the next model)`)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
  * Before a job: make sure its model will run on the GPU. On a small GPU
  * (8 GB) Ollama keeps the last model in memory and squeezes the next one in
  * beside it – mostly on the CPU, many times slower. So before loading a model,

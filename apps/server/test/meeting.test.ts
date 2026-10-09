@@ -25,6 +25,7 @@ beforeAll(async () => {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion'] }))
     if (req.url === '/api/ps' || req.url === '/api/tags') return res.end('{"models":[]}')
+    if (!body) return res.end('{}')
     const j = JSON.parse(body)
     prompts.push(j.messages?.[0]?.content ?? '')
     const content = '## Summary\n- Doug orders the parts; the gym needs booking\n\n## Action items\n- [ ] Doug – order the parts by Friday\n- [ ] Book the gym'
@@ -145,7 +146,11 @@ describe('a long meeting, heard by the server', () => {
   it('writes notes on each part, then puts them together – and Whisper is used over the phone’s own reading', async () => {
     // a Whisper server: says what it heard, and what words it was told to expect
     let hint = ''
+    const unloaded: string[] = []
     const whisper = http.createServer(async (req, res) => {
+      // Speaches: lets go of the model once it's done, so the notes model gets the whole GPU
+      if (req.method === 'DELETE') return unloaded.push(req.url!), res.end('{}')
+      if (req.url === '/api/ps') return res.end(JSON.stringify({ models: unloaded.length ? [] : ['faster-whisper-large-v3-turbo'] }))
       const chunks: Buffer[] = []
       for await (const c of req) chunks.push(c as Buffer)
       const body = Buffer.concat(chunks).toString('latin1')
@@ -168,11 +173,14 @@ describe('a long meeting, heard by the server', () => {
       prompts.length = 0
       const api = (m: string, p: string, b?: unknown) =>
         fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+      // "In memory" counts the speech-to-text model too – it shares the GPU
+      expect((await api('GET', '/api/ai/health?fresh=1')).speech).toEqual([{ agent: 'Whisper', model: 'faster-whisper-large-v3-turbo' }])
       const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'meetingaudio0001', transcript: 'Locates try to keep up with the gas.' } })).job
       const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
       expect(done.error ?? done.status).toBe('done')
       // Whisper's reading, with your words as a hint – not the phone's
       expect(hint).toBe('Doug, MinneTrials.')
+      expect(unloaded).toContain('/api/ps/faster-whisper-large-v3-turbo')
       expect(prompts.join('\n')).not.toContain('Locates try to keep up')
       // each part read, then all of them put together – the last minutes included
       const partPrompts = prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))
@@ -211,6 +219,7 @@ describe('Transcribe on a recording', () => {
   it('replaces the recording’s own transcript – with the server’s speech-to-text, else the phone’s – and says who made it', async () => {
     let asked = ''
     const whisper = http.createServer(async (req, res) => {
+      if (req.method === 'DELETE') return res.end('{}')
       const chunks: Buffer[] = []
       for await (const c of req) chunks.push(c as Buffer)
       asked = Buffer.concat(chunks).toString('latin1')

@@ -5,7 +5,7 @@ import { Vocabulary } from './vocabulary'
 import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, NoTextError, readingMode, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, readingMode, streaming, unloadSpeech, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
@@ -359,6 +359,8 @@ ${partNotes.join('\n\n')}
       return { text: collapseRepeats(r.text), words: r.words }
     })
     log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.text.length} chars${result.words ? `, ${result.words.length} timed words` : ''})`)
+    // the GPU's memory back for what comes next (the meeting notes' language model)
+    await unloadSpeech(agent)
     return { text: result.text, agent: agent.name, ...(result.words ? { words: result.words } : {}) }
   }
   get autoHandwriting() {
