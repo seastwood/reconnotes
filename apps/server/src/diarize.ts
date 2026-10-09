@@ -43,7 +43,12 @@ export async function diarizeAvailable(speechUrl: string): Promise<boolean> {
  * transcript is then just without speakers). `most`: at most this many people spoke;
  * `threshold`: how alike two voices must be to count as one person.
  */
-export async function diarize(speechUrl: string, audio: Buffer, most = 0, threshold?: number): Promise<SpeakerSegment[] | null> {
+export async function diarize(
+  speechUrl: string,
+  audio: Buffer,
+  most = 0,
+  threshold?: number,
+): Promise<{ segments: SpeakerSegment[]; voices: Record<number, number[]> } | null> {
   if (!(await diarizeAvailable(speechUrl))) return null
   try {
     const q = new URLSearchParams()
@@ -57,13 +62,17 @@ export async function diarize(speechUrl: string, audio: Buffer, most = 0, thresh
       // about 5 s a minute of audio on a CPU; room for a long one on a slow machine
       signal: timeoutSignal(30 * 60_000),
     })
-    const body = (await res.json().catch(() => ({}))) as { segments?: SpeakerSegment[]; speakers?: number; error?: string }
+    const body = (await res.json().catch(() => ({}))) as { segments?: SpeakerSegment[]; speakers?: number; voices?: Record<string, number[]>; error?: string }
     if (!res.ok || !Array.isArray(body.segments)) {
       log.warn(`speaker labels failed: ${body.error ?? `answered ${res.status}`}`)
       return null
     }
     log.info(`speaker labels: ${body.speakers ?? '?'} voices, ${body.segments.length} turns`)
-    return body.segments.filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && Number.isInteger(s.speaker))
+    // what each voice sounds like (a newer diarize.py): to recognise people named before
+    const voices: Record<number, number[]> = {}
+    for (const [k, v] of Object.entries(body.voices ?? {}))
+      if (/^\d+$/.test(k) && Array.isArray(v) && v.length && v.every((x) => typeof x === 'number' && Number.isFinite(x))) voices[Number(k)] = v
+    return { segments: body.segments.filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && Number.isInteger(s.speaker)), voices }
   } catch (e) {
     log.warn(`speaker labels failed: ${(e as Error).message}`)
     return null

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto'
+import { fixTranscripts } from './transcriptFix'
+import { forgetVoice, knownVoices } from './voices'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -590,6 +592,25 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { from, to } = await readJson<{ from: string; to: string }>(req)
     ai.vocabulary?.forget(String(from), String(to))
     json(res, 200, ai.vocabulary?.get())
+  })
+
+  // --- a word speech-to-text misheard, fixed by you ---------------------------
+  route('POST', '/api/ai/transcript-fix', async (req, res) => {
+    const body = await readJson<{ attachmentId?: string; from?: string; to?: string; everywhere?: boolean }>(req)
+    const from = String(body.from ?? '').trim()
+    const to = String(body.to ?? '').trim()
+    if (!body.attachmentId || !store.getAttachment(String(body.attachmentId))) throw new HttpError(404, 'recording not found')
+    if (!from || !to || from.length > 60 || to.length > 60) throw new HttpError(400, 'say what it heard and what it should be (up to 60 characters each)')
+    if (from === to) throw new HttpError(400, 'that’s the same')
+    json(res, 200, fixTranscripts(store, sync, ai.vocabulary, { attachmentId: String(body.attachmentId), from, to, everywhere: body.everywhere !== false }))
+  })
+
+  // --- voices recognised across recordings ------------------------------------
+  route('GET', '/api/voices', (_req, res) => json(res, 200, { voices: knownVoices(store) }))
+  route('POST', '/api/voices/forget', async (req, res) => {
+    const { name } = await readJson<{ name: string }>(req)
+    forgetVoice(store, String(name ?? ''))
+    json(res, 200, { voices: knownVoices(store) })
   })
 
   // --- is the AI working? ----------------------------------------------------

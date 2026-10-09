@@ -17,6 +17,8 @@ export interface Learned {
   to: string
   count: number
   at: number
+  /** misheard by speech-to-text (fixed in a transcript): fixed in new transcripts as they come */
+  heard?: boolean
 }
 
 interface Saved {
@@ -49,16 +51,24 @@ export class Vocabulary {
     this.store.setSetting(KEY, { ...s, learned: s.learned.filter((l) => !(l.from === from && l.to === to)) })
   }
 
-  /** Remember that the AI read `from` where you meant `to`. */
-  learn(from: string, to: string) {
+  /** Remember that the AI read `from` where you meant `to` (`heard`: speech-to-text misheard it). */
+  learn(from: string, to: string, heard = false) {
     const s = this.load()
     const hit = s.learned.find((l) => l.from.toLowerCase() === from.toLowerCase() && l.to === to)
     if (hit) {
       hit.count++
       hit.at = Date.now()
-    } else s.learned.push({ from, to, count: 1, at: Date.now() })
+      if (heard) hit.heard = true
+    } else s.learned.push({ from, to, count: 1, at: Date.now(), ...(heard ? { heard } : {}) })
     s.learned.sort((a, b) => b.at - a.at)
     this.store.setSetting(KEY, { ...s, learned: s.learned.slice(0, MAX_LEARNED) })
+  }
+
+  /** What speech-to-text has misheard before (you fixed it in a transcript): [from, to]. */
+  heardFixes(): [string, string][] {
+    return this.load()
+      .learned.filter((l) => l.heard)
+      .map((l) => [l.from, l.to])
   }
 
   /** The words to tell the AI about ('' when there are none). */
@@ -87,6 +97,29 @@ export class Vocabulary {
     if (misreads.length) parts.push(`Words that have been misread before: ${misreads.join('; ')}.`)
     return parts.join('\n')
   }
+}
+
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** the words, whole (not inside another word), any case, any spacing between them */
+export const heardPattern = (from: string) => new RegExp(`(?<![\\p{L}\\p{N}])${from.trim().split(/\s+/).map(escape).join('\\s+')}(?![\\p{L}\\p{N}])`, 'giu')
+
+/** `to` in place of `from`, capitalised where what it replaces was (a sentence's first word). */
+export function replaceHeard(text: string, from: string, to: string): { text: string; count: number } {
+  let count = 0
+  const out = text.replace(heardPattern(from), (m) => {
+    count++
+    return /^\p{Lu}/u.test(m) && /^\p{Ll}/u.test(to) ? to[0].toUpperCase() + to.slice(1) : to
+  })
+  return { text: out, count }
+}
+
+/** A transcript with the fixes you've made before (misheard words): text and word times. */
+export function fixHeard<W extends { word: string }>(text: string, words: W[] | undefined, fixes: [string, string][]): { text: string; words: W[] | undefined } {
+  for (const [from, to] of fixes) {
+    text = replaceHeard(text, from, to).text
+    if (words && !/\s/.test(from.trim()) && !/\s/.test(to.trim())) words = words.map((w) => ({ ...w, word: replaceHeard(w.word, from, to).text }))
+  }
+  return { text, words }
 }
 
 const tokens = (s: string) => s.match(/[\p{L}\p{N}'’-]+/gu) ?? []

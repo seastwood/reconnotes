@@ -6,7 +6,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, TextQuote, Trash2, Users, X } from 'lucide-react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { attendeeNames, getNotes, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
@@ -15,6 +15,8 @@ import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
 import { workspaceDoc } from '../lib/workspace'
 import { FollowAlong } from './FollowAlong'
+import { WordFix } from './WordFix'
+import { voicesApi } from '../lib/agents'
 import { DockedPlayer } from './DockedPlayer'
 import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
@@ -399,12 +401,16 @@ function SpeakerNamer({
 }) {
   const ref = useRef<HTMLElement | null>(anchor)
   ref.current = anchor
-  const attendees = useMemo(() => attendeeNames(noteToMarkdown(doc)), [doc])
+  // the attendees, and people whose voices are known from other recordings
+  const known = useKnownVoices()
+  const attendees = useMemo(() => [...new Set([...attendeeNames(noteToMarkdown(doc)), ...known])], [doc, known])
   const set = (name: string | null) => {
     const next: Record<number, string> = { ...names }
     if (name?.trim()) next[speaker] = name.trim()
     else delete next[speaker]
     getTranscripts(doc).set(speakerNamesKey(attachmentId), JSON.stringify(next))
+    // a new name is a voice the server learns: offered next time too
+    if (name?.trim() && knownVoiceNames && !knownVoiceNames.includes(name.trim())) knownVoiceNames = [...knownVoiceNames, name.trim()]
     onClose()
   }
   const taken = new Set(Object.entries(names).filter(([k]) => Number(k) !== speaker).map(([, v]) => v))
@@ -428,6 +434,20 @@ function SpeakerNamer({
       )}
     </Popover>
   )
+}
+
+/** Names of the people whose voices are known (fetched once a session; refreshed on naming). */
+let knownVoiceNames: string[] | null = null
+function useKnownVoices(): string[] {
+  const [names, setNames] = useState<string[]>(knownVoiceNames ?? [])
+  useEffect(() => {
+    if (knownVoiceNames || !isSyncConfigured()) return
+    void voicesApi
+      .list()
+      .then((r) => setNames((knownVoiceNames = r.voices.map((v) => v.name))))
+      .catch(() => {})
+  }, [])
+  return names
 }
 
 /** The meeting notes last written from a recording (to redo in place). */
@@ -454,6 +474,7 @@ function AudioMenu({
   transcript,
   onShowTranscript,
   onTranscribe,
+  onFixWord,
   busy,
 }: {
   editor: Editor
@@ -465,6 +486,8 @@ function AudioMenu({
   transcript: string | null
   onShowTranscript: () => void
   onTranscribe: () => void
+  /** fix a word the speech-to-text misheard */
+  onFixWord: () => void
   busy: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -559,6 +582,11 @@ function AudioMenu({
                   <TextQuote size={16} /> Insert transcript into note
                 </button>
               )}
+              {editable && isSyncConfigured() && (
+                <button onClick={act(onFixWord)}>
+                  <SpellCheck size={16} /> Fix a misheard word…
+                </button>
+              )}
             </>
           )}
           <div className="menu-sep" />
@@ -607,6 +635,21 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const speakers = useMemo(() => parseSpeakers(speakerText), [speakerText])
   const names = useMemo(() => parseSpeakerNames(namesText), [namesText])
   const [naming, setNaming] = useState<{ speaker: number; anchor: HTMLElement } | null>(null)
+  // fixing a misheard word: what was selected in the transcript when you asked, to start from
+  const [fixing, setFixing] = useState<string | null>(null)
+  const selectedInTranscript = useRef('')
+  useEffect(() => {
+    const onSelect = () => {
+      const sel = window.getSelection()
+      const box = sel?.anchorNode?.parentElement?.closest('.audio-transcript')
+      if (box && box.closest('[data-attachment-id]')?.getAttribute('data-attachment-id') === node.attrs.attachmentId) {
+        const t = sel!.toString().trim()
+        if (t && t.length <= 60) selectedInTranscript.current = t
+      }
+    }
+    document.addEventListener('selectionchange', onSelect)
+    return () => document.removeEventListener('selectionchange', onSelect)
+  }, [node.attrs.attachmentId])
   const meetingJob = useMeetingJob(ctx?.noteId, node.attrs.attachmentId)
   const playerRef = useRef<HTMLAudioElement | null>(null)
   const player = useCallback(() => playerRef.current, [])
@@ -658,7 +701,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     }
   }
   return (
-    <NodeViewWrapper className="audio-block" data-drag-handle="">
+    <NodeViewWrapper className="audio-block" data-drag-handle="" data-attachment-id={node.attrs.attachmentId}>
       <div className="audio-head">
         <Mic size={16} /> <span>{node.attrs.name || 'Recording'}</span>
         {editor.isEditable && (
@@ -682,6 +725,11 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
             transcript={transcript}
             onShowTranscript={() => setOpen(true)}
             onTranscribe={() => void transcribe()}
+            onFixWord={() => {
+              setOpen(true)
+              setFixing(selectedInTranscript.current)
+              selectedInTranscript.current = ''
+            }}
             busy={busy}
           />
         )}
@@ -758,6 +806,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
               onClose={() => setNaming(null)}
             />
           )}
+          {fixing !== null && <WordFix attachmentId={attachmentId} selected={fixing} onClose={() => setFixing(null)} />}
           <FollowAlong
             text={transcript}
             timing={timing}

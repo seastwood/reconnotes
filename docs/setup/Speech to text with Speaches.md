@@ -269,7 +269,9 @@ In **Settings › AI agents**, add an agent:
 
 Press **Test connection**. Its model name contains "whisper", so it goes on **Audio to text** by itself.
 
-Then fill in **Your words** on the same page with the names and terms that come up in your recordings: people, teams, places, product names. They're passed to Whisper as a hint, so it spells them right.
+Then fill in **Your words** on the same page with the names and terms that come up in your recordings: people, teams, places, product names. They're passed to Whisper as a hint, so it spells them right. On the same page, set **Language spoken** to the language of your recordings: Whisper then doesn't guess it from the first few seconds (a noisy start can make it guess wrong).
+
+When Whisper still mishears a word, fix it once: the recording's **⋯ → Fix a misheard word…** fixes it in that transcript (or in all of them), and every new transcript comes out fixed too.
 
 Check that it's being used:
 
@@ -462,7 +464,12 @@ TitaNet voice model, downloaded once on first start.
                                   N (optional): at most this many people spoke;
                                   T (optional): how alike voices must be to count as one
                                   person, 0.5–1 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
-    -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3}
+    -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3,
+        "voices": {"0": [0.012, -0.08, ...], ...}}
+
+"voices" is what each speaker sounds like (a TitaNet voice embedding, from up to a minute of
+their speech): ReconNotes compares them with the voices you've named before, to name people
+it recognises.
 
 ReconNotes looks for it on port 9402 of the speech-to-text server's address.
 Needs: ffmpeg, and `pip install sherpa-onnx numpy`.
@@ -539,6 +546,36 @@ def segments(sd, samples):
     return [{"start": round(s.start, 2), "end": round(s.end, 2), "speaker": int(s.speaker)} for s in sd.process(samples).sort_by_start_time()]
 
 
+def voice_of(extractor, samples, rate, turns):
+    """One speaker's voice: an embedding of their longest turns (up to a minute), unit length."""
+    chosen, total = [], 0.0
+    for t in sorted(turns, key=lambda t: t["end"] - t["start"], reverse=True):
+        if t["end"] - t["start"] < 1.0 or total >= 60:
+            continue
+        chosen.append(samples[int(t["start"] * rate):int(t["end"] * rate)])
+        total += t["end"] - t["start"]
+    if not chosen:
+        return None
+    stream = extractor.create_stream()
+    stream.accept_waveform(sample_rate=rate, waveform=np.concatenate(chosen))
+    stream.input_finished()
+    if not extractor.is_ready(stream):
+        return None
+    v = np.array(extractor.compute(stream), dtype=np.float32)
+    n = float(np.linalg.norm(v))
+    return [round(float(x), 5) for x in (v / n)] if n > 0 else None
+
+
+_extractor = None
+
+
+def extractor():
+    global _extractor
+    if _extractor is None:
+        _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=EMBEDDING, num_threads=THREADS))
+    return _extractor
+
+
 lock = threading.Lock()
 
 
@@ -570,11 +607,21 @@ class Handler(BaseHTTPRequestHandler):
                 # more voices than people there: grouped again into that many
                 if most > 0 and len({s["speaker"] for s in found}) > most:
                     found = segments(diarizer(most, threshold), samples)
-            # speakers numbered in the order they first speak
-            order = {}
-            for s in found:
-                s["speaker"] = order.setdefault(s["speaker"], len(order))
-            self.answer(200, {"segments": found, "speakers": len(order), "seconds": round(len(samples) / sd.sample_rate, 2)})
+                # speakers numbered in the order they first speak
+                order = {}
+                for s in found:
+                    s["speaker"] = order.setdefault(s["speaker"], len(order))
+                # what each one sounds like (to recognise them in other recordings)
+                voices = {}
+                for v in range(len(order)):
+                    try:
+                        emb = voice_of(extractor(), samples, sd.sample_rate, [s for s in found if s["speaker"] == v])
+                    except Exception as e:  # noqa: BLE001 – the labels still count without it
+                        print(f"voice {v}: {e}", flush=True)
+                        emb = None
+                    if emb:
+                        voices[str(v)] = emb
+            self.answer(200, {"segments": found, "speakers": len(order), "voices": voices, "seconds": round(len(samples) / sd.sample_rate, 2)})
         except subprocess.CalledProcessError as e:
             self.answer(400, {"error": "couldn't read the audio: " + e.stderr.decode(errors="replace")[-300:]})
         except Exception as e:  # noqa: BLE001
@@ -642,6 +689,10 @@ ReconNotes looks for it on port 9402 at your speech-to-text agent's address, so 
 - **Meetings**: the notes are written from the transcript as turns ("Jesse: …", "Speaker 2: …"). The names on the note's **Attendees** line (the meeting's setup asks for them) are Whisper's spelling hint, and also the most voices it will find.
 - **The transcript** under a recording shows a coloured label where each speaker starts. Tap a label to say who it is: the attendees are one tap away, or type a name. Then **Redo the notes with the names** under the transcript rewrites the meeting notes with them.
 - **Transcribe** on any recording labels its speakers too.
+- **Voices it knows**: once you've named someone, the next recording names them by itself – it remembers what each named voice sounds like. **Settings → Handwriting & speech → Voices it knows** lists them, and forgets one if you ask. (A recording named wrongly? Tap the label and pick the right name: that voice is taken back from the wrong person.)
+- A voice heard for only a few seconds (a cough, someone passing) is counted as whoever was speaking around it, not as an extra "Speaker 8".
+
+**Updating from an earlier copy of the script:** recognising voices needs the current `diarize.py`. Copy it over the old one (the `scp` line above) and run `systemctl restart diarize`.
 
 ### Too many or too few speakers
 

@@ -518,7 +518,14 @@ describe('who said what', () => {
       asked = req.url ?? ''
       res.writeHead(200, { 'Content-Type': 'application/json' })
       if (req.method === 'GET') return res.end('{"ok":true}')
-      res.end(JSON.stringify({ segments: [{ start: 0, end: 3.9, speaker: 0 }, { start: 4, end: 7.9, speaker: 1 }, { start: 8, end: 11, speaker: 0 }], speakers: 2 }))
+      // …and what each voice sounds like (unit vectors: Seth's along one axis, Jesse's another)
+      res.end(
+        JSON.stringify({
+          segments: [{ start: 0, end: 3.9, speaker: 0 }, { start: 4, end: 7.9, speaker: 1 }, { start: 8, end: 11, speaker: 0 }],
+          speakers: 2,
+          voices: { 0: [0.96, 0.28, 0], 1: [0.1, 0.99, 0.1] },
+        }),
+      )
     })
     await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
     await new Promise<void>((r) => diarizer.listen(DIARIZE_PORT, '127.0.0.1', () => r()))
@@ -579,9 +586,78 @@ describe('who said what', () => {
       app.ai.agents.updateSettings({ speakerThreshold: 3 })
       expect(app.ai.agents.settings().speakerThreshold).toBe(1)
       app.ai.agents.updateSettings({ speakerThreshold: 0.9 })
+
+      // the voices you named are known now: a new recording of the same people is named by itself
+      const { knownVoices } = await import('../src/voices')
+      expect(knownVoices(app.store).map((v) => v.name)).toEqual(['Jesse', 'Seth'])
+      app.store.putAttachment({ id: 'speakersaudio002', mime: 'audio/mp4', name: 'Recording 2.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notespeakers0002', title: 'Next meeting' }))
+      await app.sync.change(noteDocName('notespeakers0002'), (doc) => {
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'speakersaudio002')
+        getContent(doc).insert(0, [rec])
+      })
+      prompts.length = 0
+      const next = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notespeakers0002', input: { attachmentId: 'speakersaudio002' } })).job
+      expect((await api('GET', `/api/jobs/${next.id}/wait`)).job.status).toBe('done')
+      expect(prompts[0]).toContain('Seth: Jesse, is the sample testing a code requirement?\nJesse: I think so')
+      expect(JSON.parse(getTranscripts(app.sync.getDoc(noteDocName('notespeakers0002'))!).get('names:att:speakersaudio002')!)).toEqual({ 0: 'Seth', 1: 'Jesse' })
+      // named wrongly there, and corrected: taken back from the wrong name
+      const { learnVoice, recogniseVoices } = await import('../src/voices')
+      learnVoice(app.store, 'speakersaudio001', 1, 'Charlie')
+      expect(recogniseVoices(app.store, { 0: [0.96, 0.28, 0], 1: [0.1, 0.99, 0.1] })).toEqual({ 0: 'Seth', 1: 'Charlie' })
+      learnVoice(app.store, 'speakersaudio001', 1, 'Jesse')
+      // someone new: nobody's name
+      expect(recogniseVoices(app.store, { 0: [0, 0, 1] })).toEqual({})
     } finally {
       whisper.close()
       diarizer.close()
     }
+  })
+})
+
+describe('a word speech-to-text misheard', () => {
+  it('fixed whole words only, capitalised where it starts a sentence', async () => {
+    const { replaceHeard, fixHeard } = await import('../src/vocabulary')
+    expect(replaceHeard('Summet is booked. We drive to summet. Summetry stays.', 'summet', 'Summit')).toEqual({ text: 'Summit is booked. We drive to Summit. Summetry stays.', count: 2 })
+    expect(replaceHeard('the fire marshal says', 'fire marshal', 'Fire Marshal').text).toBe('the Fire Marshal says')
+    const words = [{ word: 'to', start: 0, end: 0.2 }, { word: 'summet.', start: 0.3, end: 0.8 }]
+    expect(fixHeard('to summet.', words, [['summet', 'Summit']])).toEqual({ text: 'to Summit.', words: [words[0], { word: 'Summit.', start: 0.3, end: 0.8 }] })
+  })
+
+  it('fixed in every recording that has it, and in new transcripts', async () => {
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    app.store.putAttachment({ id: 'fixaudio00000001', mime: 'audio/mp4', name: 'a.m4a', size: 4, created_at: Date.now() }, Buffer.from('a'), 'skipped')
+    app.store.putAttachment({ id: 'fixaudio00000002', mime: 'audio/mp4', name: 'b.m4a', size: 4, created_at: Date.now() }, Buffer.from('b'), 'skipped')
+    app.store.setAttachmentText('fixaudio00000001', 'We meet at Summet on Friday.', 'done')
+    app.store.setAttachmentText('fixaudio00000002', 'Summet again, then summet.', 'done')
+    const { setWordTimes, wordTimes } = await import('../src/attachments')
+    setWordTimes(app.store, 'fixaudio00000002', [{ word: 'Summet', start: 0, end: 0.5 }, { word: 'again,', start: 0.6, end: 1 }])
+    // just this one
+    expect(await api('POST', '/api/ai/transcript-fix', { attachmentId: 'fixaudio00000001', from: 'Summet', to: 'Summit', everywhere: false })).toEqual({ recordings: 1, places: 1 })
+    expect(app.store.getAttachment('fixaudio00000002')?.text).toBe('Summet again, then summet.')
+    // everywhere
+    expect(await api('POST', '/api/ai/transcript-fix', { attachmentId: 'fixaudio00000001', from: 'summet', to: 'Summit', everywhere: true })).toEqual({ recordings: 1, places: 2 })
+    expect(app.store.getAttachment('fixaudio00000002')?.text).toBe('Summit again, then Summit.')
+    expect(wordTimes(app.store, 'fixaudio00000002')).toContain('Summit')
+    // remembered: Whisper is told the spelling, and a new transcript comes out fixed
+    expect(app.ai.vocabulary!.heardFixes()).toContainEqual(['Summet', 'Summit'])
+    expect(app.ai.vocabulary!.speechPrompt()).toContain('Summit')
+  })
+})
+
+describe('voices heard for a moment, when the service tells them apart', () => {
+  it('fold into the voice around them; what each remaining voice sounds like follows it', async () => {
+    const { mergeVoices } = await import('../src/jobHandlers')
+    const found = [
+      { start: 0, end: 30, speaker: 0 },
+      { start: 30.5, end: 31.5, speaker: 1 },
+      { start: 32, end: 60, speaker: 0 },
+      { start: 61, end: 120, speaker: 2 },
+    ]
+    const { segments, voices } = mergeVoices(found, { 0: [1, 0], 1: [0.5, 0.5], 2: [0, 1] })
+    expect(new Set(segments.map((s) => s.speaker))).toEqual(new Set([0, 1]))
+    expect(voices).toEqual({ 0: [1, 0], 1: [0, 1] })
   })
 })

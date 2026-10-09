@@ -127,6 +127,18 @@ export const vocabApi = {
   forget: (from: string, to: string) => call<Vocab>('POST', '/api/ai/vocabulary/forget', { from, to }),
 }
 
+/** A word speech-to-text misheard, fixed in a recording's transcript (and every other's, `everywhere`) – and learned. */
+export const transcriptApi = {
+  fix: (attachmentId: string, from: string, to: string, everywhere: boolean) =>
+    call<{ recordings: number; places: number }>('POST', '/api/ai/transcript-fix', { attachmentId, from, to, everywhere }),
+}
+
+/** The people whose voices are recognised in new recordings (learned when you name a voice). */
+export const voicesApi = {
+  list: () => call<{ voices: { name: string; recordings: number }[] }>('GET', '/api/voices'),
+  forget: (name: string) => call<{ voices: { name: string; recordings: number }[] }>('POST', '/api/voices/forget', { name }),
+}
+
 export interface AiHealth {
   checkedAt: number
   status: 'ok' | 'degraded' | 'down' | 'none'

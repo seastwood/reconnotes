@@ -7,6 +7,7 @@ import {
   TASK_HELP,
   rereadAll,
   vocabApi,
+  voicesApi,
   type Vocab,
   agentsApi,
   type Agent,
@@ -127,6 +128,7 @@ export function AiAgentsSection({ part = 'agents' }: { part?: 'agents' | 'recogn
           more than one language.
         </p>
         <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
+        <KnownVoices />
         <VocabularySection />
         <RereadButton />
       </div>
@@ -336,6 +338,48 @@ function SpeakerLabelsSetting({ value, onSave }: { value: number; onSave: (v: nu
         voices. Two people merged into one? Toward More voices. A recording gets new labels the next time you redo its meeting notes.
       </p>
     </>
+  )
+}
+
+/** The people whose voices are recognised in new recordings, learned when you name a voice. */
+function KnownVoices() {
+  const [voices, setVoices] = useState<{ name: string; recordings: number }[] | null>(null)
+  useEffect(() => {
+    void voicesApi
+      .list()
+      .then((r) => setVoices(r.voices))
+      .catch(() => setVoices([]))
+  }, [])
+  if (!voices) return null
+  return (
+    <div className="known-voices">
+      <h3>Voices it knows</h3>
+      <p className="hint">
+        When you name a speaker in a recording (tap “Speaker 2” in its transcript), what they sound like is kept under that name – the next recording names them by
+        itself. Needs the current speaker-label service (deploy/diarize.py).
+      </p>
+      {voices.length ? (
+        <ul className="learned">
+          {voices.map((v) => (
+            <li key={v.name}>
+              <span>
+                <b>{v.name}</b> <span className="muted">– named in {v.recordings === 1 ? '1 recording' : `${v.recordings} recordings`}</span>
+              </span>
+              <button
+                className="icon"
+                aria-label={`Forget ${v.name}’s voice`}
+                title="Forget this voice"
+                onClick={() => confirm(`Forget ${v.name}’s voice? Recordings keep the names they have.`) && void voicesApi.forget(v.name).then((r) => setVoices(r.voices))}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">None yet.</p>
+      )}
+    </div>
   )
 }
 

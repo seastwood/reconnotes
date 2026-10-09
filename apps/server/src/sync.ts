@@ -13,6 +13,8 @@ import {
   noteIdFromDocName,
   readNote,
   getNotes,
+  parseSpeakerNames,
+  speakerNamesKey,
 } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -23,6 +25,7 @@ import type { Devices } from './devices'
 import type { Jobs } from './jobs'
 import type { MeaningIndex } from './semantic'
 import { corrections } from './vocabulary'
+import { learnVoice, recordingVoices, seenNames, setSeenNames } from './voices'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -165,6 +168,29 @@ export class SyncEngine {
     }
     this.scheduleEmbedding(noteId)
     this.learnFromCorrections(noteId, doc)
+    this.learnVoices(ex.attachments, doc)
+  }
+
+  /**
+   * A voice you named (or renamed) in a recording: what it sounds like is kept under that name, so
+   * the same person is named straight away in the next recording (see voices.ts).
+   */
+  private learnVoices(attachments: string[], doc: Y.Doc) {
+    const transcripts = getTranscripts(doc)
+    for (const id of attachments) {
+      if (!recordingVoices(this.store, id)) continue
+      const names = parseSpeakerNames(transcripts.get(speakerNamesKey(id)) ?? null)
+      const seen = seenNames(this.store, id)
+      const speakers = new Set([...Object.keys(names), ...Object.keys(seen)].map(Number))
+      let changed = false
+      for (const sp of speakers) {
+        const now = names[sp] ?? ''
+        if (now === (seen[sp] ?? '')) continue
+        changed = true
+        if (learnVoice(this.store, id, sp, now) && now) log.info(`learned a voice: ${now}`)
+      }
+      if (changed) setSeenNames(this.store, id, Object.fromEntries(Object.entries(names).map(([k, v]) => [String(k), v])))
+    }
   }
 
   /**

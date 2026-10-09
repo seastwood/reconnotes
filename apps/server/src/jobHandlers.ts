@@ -22,7 +22,9 @@ import {
   labelledTranscript,
   parseSpeakerNames,
   speakerNamesKey,
+  speakerAt,
   speakerTurns,
+  mergeMinorVoices,
   voiceCount,
 } from '@reconnotes/core'
 import type { Config } from './config'
@@ -36,6 +38,7 @@ import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
 import { SPEAKER_THRESHOLD, type AiTask } from './agents'
+import { recogniseVoices, setRecordingVoices, setSeenNames, type Voices } from './voices'
 import { guessedWords } from './vocabulary'
 import { dueDateIn, todayLabel } from './timeRange'
 import { scopeFromInput } from './access'
@@ -225,6 +228,35 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'web-refresh': null,
 }
 
+/**
+ * Voices heard for a moment folded into the ones around them (mergeMinorVoices) – and what each
+ * remaining voice sounds like carried over to its new number (from the one that spoke the most).
+ */
+export function mergeVoices(found: { start: number; end: number; speaker: number }[], voices: Voices): { segments: { start: number; end: number; speaker: number }[]; voices: Voices } {
+  const segments = mergeMinorVoices(found)
+  const talk = new Map<number, number>()
+  const longest = new Map<number, { start: number; end: number }>()
+  for (const s of found) {
+    talk.set(s.speaker, (talk.get(s.speaker) ?? 0) + s.end - s.start)
+    const l = longest.get(s.speaker)
+    if (!l || s.end - s.start > l.end - l.start) longest.set(s.speaker, s)
+  }
+  const out: Voices = {}
+  const by = new Map<number, number>()
+  for (const [k, vec] of Object.entries(voices)) {
+    const old = Number(k)
+    const l = longest.get(old)
+    if (!l) continue
+    const now = speakerAt(segments, (l.start + l.end) / 2)
+    if (now === null) continue
+    if (!by.has(now) || (talk.get(old) ?? 0) > (talk.get(by.get(now)!) ?? 0)) {
+      by.set(now, old)
+      out[now] = vec
+    }
+  }
+  return { segments, voices: out }
+}
+
 /** for snapshots before a redo replaces a result */
 let versionStore: Store | null = null
 
@@ -245,14 +277,32 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     let segments = kept && (was ?? SPEAKER_THRESHOLD) === threshold ? kept : null
     if (!segments) {
       const speech = ai.agents.chain('audio').find((a) => a.kind === 'openai' && a.enabled)
+      let voices: Voices = {}
       if (speech && store.hasBlob(att.id) && (await diarizeAvailable(speech.baseUrl))) {
         reportProgress('Telling the voices apart…')
-        segments = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most, threshold)
+        const found = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most, threshold)
+        if (found) ({ segments, voices } = mergeVoices(found.segments, found.voices))
       }
       // the service couldn't be asked again: the voices as they were
       if (!segments && kept && !newReading) segments = kept
       else if (segments || newReading) {
         setSpeakers(store, att.id, segments, threshold)
+        // new turns, new numbers: the voices named again – by who they sound like (people you've
+        // named in other recordings), where the service says what each one sounds like
+        if (segments && Object.keys(voices).length) {
+          setRecordingVoices(store, att.id, voices)
+          const names = recogniseVoices(store, voices)
+          const json = Object.keys(names).length ? JSON.stringify(names) : null
+          setSeenNames(store, att.id, Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v])))
+          for (const noteId of store.notesReferencing(att.id)) {
+            await sync.change(noteDocName(noteId), (d) => {
+              const tr = getTranscripts(d)
+              if (json) tr.set(speakerNamesKey(att.id), json)
+              else tr.delete(speakerNamesKey(att.id))
+            })
+          }
+          if (Object.keys(names).length) log.info(`recognised by voice: ${Object.values(names).join(', ')}`)
+        } else setRecordingVoices(store, att.id, null)
         sync.reindexNotesFor(att.id)
       }
     }
@@ -632,7 +682,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
     const newReading = Boolean(times) || fresh
     const turns = att && said.length ? await speakerTurnsFor(att, said, newReading, attendees.length) : null
-    const names = att ? parseSpeakerNames(getTranscripts(doc).get(speakerNamesKey(att.id)) ?? null) : {}
+    // (read again: telling the voices apart may have just named them – people recognised by voice)
+    const names = att ? parseSpeakerNames(getTranscripts(noteDoc(noteId)).get(speakerNamesKey(att.id)) ?? null) : {}
     const voices = turns ? voiceCount(turns) : 0
     const heard = turns && voices >= 2 ? labelledTranscript(turns, names) : transcript
     const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, voices, named: Object.values(names) })

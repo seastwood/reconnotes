@@ -5368,3 +5368,66 @@ a.button {
     padding: 2px 14px 12px;
   }
 }
+
+/* fixing a word the speech-to-text misheard, above a recording's transcript */
+.word-fix {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  font-size: 14px;
+}
+.word-fix-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.word-fix-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+.word-fix-fields label {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.word-fix input:not([type='checkbox']) {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+}
+.word-fix label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.word-fix-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.word-fix-actions .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #1c1c1e;
+  font-weight: 600;
+}
+.word-fix-actions .primary:disabled {
+  opacity: 0.5;
+}

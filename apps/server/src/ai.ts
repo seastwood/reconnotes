@@ -1,7 +1,7 @@
 import { Resvg } from '@resvg/resvg-js'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
 import type { Store } from './store'
-import { Vocabulary } from './vocabulary'
+import { fixHeard, Vocabulary } from './vocabulary'
 import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
@@ -443,7 +443,9 @@ ${partNotes.join('\n\n')}
         r = await once()
         rememberSpeechNeedsRoom(agent)
       }
-      return { text: collapseRepeats(r.text), words: r.words }
+      // words you've fixed in transcripts before ("Summet" → "Summit"): fixed in this one too
+      const fixed = fixHeard(collapseRepeats(r.text), r.words, this.vocabulary?.heardFixes() ?? [])
+      return { text: fixed.text, words: fixed.words }
     })
     log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.text.length} chars${result.words ? `, ${result.words.length} timed words` : ''})`)
     // Speaches keeps it loaded a while – unloaded later only if the next model doesn't fit beside it

@@ -254,8 +254,12 @@ it ("Transcribed by …"). Ollama and Claude can't transcribe audio.
 **Meetings** are always transcribed by the server's Audio to text agent when there is one (Apple's
 recognition is made for dictation, not a room of people – it's only used when the server can't).
 The names and terms in *Settings › Handwriting & speech › Your words* are passed to Whisper as a hint, so it spells them
-right. A long meeting is read in parts of about eight minutes, each written up, then put together –
-so the end of a long meeting is covered as well as its start. Each point in the notes gets a **▶ time** link to where it was
+right; *Language spoken* (same page) tells it the language instead of it guessing. A word it still
+mishears is fixed once – ⋯ → *Fix a misheard word…* – in one transcript or all of them, and new
+transcripts come out fixed. Silences are skipped (no phrases made up in the quiet). A long meeting is
+read in parts of about eight minutes, each written up, then put together – so the end of a long
+meeting is covered as well as its start; a redo with the same transcript reuses each part's notes
+and only puts them together again. Each point in the notes gets a **▶ time** link to where it was
 talked about in the recording (found by the words the point and the transcript share; it needs
 the word times Whisper gives). While a recording plays, a slim player stays under the toolbar once
 its own player scrolls out of view, and the transcript scrolls in its own box.
@@ -265,6 +269,8 @@ from recent meetings are a tap away) and the agenda – then **Start recording**
 The names are Whisper's spelling hint; the notes follow the agenda. With the speaker service
 (`deploy/diarize.py`, see the Speaches setup guide, step 13) the transcript is told apart by voice:
 each turn is labelled, you name the voices with a tap, and the meeting notes say who said what.
+A voice you've named is recognised in later recordings and named by itself; voices heard for only
+a few seconds are folded into whoever was speaking around them.
 
 A self-hosted Whisper server next to ReconNotes. Without Docker (e.g. in an LXC container), follow
 [`docs/setup/Speech to text with Speaches.md`](docs/setup/Speech%20to%20text%20with%20Speaches.md),
