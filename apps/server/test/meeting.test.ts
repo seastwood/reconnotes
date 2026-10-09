@@ -87,6 +87,21 @@ describe('meeting notes', () => {
     expect(xml).toMatch(/<taskitem[^>]*><paragraph>Doug – order the parts by Friday <duedate date="\d{4}-\d{2}-\d{2}"/)
     // no day said: no due date
     expect(xml).toMatch(/Book the gym<\/paragraph>/)
+
+    // done again (redo): the model gets what you wrote – not the notes it wrote last time to copy back
+    prompts.length = 0
+    const again = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00001', input: { attachmentId: 'nonexistent00001', transcript: 'Doug will order the parts by Friday. We need to book the gym.', replace: job.id } })).job
+    expect((await api('GET', `/api/jobs/${again.id}/wait`)).job.status).toBe('done')
+    const yours = prompts[0].slice(prompts[0].indexOf('<notes>'), prompts[0].indexOf('</notes>'))
+    expect(yours).toContain('Attendees: Doug, Sophie')
+    expect(yours).not.toContain('the gym needs booking')
+    expect(yours).not.toContain('Action items')
+    // and the note has the new notes once, in place of the old
+    expect(getContent(app.sync.getDoc(noteDocName('notemeeting00001'))!).toString().split('the gym needs booking').length - 1).toBe(1)
+  })
+
+  it('leaves ▶ links into the recording out of what you wrote', () => {
+    expect(meetingNotesText('Attendees: Doug\n\n- Fence line [▶ 4:10](listen:abc123@250) stays')).toBe('Attendees: Doug\n\n- Fence line stays')
   })
 })
 

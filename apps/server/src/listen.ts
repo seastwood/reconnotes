@@ -105,7 +105,7 @@ export function addListenLinks(markdown: string, words: TimedWord[], attachmentI
   let links = 0
   const out = lines.map((line, i) => {
     const t = times[i]
-    if (t === null || /no action items|^\s*[-*]\s*$/i.test(line)) return line
+    if (t === null || /no action items|^\s*[-*]\s*$|\]\(listen:/i.test(line)) return line
     links++
     const link = ` [▶ ${clock(t)}](${listenHref(attachmentId, t)})`
     const due = line.match(/^(.*?)(\s+!\d{4}-\d{2}-\d{2})\s*$/)

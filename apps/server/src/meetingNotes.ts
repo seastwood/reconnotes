@@ -22,6 +22,8 @@ const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
 export function meetingNotesText(markdown: string): string {
   return markdown
     .replace(/^#+ Meeting.*$/m, '')
+    // ▶ links into the recording (from earlier notes): not something you wrote
+    .replace(/\s*\[▶[^\]]*\]\(listen:[^)]*\)/g, '')
     .split('\n')
     .filter((l) => !/^\s*(#+\s*Notes|Attendees:)\s*$/i.test(l))
     .join('\n')

@@ -131,6 +131,18 @@ function markGuesses(text: string, raw: string | undefined): string {
   return out
 }
 
+/** A copy of a note without the blocks jobs wrote into it (marked with their job). */
+function withoutAiResults(doc: Y.Doc): Y.Doc {
+  const copy = new Y.Doc()
+  Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc))
+  const frag = getContent(copy)
+  for (let i = frag.length - 1; i >= 0; i--) {
+    const el = frag.get(i)
+    if (el instanceof Y.XmlElement && el.getAttribute('job')) frag.delete(i, 1)
+  }
+  return copy
+}
+
 const preview = (text: string) => (text.length > 1500 ? text.slice(0, 1500) + '…' : text)
 
 /** Which AI task a kind of job starts with (for running jobs on an already-loaded model first). */
@@ -509,7 +521,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       sync.reindexNotesFor(att.id)
     }
     const tzOffset = Number(job.input.tzOffset) || 0
-    const notes = meetingNotesText(noteToMarkdown(doc))
+    // what you wrote – not notes an AI wrote before (a redo would copy them back, ▶ links and all)
+    const notes = meetingNotesText(noteToMarkdown(withoutAiResults(doc)))
     if (!transcript.trim() && !notes.replace(/\W/g, '')) throw new Error('No speech was recognised in this recording, and nothing was written.')
     const r = await ai.meetingNotes(notes, transcript, todayLabel(Date.now(), tzOffset))
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
