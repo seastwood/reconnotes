@@ -1,5 +1,6 @@
 import { Resvg } from '@resvg/resvg-js'
-import { cutAt, isMeant, likeness, pointText, stretches, topicCuts, type Embed, type Stretch } from './meetingMeaning'
+import { cosine, cutAt, isMeant, likeness, pointText, stretches, topicCuts, type Embed, type Stretch } from './meetingMeaning'
+import { stem, telling } from './listen'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
 import type { Store } from './store'
 import { fixHeard, Vocabulary } from './vocabulary'
@@ -11,7 +12,7 @@ import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
-import { coverTopics, groundMeetingNotes, normalizeMeetingNotes, partTopics, topicBullet } from './meetingNotes'
+import { coverTopics, groundMeetingNotes, keepAgreedDecisions, normalizeMeetingNotes, partOutcomes, partTopics, topicBullet, type PartOutcome } from './meetingNotes'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -264,7 +265,7 @@ export class Ai {
     const layout = `Use exactly this Markdown layout:
 
 ## Summary
-- **A short name for the topic**: one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as). Plain sentences: no "Topic:", "Outcome:" or "Who:" labels.
+- **A short name for the topic**: one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as). Plain sentences: no "Topic:", "Outcome:" or "Who:" labels. Two different subjects are two bullets – never one bullet joining unrelated things ("Air freshener & compost").
 
 ## Decisions
 - each thing that was actually settled: the final outcome only (leave this section out if nothing was settled)
@@ -273,7 +274,7 @@ export class Ai {
 - each real question left open: what's still to be decided or found out, said as that ("Where does the water meter box go – the middle of the lot, or 8 ft off the fence?"). Most topics have none: a topic that was only talked about isn't an open question, and "unresolved", "no decision made" or "no task assigned" isn't one either. Leave this section out if there are none.
 
 ## Action items
-- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning". Not every topic is a task: something only talked about ("the toilet's acting up") isn't one unless someone said it would be done.
+- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning". Not every topic is a task: something only talked about ("the toilet's acting up") isn't one unless someone said it would be done. One task per item: three things to do are three items.
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
@@ -412,7 +413,10 @@ ${partNotes.join('\n\n')}
         if (sims) meant = new Set(points.filter((_, i) => isMeant(sims[i])).map((l) => l.trim()))
         how.unshift(`Read by meaning: ${parts.length > 1 ? `${parts.length} parts, cut where the subject changes; ` : ''}${meant?.size ?? 0} of ${points.length} points match what was said`)
       }
-      const text = groundMeetingNotes(written, transcript, notes, { fallback, dropped, meant })
+      // decisions only for what the parts say was agreed: matched to their topics by meaning (or words)
+      const outcomes = partOutcomes(partNotesAll)
+      const decided = outcomes.some((o) => o.outcome) ? keepAgreedDecisions(written, outcomes, await this.topicMatcher(written, outcomes, meaning?.embed), dropped) : written
+      const text = groundMeetingNotes(decided, transcript, notes, { fallback, dropped, meant })
       if (dropped.length) log.info(`meeting notes: left out ${dropped.length} line(s) not found in what was said`)
       return { text, draft: { parts: partNotesAll, raw: rawOut.slice(0, 20000), how, dropped } }
     })
@@ -447,6 +451,48 @@ ${partNotes.join('\n\n')}
     } catch (e) {
       log.warn(`couldn't read the meeting by meaning (${describeError(e)}) – by its words alone`)
       return null
+    }
+  }
+
+  /**
+   * Which part topic each Decisions point is about: by meaning where there's an embedding model
+   * (likeness of 0.5 or more), else by the telling words they share (two or more). -1: none.
+   */
+  private async topicMatcher(markdown: string, outcomes: PartOutcome[], embed?: Embed): Promise<(line: string) => number> {
+    const lines = markdown.split('\n')
+    const start = lines.findIndex((l) => /^#{1,6}\s+decisions?\b/i.test(l))
+    const end = start < 0 ? -1 : lines.findIndex((l, i) => i > start && /^#{1,6}\s/.test(l))
+    const points = start < 0 ? [] : lines.slice(start + 1, end < 0 ? lines.length : end).filter((l) => /^\s*[-*]\s/.test(l))
+    const docs = outcomes.map((o) => `${o.topic}: ${o.text}`.slice(0, 1500))
+    if (embed && points.length) {
+      try {
+        const [pv, dv] = await Promise.all([embed(points.map(pointText), 'query'), embed(docs, 'document')])
+        const best = new Map<string, number>()
+        points.forEach((p, i) => {
+          let at = -1
+          let top = 0.5
+          dv.forEach((d, k) => {
+            const c = cosine(pv[i], d)
+            if (c > top) (top = c), (at = k)
+          })
+          best.set(p, at)
+        })
+        return (line) => best.get(line) ?? -1
+      } catch {
+        /* by words */
+      }
+    }
+    const words = (t: string) => new Set(t.split(/\s+/).map(stem).filter(telling))
+    const topics = docs.map(words)
+    return (line) => {
+      const w = words(pointText(line))
+      let at = -1
+      let top = 1
+      topics.forEach((t, k) => {
+        const shared = [...w].filter((x) => t.has(x)).length
+        if (shared > top) (top = shared), (at = k)
+      })
+      return at
     }
   }
 

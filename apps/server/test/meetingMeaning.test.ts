@@ -137,3 +137,44 @@ describe('notes in the shape asked for, from what a model actually wrote', async
     ])
   })
 })
+
+describe('decisions only for what was agreed', async () => {
+  const { keepAgreedDecisions, partOutcomes } = await import('../src/meetingNotes')
+  const parts = [
+    `#### **Topic: Water Meter Box Placement**
+- **Details**: Box comes Tuesday; middle of the lot or 8 ft off the fence suggested.
+- **Outcome**: Open: no consensus on the spot.
+
+#### **Topic: Project Start Date**
+- **Details**: Starting on the 19th.
+- **Outcome**: Agreed: "We're on board for the 19th."`,
+    `- Topic: Parking during the gate project
+  - Said: park on the west side Tuesday
+  - Outcome: Agreed: "Done. You got it."
+- Topic: Water meter box placement (continued)
+  - Said: the box goes in the elbow
+  - Outcome: Agreed: put it in the elbow`,
+  ]
+  it('reads each part’s topics and how they were left', () => {
+    expect(partOutcomes(parts).map((o) => [o.topic, o.outcome])).toEqual([
+      ['Water Meter Box Placement', 'open'],
+      ['Project Start Date', 'agreed'],
+      ['Parking during the gate project', 'agreed'],
+      ['Water meter box placement (continued)', 'agreed'],
+    ])
+  })
+  it('leaves out a decision about a topic left open – unless a later part settled it', () => {
+    const outcomes = partOutcomes([parts[0]])
+    const md = '## Summary\n- x\n\n## Decisions\n- Box placed in the middle of the lot, 8 ft off the fence\n- Start on the 19th\n\n## Action items\n- [ ] y'
+    const match = (l: string) => (/box/i.test(l) ? 0 : /19th/.test(l) ? 1 : -1)
+    const dropped: string[] = []
+    const out = keepAgreedDecisions(md, outcomes, match, dropped)
+    expect(out).toContain('## Decisions\n- Start on the 19th')
+    expect(out).not.toContain('middle of the lot')
+    expect(dropped[0]).toMatch(/^Decisions \(left open in the meeting\)/)
+    // the later part settled it: kept
+    expect(keepAgreedDecisions(md, partOutcomes(parts), match)).toContain('middle of the lot')
+    // nothing agreed left: no Decisions heading
+    expect(keepAgreedDecisions('## Decisions\n- Box in the middle of the lot\n\n## Action items\n- [ ] y', outcomes, () => 0)).toBe('## Action items\n- [ ] y')
+  })
+})

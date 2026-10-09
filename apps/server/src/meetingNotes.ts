@@ -168,6 +168,64 @@ export function partTopics(partNotes: string[]): { topic: string; said: string }
   return out.filter((t) => t.topic && t.said)
 }
 
+/** A part's topic, all it said about it, and how it said the topic was left. */
+export interface PartOutcome {
+  topic: string
+  text: string
+  outcome: 'agreed' | 'changed' | 'open' | null
+}
+
+/** Each part's topics with their outcome ("Outcome: Agreed: …" / "Changed: …" / "Open: …"), in order. */
+export function partOutcomes(partNotes: string[]): PartOutcome[] {
+  const out: PartOutcome[] = []
+  for (const part of partNotes) {
+    let cur: PartOutcome | null = null
+    for (const line of part.split('\n')) {
+      const t = line.match(/^\s*(?:[-*]|#{1,6})\s*(?:\*\*)?Topic(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$/i)
+      if (t) {
+        cur = { topic: t[1].replace(/\*\*/g, '').trim(), text: '', outcome: null }
+        out.push(cur)
+        continue
+      }
+      if (!cur || !line.trim()) continue
+      cur.text += ` ${line.replace(/[*#]/g, '').trim()}`
+      const o = line.match(/Outcome\W*:?\W*(Agreed|Changed|Open|Settled|Decided|Unsettled|Undecided)/i)
+      if (o) cur.outcome = /agreed|settled|decided/i.test(o[1]) && !/^un/i.test(o[1]) ? 'agreed' : /changed/i.test(o[1]) ? 'changed' : 'open'
+    }
+  }
+  return out
+}
+
+/**
+ * Decisions only for what was agreed: each part says how each topic was left, and a decision that
+ * matches a topic the parts left open (options floated, nothing settled) is left out – putting a
+ * long meeting together, a small model turns suggestions into decisions ("box placed in the middle
+ * of the lot") when nobody decided. `matchOf`: the part topic a point is about (an index), or -1.
+ */
+export function keepAgreedDecisions(markdown: string, outcomes: PartOutcome[], matchOf: (point: string) => number, dropped?: string[]): string {
+  const lines = markdown.split('\n')
+  const start = lines.findIndex((l) => /^#{1,6}\s+decisions?\b/i.test(l))
+  if (start < 0 || !outcomes.some((o) => o.outcome)) return markdown
+  let end = lines.findIndex((l, i) => i > start && /^#{1,6}\s/.test(l))
+  if (end < 0) end = lines.length
+  const keep = lines.slice(start + 1, end).filter((l) => {
+    if (!/^\s*[-*]\s/.test(l)) return true
+    const i = matchOf(l)
+    // (a topic left open in one part may be settled in a later one: then it was decided)
+    const name = (t: string) => new Set(t.split(/\s+/).map(stem).filter(telling))
+    const settledLater =
+      i >= 0 &&
+      outcomes.some((o, k) => k > i && (o.outcome === 'agreed' || o.outcome === 'changed') && [...name(o.topic)].filter((w) => name(outcomes[i].topic).has(w)).length >= 1)
+    if (i >= 0 && outcomes[i].outcome === 'open' && !settledLater) {
+      dropped?.push(`Decisions (left open in the meeting): ${l.trim()}`)
+      return false
+    }
+    return true
+  })
+  const section = keep.some((l) => /^\s*[-*]\s/.test(l)) ? [lines[start], ...keep] : []
+  return [...lines.slice(0, start), ...section, ...lines.slice(end)].join('\n')
+}
+
 /**
  * A small model putting a long meeting together drops topics (what came up in the middle
  * mostly). Every topic the parts found that the Summary doesn't mention is added to it, as the
