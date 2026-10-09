@@ -70,7 +70,7 @@ describe('AI agents managed from the app', () => {
   it('starts with no agents and explains how to add one', async () => {
     const { body } = await api('GET', '/api/ai/agents')
     expect(body.agents).toEqual([])
-    expect(body.tasks.map((t: { id: string }) => t.id)).toEqual(['handwriting', 'format', 'images', 'pdf', 'compile', 'audio', 'embed'])
+    expect(body.tasks.map((t: { id: string }) => t.id)).toEqual(['handwriting', 'format', 'images', 'pdf', 'compile', 'ask', 'audio', 'embed'])
     await drawing('note00000000000000a1', 'drawing000000000a1')
     const r = await api('POST', '/api/ai/handwriting', { noteId: 'note00000000000000a1', drawingId: 'drawing000000000a1' })
     expect(r.status).toBe(503)

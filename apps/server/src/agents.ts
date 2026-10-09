@@ -23,8 +23,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
  */
 
 export type AgentKind = 'anthropic' | 'ollama' | 'openai' | 'wyoming'
-export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'audio' | 'embed'
-export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'audio', 'embed']
+export type AiTask = 'handwriting' | 'format' | 'images' | 'pdf' | 'compile' | 'ask' | 'audio' | 'embed'
+export const AI_TASKS: AiTask[] = ['handwriting', 'format', 'images', 'pdf', 'compile', 'ask', 'audio', 'embed']
 
 /** How an agent reads handwritten drawings. */
 export type ReadingMode = 'auto' | 'page' | 'lines'
@@ -954,6 +954,7 @@ export const TASK_LABELS: Record<AiTask, string> = {
   images: 'Text from images',
   pdf: 'Text from PDFs',
   compile: 'Compile notes',
+  ask: 'Ask your notes',
   audio: 'Audio to text',
   embed: 'Search by meaning',
 }
@@ -1014,7 +1015,7 @@ export class AgentRegistry {
 
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
-    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
+    const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ask: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
     return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true }
   }
 
@@ -1159,6 +1160,7 @@ export class AgentRegistry {
       pdf: claude ? [claude.id] : [],
       format: claude ? [claude.id] : [],
       compile: order(c.compileProvider, [claude, ollamaText ?? ollama]),
+      ask: [],
       audio: [],
       embed: [],
     }

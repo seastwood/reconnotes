@@ -283,7 +283,8 @@ ${transcript.slice(0, 16000) || '(no speech recognised)'}
 
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
   async ask(prompt: string, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
-    const { result, agent } = await this.agents.run('compile', async (backend) => {
+    // its own agents ("Ask your notes"), else the ones that compile notes
+    const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) => {
       const gen = () => backend.generate([{ text: withExtra(prompt) }], 1000)
       const raw = await (onText ? streaming(onText, gen) : gen())
       return collapseRepeats(unwrapModelOutput(raw)).trim()
