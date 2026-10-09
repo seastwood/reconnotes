@@ -277,7 +277,7 @@ Check that it's being used:
 
 Whisper and Ollama's models share the GPU's memory. On a big card, both simply stay loaded. On a small one (8 GB), a language model loaded right after a transcription may not fit beside Whisper. Ollama then runs it partly on the CPU, many times slower. The **Jobs** view shows that as "partly on the CPU, slow".
 
-ReconNotes handles this by itself: the first time a model is squeezed beside Whisper, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)".
+ReconNotes handles this by itself: the first time a model is squeezed beside Whisper, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' small voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. It's tiny and stays loaded, and Whisper itself is what gets unloaded after 5 minutes (`STT_MODEL_TTL`) or when a model needs the room.
 
 ## Updating Speaches
 

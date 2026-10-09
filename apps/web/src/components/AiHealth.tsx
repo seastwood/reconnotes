@@ -79,7 +79,9 @@ export function AiHealthLine({ trigger }: { trigger?: string }) {
               {speech.map((m, i) => (
                 <span key={`speech:${m.model}`} className="ai-model">
                   {(loaded.length > 0 || i > 0) && ', '}
-                  <b>{m.model.split('/').pop()}</b> <span className="muted">(speech-to-text)</span>
+                  <b>{m.model.split('/').pop()}</b>{' '}
+                  {/* Speaches' small voice detector (finds where people speak before Whisper listens) stays loaded */}
+                  <span className="muted">{/vad/i.test(m.model) ? '(voice detection for speech-to-text, small)' : '(speech-to-text)'}</span>
                 </span>
               ))}
             </span>
