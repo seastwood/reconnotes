@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { setAskRefs } from '../src/askHistory'
-import { findReferences } from '../src/references'
+import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
@@ -705,7 +705,8 @@ describe('what a note refers to', () => {
     expect(unwrapLink('https://www.google.com/url?q=https://www.chiefdelphi.com/uploads/short-url/abc.pdf&sa=D&ust=1')).toBe('https://www.chiefdelphi.com/uploads/short-url/abc.pdf')
     expect(unwrapLink('https://example.com/url?q=https://x.org')).toBe('https://example.com/url?q=https://x.org')
     const mk = async (id: string, title: string, md: string, source?: string) => {
-      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title, ...(source ? { source } : {}) }))
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      if (source) await app.sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, id, { source }))
       await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
     }
     await mk(
@@ -721,5 +722,22 @@ describe('what a note refers to', () => {
     expect(r.missing.map((d) => d.url)).toEqual(['https://www.chiefdelphi.com/uploads/short-url/g2T.pdf'])
     expect(r.suggestions.map((s) => s.noteId)).not.toContain('redircopy00001')
     expect(r.suggestions.map((s) => s.noteId)).not.toContain('redirnamed0001')
+
+    // ignored: set aside, and back
+    setIgnoredRef(app.store, 'redirmain00001', 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', true)
+    const off = findReferences(app.store, app.sync, 'redirmain00001')
+    expect(off.missing).toEqual([])
+    expect(off.ignored).toEqual([{ key: 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', kind: 'document', name: 'PARCEL PANIC Rules', detail: 'https://www.chiefdelphi.com/uploads/short-url/g2T.pdf' }])
+    setIgnoredRef(app.store, 'redirmain00001', 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', false)
+    expect(findReferences(app.store, app.sync, 'redirmain00001').missing.length).toBe(1)
+  })
+
+  it('does not list the page the note was imported from', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'selfsrc0000001', title: 'Rules' }))
+    await app.sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, 'selfsrc0000001', { source: 'https://example.org/rules/manual.pdf' }))
+    await app.sync.change(noteDocName('selfsrc0000001'), (doc) =>
+      void getContent(doc).insert(0, markdownToNodes('*From [example.org/rules/manual.pdf](https://example.org/rules/manual.pdf) · imported 2026-10-09*\n\nR1. Be kind.', { attach: () => null, noteFor: () => null })),
+    )
+    expect(findReferences(app.store, app.sync, 'selfsrc0000001').missing).toEqual([])
   })
 })

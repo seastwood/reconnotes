@@ -4745,3 +4745,38 @@ a.button {
 .ask-refs-rules {
   padding: 2px 2px 0;
 }
+/* references: ignoring what isn't needed */
+.ask-refs-ignore {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+}
+.ask-refs-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 0 0 4px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text);
+  font-size: 12px;
+}
+.ask-refs-ignored {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ask-refs-ignored-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ask-refs-suggest.ignored {
+  background: transparent;
+  border: 1px dashed var(--line);
+}

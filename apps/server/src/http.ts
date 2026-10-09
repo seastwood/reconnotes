@@ -40,7 +40,7 @@ import { log } from './log'
 import { aiHealth } from './health'
 import { aiSkips, noteFilter, scopeFromQuery } from './access'
 import { definesRule, ruleIds } from './sections'
-import { findReferences } from './references'
+import { findReferences, setIgnoredRef } from './references'
 import { askRefs, deleteConversation, listConversations, scopeKey, setAskRefs } from './askHistory'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
@@ -328,6 +328,13 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   // what a note refers to, found among your notes or missing (see references.ts)
   route('GET', '/api/ask/references', (_req, res, _p, url) => {
     json(res, 200, findReferences(store, sync, url.searchParams.get('noteId') ?? ''))
+  })
+  // set aside something found (a note, a document, a rule) – or bring it back
+  route('PUT', '/api/ask/references/ignore', async (req, res) => {
+    const { noteId, key, ignore } = await readJson<{ noteId?: string; key?: string; ignore?: boolean }>(req)
+    if (typeof noteId !== 'string' || !noteId || typeof key !== 'string' || !/^(note|doc|rule):/.test(key)) throw new HttpError(400, 'noteId and key are required')
+    setIgnoredRef(store, noteId, key.slice(0, 500), ignore !== false)
+    json(res, 200, findReferences(store, sync, noteId))
   })
   route('PUT', '/api/ask/refs', async (req, res) => {
     const { noteId, refs } = await readJson<{ noteId?: string; refs?: unknown }>(req)

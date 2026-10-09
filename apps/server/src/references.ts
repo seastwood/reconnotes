@@ -48,7 +48,36 @@ export interface References {
   missing: DocumentRef[]
   /** rules it uses that no note defines */
   missingRules: string[]
+  /** what you said it doesn't need (kept, to bring back) */
+  ignored: Ignored[]
 }
+
+/** Something found that you said the note doesn't need: a note to add, a document to import, a rule. */
+export interface Ignored {
+  /** "note:<id>", "doc:<address or name>", "rule:<id>" */
+  key: string
+  kind: 'note' | 'document' | 'rule'
+  name: string
+  detail?: string
+}
+
+/** The keys of what's ignored for a note. */
+export function ignoredRefs(store: Store, noteId: string): string[] {
+  return store.getSetting<Record<string, string[]>>('askRefsIgnored')?.[noteId] ?? []
+}
+
+export function setIgnoredRef(store: Store, noteId: string, key: string, ignore: boolean) {
+  const all = { ...(store.getSetting<Record<string, string[]>>('askRefsIgnored') ?? {}) }
+  const list = new Set(all[noteId] ?? [])
+  if (ignore) list.add(key)
+  else list.delete(key)
+  if (list.size) all[noteId] = [...list].slice(-200)
+  else delete all[noteId]
+  store.setSetting('askRefsIgnored', all)
+}
+
+/** A document's key for ignoring it. */
+export const docKey = (d: { name: string; url?: string }) => `doc:${d.url ? sameAddress(d.url) : d.name.toLowerCase()}`
 
 /** A document's kind of name: what makes a link or a phrase a reference to read, not any web page. */
 const DOC_WORD = /\b(manual|guide|handbook|rule ?book|rules|specification|spec|standard|datasheet|data sheet|reference|documentation|instructions)\b/i
@@ -92,6 +121,14 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   const live = new Set(others.map((o) => o.id))
   const imports = listImports(store)
   const titleOf = (id: string) => meta.get(id)?.title || 'Untitled'
+  // where this note itself came from: a link there is the note, not something it refers to
+  const self = new Set<string>()
+  if (own?.source) self.add(sameAddress(unwrapLink(own.source)))
+  for (const r of imports)
+    if (Object.values(r.pages).some((p) => p.noteId === noteId) || r.contentsNoteId === noteId) {
+      self.add(sameAddress(unwrapLink(r.url)))
+      for (const page of Object.keys(r.pages)) self.add(sameAddress(page))
+    }
 
   // 1. documents it links to (a PDF, or a link named like a manual)
   const documents = new Map<string, DocumentRef>()
@@ -101,7 +138,7 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
     const url = unwrapLink(m[2])
     if (!/\.pdf$/i.test(new URL(url).pathname) && !DOC_WORD.test(text)) continue
     const key = sameAddress(url)
-    if (documents.has(key)) continue
+    if (documents.has(key) || self.has(key)) continue
     const file = fileName(url)
     const found = others
       .filter((o) => {
@@ -172,19 +209,19 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   const byNote = new Map<string, string[]>()
   for (const r of rules) if (!covered(r.definedIn)) for (const f of r.definedIn) byNote.set(f.noteId, [...(byNote.get(f.noteId) ?? []), r.id])
   for (const [id, ids] of byNote) why(id, `defines ${ids.slice(0, 4).join(', ')}${ids.length > 4 ? ` and ${ids.length - 4} more` : ''}`)
+  // what you said it doesn't need: set aside, not suggested again
+  const off = new Set(ignoredRefs(store, noteId))
+  const ignored: Ignored[] = []
+  const keep = (key: string, as: Omit<Ignored, 'key'>) => (off.has(key) ? (ignored.push({ key, ...as }), false) : true)
   const suggestions = [...reasons]
-    .filter(([id]) => !chosen.has(id))
+    .filter(([id]) => !chosen.has(id) && keep(`note:${id}`, { kind: 'note', name: titleOf(id), detail: reasons.get(id)!.join(' · ') }))
     .map(([id, r]) => ({ noteId: id, title: titleOf(id), reasons: r, weight: r.length + (byNote.get(id)?.length ?? 0) }))
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 6)
     .map(({ weight: _w, ...s }) => s)
 
   const docs = [...documents.values()]
-  return {
-    documents: docs,
-    rules,
-    suggestions,
-    missing: docs.filter((d) => d.url && !d.found.length),
-    missingRules: rules.filter((r) => !r.definedIn.length).map((r) => r.id),
-  }
+  const missing = docs.filter((d) => d.url && !d.found.length && keep(docKey(d), { kind: 'document', name: d.name, detail: d.url }))
+  const missingRules = rules.filter((r) => !r.definedIn.length && keep(`rule:${r.id}`, { kind: 'rule', name: r.id })).map((r) => r.id)
+  return { documents: docs, rules, suggestions, missing, missingRules, ignored }
 }

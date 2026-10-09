@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, Check, ChevronDown, ChevronRight, CornerLeftUp, Download, FileText, Folder, Loader2, Plus, Sparkles, X } from 'lucide-react'
+import { BookOpen, Check, ChevronDown, ChevronRight, CornerLeftUp, Download, EyeOff, FileText, Folder, Loader2, Plus, RotateCcw, Sparkles, X } from 'lucide-react'
 import { getNotes, listFolders, readNote } from '@reconnotes/core'
 import { api } from '../lib/api'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
@@ -23,6 +23,21 @@ export interface References {
   suggestions: { noteId: string; title: string; reasons: string[] }[]
   missing: { name: string; url?: string }[]
   missingRules: string[]
+  /** what you said the note doesn't need – kept here to bring back */
+  ignored: { key: string; kind: 'note' | 'document' | 'rule'; name: string; detail?: string }[]
+}
+
+/** Set aside something found (or bring it back); answers with what's found now. */
+const ignore = (noteId: string, key: string, on: boolean) => api<References>('PUT', '/api/ask/references/ignore', { noteId, key, ignore: on })
+/** A document's key, as the server makes it: its address without "www.", query or trailing slash. */
+const docKey = (d: { name: string; url?: string }) => {
+  if (!d.url) return `doc:${d.name.toLowerCase()}`
+  try {
+    const u = new URL(d.url)
+    return `doc:${(u.host.replace(/^www\./, '') + u.pathname.replace(/\/$/, '')).toLowerCase()}`
+  } catch {
+    return `doc:${d.url.toLowerCase()}`
+  }
 }
 
 const titleOf = (id: string) => {
@@ -50,14 +65,14 @@ function useFound(noteId: string, refs: string[]) {
   useEffect(() => {
     if (doneImports) void loadRefs(true)
   }, [doneImports])
-  return found
+  return [found, setFound] as const
 }
 
 /** In the chat: "References · 2", opened to show them. */
 export function ReferencesBar({ noteId, onOpen }: { noteId: string; onOpen: (id: string) => void }) {
   useWorkspace()
   const refs = useRefs(noteId).filter((id) => titleOf(id) !== null)
-  const found = useFound(noteId, refs)
+  const [found, setFound] = useFound(noteId, refs)
   const [open, setOpen] = useState(false)
   const todo = (found?.suggestions.length ?? 0) + (found?.missing.length ?? 0)
   return (
@@ -72,7 +87,7 @@ export function ReferencesBar({ noteId, onOpen }: { noteId: string; onOpen: (id:
           </span>
         )}
       </button>
-      {open && <ReferencesPanel noteId={noteId} found={found} onOpen={onOpen} />}
+      {open && <ReferencesPanel noteId={noteId} found={found} setFound={setFound} onOpen={onOpen} />}
     </div>
   )
 }
@@ -87,7 +102,7 @@ export function ReferencesHost({ onOpen }: { onOpen: (id: string) => void }) {
 function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: string) => void }) {
   useWorkspace()
   const refs = useRefs(noteId)
-  const found = useFound(noteId, refs)
+  const [found, setFound] = useFound(noteId, refs)
   return createPortal(
     <div className="dialog-backdrop" onClick={closeRefs}>
       <div className="dialog refs-dialog" onClick={(e) => e.stopPropagation()}>
@@ -104,6 +119,7 @@ function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: str
         <ReferencesPanel
           noteId={noteId}
           found={found}
+          setFound={setFound}
           onOpen={(id) => {
             closeRefs()
             onOpen(id)
@@ -115,10 +131,30 @@ function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: str
   )
 }
 
-export function ReferencesPanel({ noteId, found, onOpen }: { noteId: string; found: References | null; onOpen: (id: string) => void }) {
+export function ReferencesPanel({
+  noteId,
+  found,
+  setFound,
+  onOpen,
+}: {
+  noteId: string
+  found: References | null
+  setFound: (r: References) => void
+  onOpen: (id: string) => void
+}) {
   useWorkspace()
   const refs = useRefs(noteId)
   const [picking, setPicking] = useState(false)
+  const [showIgnored, setShowIgnored] = useState(false)
+  const setIgnored = (key: string, on: boolean) =>
+    void ignore(noteId, key, on)
+      .then(setFound)
+      .catch(() => {})
+  const ignoreBtn = (key: string, what: string) => (
+    <button className="icon ask-refs-ignore" aria-label={`Ignore ${what}`} title="Ignore – not needed (kept under Ignored)" onClick={() => setIgnored(key, true)}>
+      <EyeOff size={15} />
+    </button>
+  )
   const [importing, setImporting] = useState<string[]>([])
   const shown = refs.filter((id) => titleOf(id) !== null)
   const save = (next: string[]) => void saveRefs(noteId, next)
@@ -167,6 +203,7 @@ export function ReferencesPanel({ noteId, found, onOpen }: { noteId: string; fou
                   <button className="text" onClick={() => save([...refs, sg.noteId])}>
                     <Plus size={13} /> Add
                   </button>
+                  {ignoreBtn(`note:${sg.noteId}`, sg.title)}
                 </div>
               ))}
               {found.suggestions.length > 1 && (
@@ -191,14 +228,42 @@ export function ReferencesPanel({ noteId, found, onOpen }: { noteId: string; fou
                   <Download size={13} /> Import
                 </button>
               )}
+              {ignoreBtn(docKey(d), d.name)}
             </div>
           ))}
           {found.missingRules.length > 0 && (
             <div className="ask-refs-where ask-refs-rules">
-              Rules it uses that none of your notes has: {found.missingRules.slice(0, 10).join(', ')}
-              {found.missingRules.length > 10 ? ` and ${found.missingRules.length - 10} more` : ''}
+              Rules it uses that none of your notes has:
+              {found.missingRules.slice(0, 12).map((id) => (
+                <button key={id} className="ask-refs-rule" title={`Ignore ${id} – not needed`} onClick={() => setIgnored(`rule:${id}`, true)}>
+                  {id} <X size={11} />
+                </button>
+              ))}
+              {found.missingRules.length > 12 ? ` and ${found.missingRules.length - 12} more` : ''}
             </div>
           )}
+        </div>
+      )}
+      {found && found.ignored.length > 0 && (
+        <div className="ask-refs-ignored">
+          <button className="text ask-refs-ignored-toggle" aria-expanded={showIgnored} onClick={() => setShowIgnored(!showIgnored)}>
+            {showIgnored ? <ChevronDown size={13} /> : <ChevronRight size={13} />} <EyeOff size={13} /> Ignored · {found.ignored.length}
+          </button>
+          {showIgnored &&
+            found.ignored.map((i) => (
+              <div key={i.key} className="ask-refs-suggest ignored">
+                <span className="ask-refs-option-text">
+                  {i.name}
+                  <span className="ask-refs-where">
+                    {i.kind === 'note' ? 'A note' : i.kind === 'document' ? 'A linked document' : 'A rule'}
+                    {i.detail ? ` · ${i.detail.replace(/^https?:\/\//, '')}` : ''}
+                  </span>
+                </span>
+                <button className="text" onClick={() => setIgnored(i.key, false)}>
+                  <RotateCcw size={13} /> Restore
+                </button>
+              </div>
+            ))}
         </div>
       )}
     </div>
