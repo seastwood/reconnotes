@@ -689,12 +689,41 @@ button.text {
 .row-actions.hover {
   position: absolute;
   right: 8px;
-  top: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   margin: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow);
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
 }
-.note-row:hover .row-actions.hover {
+.note-row:hover .row-actions.hover,
+.row-actions.hover:focus-within {
   opacity: 1;
+  pointer-events: auto;
+}
+.row-actions.hover button {
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent-text);
+}
+.row-actions.hover button:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.row-actions.hover button.danger {
+  color: var(--danger, #e5484d);
+}
+.row-actions.hover button.danger:hover {
+  background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent);
 }
 @media (hover: none) {
   .row-actions.hover {

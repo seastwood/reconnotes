@@ -396,16 +396,16 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
               </div>
             ) : (
               <div className="row-actions hover">
-                <button onClick={(e) => (e.stopPropagation(), onMoveNote(n.id))} aria-label="Move note">
+                <button onClick={(e) => (e.stopPropagation(), onMoveNote(n.id))} aria-label="Move note" title="Move to a folder">
                   <FolderInput size={14} />
                 </button>
-                <button onClick={(e) => (e.stopPropagation(), pinNotes([n.id], !n.pinned))} aria-label="Pin">
+                <button onClick={(e) => (e.stopPropagation(), pinNotes([n.id], !n.pinned))} aria-label={n.pinned ? 'Unpin' : 'Pin'} title={n.pinned ? 'Unpin' : 'Pin to top'}>
                   <Pin size={14} />
                 </button>
                 <button onClick={(e) => (e.stopPropagation(), void duplicateNote(n.id))} aria-label="Duplicate" title="Duplicate">
                   <Copy size={14} />
                 </button>
-                <button onClick={(e) => (e.stopPropagation(), trashNotes([n.id]))} aria-label="Delete">
+                <button className="danger" onClick={(e) => (e.stopPropagation(), trashNotes([n.id]))} aria-label="Delete" title="Move to Trash">
                   <Trash2 size={14} />
                 </button>
               </div>
