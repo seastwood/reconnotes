@@ -145,6 +145,44 @@ const MAIN_SELECTORS = [
 
 const textLength = (el: El) => (el.textContent ?? '').replace(/\s+/g, ' ').trim().length
 
+/** A CSS length in points ("36pt", "48px", "2em"); 0 for anything else. */
+function points(v: string): number {
+  const m = /^(-?[\d.]+)(pt|px|em|rem)?$/.exec(v.trim())
+  if (!m) return 0
+  const n = parseFloat(m[1])
+  return m[2] === 'px' ? n * 0.75 : m[2] === 'em' || m[2] === 'rem' ? n * 12 : m[2] === 'pt' ? n : 0
+}
+
+/**
+ * How far each paragraph is indented (Google Docs, Word's HTML: by classes in
+ * the page's stylesheet, or a style on it), noted on it as data-rn-indent –
+ * before the stylesheets go with the rest of the noise.
+ */
+function markIndents(doc: Document) {
+  const byClass = new Map<string, number>()
+  for (const st of doc.querySelectorAll('style'))
+    for (const m of (st.textContent ?? '').matchAll(/\.([\w-]+)\s*\{([^}]*)\}/g)) {
+      const left = /(?:^|;)\s*(?:margin|padding)-left\s*:\s*([^;]+)/gi
+      let pt = 0
+      for (const d of m[2].matchAll(left)) pt += points(d[1])
+      if (pt) byClass.set(m[1], (byClass.get(m[1]) ?? 0) + pt)
+    }
+  for (const el of doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, div')) {
+    let pt = 0
+    for (const c of (el.getAttribute('class') ?? '').split(/\s+/)) pt += byClass.get(c) ?? 0
+    for (const d of (el.getAttribute('style') ?? '').matchAll(/(?:^|;)\s*(?:margin|padding)-left\s*:\s*([^;]+)/gi)) pt += points(d[1])
+    if (pt > 0) el.setAttribute('data-rn-indent', String(Math.round(pt)))
+  }
+}
+
+/** A Google Doc published to the web: its document, and its own title. */
+function googleDoc(doc: Document): { main: El; title: string } | null {
+  const main = doc.querySelector('#contents') as El | null
+  if (!main || !doc.querySelector('#publish-banner, #banners, meta[content*="Google Docs"]')) return null
+  const title = (doc.querySelector('#title')?.textContent ?? doc.querySelector('title')?.textContent?.replace(/\s+-\s+Google Docs\s*$/, '') ?? '').replace(/\s+/g, ' ').trim()
+  return { main, title }
+}
+
 /** The element holding the page's content. */
 function findMain(doc: Document): El {
   const body = doc.body ?? doc.documentElement
@@ -382,6 +420,16 @@ function pageToMarkdown(main: El, conv: Conv): string {
     return token ? `\n\n![](${token})\n\n` : ''
   }
 
+    /** A line of a table of contents: a paragraph that's only a link to a place in the page. */
+  const isContentsLine = (n: Node): boolean => {
+    if (n.nodeType !== 1 || !/^(P|DIV)$/.test((n as El).tagName)) return false
+    const links = (n as El).querySelectorAll('a')
+    if (links.length !== 1 || !(links[0].getAttribute('href') ?? '').startsWith('#') || (n as El).querySelector('p, div, img, table')) return false
+    const t = textLength(n as El)
+    return t > 0 && t === textLength(links[0] as El)
+  }
+  const indentOf = (el: El) => Number(el.getAttribute('data-rn-indent') ?? 0)
+
   /** A run of mixed inline / block children as Markdown blocks. */
   const blocks = (parent: El, depth = 0): string[] => {
     const out: string[] = []
@@ -393,7 +441,26 @@ function pageToMarkdown(main: El, conv: Conv): string {
       }
       run = ''
     }
-    for (const c of [...parent.childNodes]) {
+    const kids = [...parent.childNodes]
+    for (let k = 0; k < kids.length; k++) {
+      const c = kids[k]
+      // a table of contents (paragraphs that are each just a link to a heading): a list, nested as it was indented
+      if (isContentsLine(c)) {
+        const run: El[] = []
+        let j = k
+        for (; j < kids.length; j++) {
+          const x = kids[j]
+          if (isContentsLine(x)) run.push(x as El)
+          else if (!(x.nodeType === 3 && !(x.textContent ?? '').trim()) && !(x.nodeType === 1 && (x as El).tagName === 'P' && !textLength(x as El) && !(x as El).querySelector('img'))) break
+        }
+        if (run.length >= 3) {
+          flush()
+          const levels = [...new Set(run.map(indentOf))].sort((a, b) => a - b)
+          out.push(run.map((p) => `${'  '.repeat(levels.indexOf(indentOf(p)))}- ${inline(p).replace(/\s+/g, ' ').trim()}`).join('\n'))
+          k = j - 1
+          continue
+        }
+      }
       if (c.nodeType === 1 && (BLOCK.has((c as El).tagName) || (c as El).tagName === 'IMG' && !parent.closest('p, a, li, td, th'))) {
         flush()
         out.push(...block(c as El, depth))
@@ -749,9 +816,11 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
 
   // 2. each page's content and title
   const mains = pages.map((p) => {
-    const main = findMain(p.doc)
+    markIndents(p.doc)
+    const gdoc = googleDoc(p.doc)
+    const main = gdoc?.main ?? findMain(p.doc)
     removeNoise(main)
-    p.title = titleOf(p.doc, main, p.url)
+    p.title = gdoc?.title || titleOf(p.doc, main, p.url)
     return main
   })
   // checking for updates: the notes the pages went into before

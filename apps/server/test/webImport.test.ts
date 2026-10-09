@@ -66,7 +66,31 @@ const layout = (title: string, body: string) => `<!doctype html><html><head><met
   <script>console.log('x')</script>
 </body></html>`
 
+/** A Google Doc as "Publish to the web" makes it: the contents linked to headings, indented by its stylesheet. */
+const GDOC = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Trials Manual - Cookie Chaos - Google Docs</title></head><body>
+<div id="banners"><div id="publish-banner">Published using Google Docs <a href="https://support.google.com/docs">Learn more</a></div></div>
+<div id="title" class="title">Trials Manual - Cookie Chaos</div>
+<div id="contents"><style type="text/css">.c2{margin-left:0;padding-top:0}.c5{margin-left:18pt;padding-top:0}.c6{margin-left:36pt}.c7{color:#1155cc;text-decoration:underline}.c9{font-weight:700}.c11{margin-left:36pt;text-indent:-18pt}</style>
+<div><p class="c2"><span><a class="c7" href="#h.intro">1 INTRODUCTION</a></span></p>
+<p class="c5 c8"><span><a class="c7" href="#h.hist">1.1 PROGRAM HISTORY</a></span></p>
+<p class="c5"><span><a class="c7" href="#h.goals">1.2 GOALS</a></span></p>
+<p class="c2"><span><a class="c7" href="#h.arena">3 ARENA</a></span></p>
+<p class="c5"><span><a class="c7" href="#h.zones">3.2 ZONES &amp; MARKINGS</a></span></p>
+<p class="c6"><span><a class="c7" href="#h.center">3.2.1 CENTER LINE</a></span></p>
+<p class="c6"><span><a class="c7" href="#h.bakery">3.2.2 BAKERY</a></span></p>
+<h1 id="h.intro"><span>1 INTRODUCTION</span></h1><p class="c2"><span>Welcome.</span></p>
+<h2 id="h.hist"><span>1.1 PROGRAM HISTORY</span></h2><p class="c2"><span>Since 2010.</span></p>
+<h2 id="h.goals"><span>1.2 GOALS</span></h2><p class="c11"><span>Have fun, see </span><span><a class="c7" href="#h.bakery">the bakery</a></span><span>.</span></p>
+<h1 id="h.arena"><span>3 ARENA</span></h1>
+<h2 id="h.zones"><span>3.2 ZONES &amp; MARKINGS</span></h2>
+<h3 id="h.center"><span>3.2.1 CENTER LINE</span></h3><p class="c2"><span>The middle.</span></p>
+<h3 id="h.bakery"><span>3.2.2 BAKERY</span></h3><p class="c2"><span>Where cookies go.</span></p>
+</div></div>
+<div id="footer">Updated automatically every 5 minutes</div>
+</body></html>`
+
 const PAGES: Record<string, string> = {
+  '/document/d/e/2PACX-x/pub': GDOC,
   '/guide/': layout(
     'Overview',
     `<h1>Robot guide <a class="hash-link" href="#robot-guide">#</a></h1>
@@ -294,6 +318,20 @@ describe('importing a web page', () => {
     expect(check.notes.join('\n')).toMatch(/New pages: Vision/)
     expect(check.notes.join('\n')).toMatch(/Updated: Wiring/)
     expect(intro).toBeTruthy()
+  })
+
+  it('a Google Doc: its contents link to the headings, indented as they were', async () => {
+    const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/document/d/e/2PACX-x/pub` })
+    const text = md(r.noteIds[0])
+    const xml = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
+    // the document's own title – not its first heading, nor Google's banner and footer
+    expect(text).toMatch(/^# Trials Manual - Cookie Chaos\n/)
+    for (const t of ['Published using Google Docs', 'Updated automatically', 'Learn more']) expect(text).not.toContain(t)
+    // the contents: a list nested as it was indented, each line going to its heading in the note
+    expect(text).toContain('- [[1 INTRODUCTION]]\n  - [[1.1 PROGRAM HISTORY]]\n  - [[1.2 GOALS]]\n- [[3 ARENA]]\n  - [[3.2 ZONES & MARKINGS]]\n    - [[3.2.1 CENTER LINE]]\n    - [[3.2.2 BAKERY]]')
+    expect(xml).toContain(`<notelink find="3.2.1 CENTER LINE" label="3.2.1 CENTER LINE" noteId="${r.noteIds[0]}"`)
+    // and a link in the text to a heading
+    expect(xml).toContain(`<notelink find="3.2.2 BAKERY" label="the bakery" noteId="${r.noteIds[0]}"`)
   })
 
   it('says what went wrong with a bad address', async () => {
