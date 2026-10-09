@@ -257,7 +257,9 @@ The names and terms in *Settings › AI agents › Your words* are passed to Whi
 right. A long meeting is read in parts of about eight minutes, each written up, then put together –
 so the end of a long meeting is covered as well as its start.
 
-A self-hosted Whisper server next to ReconNotes (uses the GPU if Docker has access to it):
+A self-hosted Whisper server next to ReconNotes. Without Docker (e.g. in an LXC container), follow
+[`docs/setup/Speech to text with Speaches.md`](docs/setup/Speech%20to%20text%20with%20Speaches.md),
+which includes fixes for the usual GPU-library problems. With Docker (uses the GPU if Docker has access to it):
 
 ```bash
 docker run -d --name speaches --restart unless-stopped --gpus all -p 8000:8000 \
@@ -272,7 +274,8 @@ better accuracy).
 
 Which model: for meetings, use **`deepdml/faster-whisper-large-v3-turbo-ct2`** – far more accurate
 than *small* or *medium* on several people talking at a distance, and fast. It needs about 2 GB of
-GPU memory (int8), so it fits next to an 8B language model on an 8 GB card. On an older NVIDIA card
+GPU memory (int8). On a small card (8 GB) an 8B language model may not fit beside it: ReconNotes
+notices and unloads Whisper first for that model (bigger cards keep both loaded). On an older NVIDIA card
 (GTX 10-series) start the container with `-e WHISPER__COMPUTE_TYPE=int8`: those cards are slow at
 16-bit maths. Without a GPU, use `Systran/faster-whisper-small` – large models are too slow on a CPU
 for a long meeting. Agents whose model name contains "whisper" are put on *Audio to text*

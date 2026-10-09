@@ -35,4 +35,4 @@ Each task has its own list of agents: the first enabled one is tried first, and 
 - In the iPhone / iPad app, Apple's speech recognition transcribes on the device.
 - On the server, use any OpenAI-compatible speech-to-text server (e.g. a self-hosted Whisper), or a Home Assistant Whisper (**Wyoming**) agent at `tcp://<address>:10300`, which needs `ffmpeg` on the ReconNotes server.
 
-The README's "AI agents" section has more detail, including running a Whisper server with Docker.
+For the best transcripts, run Whisper on your own GPU: [[Speech to text with Speaches]] sets it up step by step. The README's "AI agents" section covers running it with Docker instead.
