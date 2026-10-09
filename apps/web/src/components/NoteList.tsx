@@ -234,7 +234,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             <PanelLeft size={20} />
           </button>
         )}
-        <h2>{selecting ? (selected.size ? `${selected.size} selected` : 'Select notes') : title}</h2>
+        <span className="list-head-gap" />
         {onToggleExpand && <ExpandButton expanded={Boolean(expanded)} onToggle={onToggleExpand} />}
         {canSelect && (
           <button
@@ -324,6 +324,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           </>
         )}
       </header>
+      {/* the folder's name on a line of its own, under the buttons – not squeezed between them */}
+      <h2 className="list-title">{selecting ? (selected.size ? `${selected.size} selected` : 'Select notes') : title}</h2>
 
       {lockedBy && <LockedScreen folderId={lockedBy} what="folder" />}
       <ul className="notes" hidden={Boolean(lockedBy)}>

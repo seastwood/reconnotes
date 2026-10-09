@@ -619,14 +619,24 @@ button.text {
   gap: 4px;
   padding: 12px 10px 8px 16px;
 }
-.list-head h2 {
-  margin: 0;
-  font-size: 22px;
+.list-head {
+  padding-bottom: 2px;
+}
+.list-head-gap {
   flex: 1;
-  min-width: 0;
+}
+.list-title {
+  margin: 0;
+  padding: 0 16px 8px;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 700;
+  /* a long name: two lines, then … */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .notes {
   list-style: none;
