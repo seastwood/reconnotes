@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, Check, ChevronDown, ChevronRight, CornerLeftUp, Download, EyeOff, FileText, Folder, Loader2, Plus, RotateCcw, Sparkles, X } from 'lucide-react'
+import { BookOpen, Check, ChevronDown, ChevronRight, CornerLeftUp, Download, Eye, EyeOff, FileText, Folder, Loader2, Plus, RotateCcw, Sparkles, X } from 'lucide-react'
 import { getNotes, listFolders, readNote } from '@reconnotes/core'
 import { api } from '../lib/api'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
@@ -20,11 +20,13 @@ import { closeRefs, loadRefs, refsStore, saveRefs, useRefs } from '../lib/refs'
  */
 
 export interface References {
-  suggestions: { noteId: string; title: string; reasons: string[] }[]
+  suggestions: { noteId: string; title: string; reasons: string[]; find?: string }[]
   missing: { name: string; url?: string }[]
   missingRules: string[]
   /** what you said the note doesn't need – kept here to bring back */
-  ignored: { key: string; kind: 'note' | 'document' | 'rule'; name: string; detail?: string }[]
+  ignored: { key: string; kind: 'note' | 'document' | 'rule'; name: string; detail?: string; find?: string }[]
+  /** for each note it refers to: where this note points to it (text to find) */
+  mentions: Record<string, string>
 }
 
 /** Set aside something found (or bring it back); answers with what's found now. */
@@ -68,12 +70,21 @@ function useFound(noteId: string, refs: string[]) {
   return [found, setFound] as const
 }
 
+/** the notes whose References are open in the chat (this visit) */
+const barsOpen = new Set<string>()
+
 /** In the chat: "References · 2", opened to show them. */
-export function ReferencesBar({ noteId, onOpen }: { noteId: string; onOpen: (id: string) => void }) {
+export function ReferencesBar({ noteId, onOpen }: { noteId: string; onOpen: (id: string, find?: string) => void }) {
   useWorkspace()
   const refs = useRefs(noteId).filter((id) => titleOf(id) !== null)
   const [found, setFound] = useFound(noteId, refs)
-  const [open, setOpen] = useState(false)
+  // stays open when you come back from viewing something
+  const [open, setOpenState] = useState(() => barsOpen.has(noteId))
+  const setOpen = (on: boolean) => {
+    if (on) barsOpen.add(noteId)
+    else barsOpen.delete(noteId)
+    setOpenState(on)
+  }
   const todo = (found?.suggestions.length ?? 0) + (found?.missing.length ?? 0)
   return (
     <div className="ask-refs">
@@ -93,13 +104,13 @@ export function ReferencesBar({ noteId, onOpen }: { noteId: string; onOpen: (id:
 }
 
 /** The References window (from the ••• menu or the list). */
-export function ReferencesHost({ onOpen }: { onOpen: (id: string) => void }) {
+export function ReferencesHost({ onOpen }: { onOpen: (id: string, find?: string) => void }) {
   const noteId = useStore(refsStore, (s) => s.open)
   if (!noteId) return null
   return <ReferencesDialog noteId={noteId} onOpen={onOpen} />
 }
 
-function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: string) => void }) {
+function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: string, find?: string) => void }) {
   useWorkspace()
   const refs = useRefs(noteId)
   const [found, setFound] = useFound(noteId, refs)
@@ -120,9 +131,9 @@ function ReferencesDialog({ noteId, onOpen }: { noteId: string; onOpen: (id: str
           noteId={noteId}
           found={found}
           setFound={setFound}
-          onOpen={(id) => {
+          onOpen={(id, find) => {
             closeRefs()
-            onOpen(id)
+            onOpen(id, find)
           }}
         />
       </div>
@@ -140,7 +151,7 @@ export function ReferencesPanel({
   noteId: string
   found: References | null
   setFound: (r: References) => void
-  onOpen: (id: string) => void
+  onOpen: (id: string, find?: string) => void
 }) {
   useWorkspace()
   const refs = useRefs(noteId)
@@ -150,6 +161,13 @@ export function ReferencesPanel({
     void ignore(noteId, key, on)
       .then(setFound)
       .catch(() => {})
+  // this note, at the spot that points to it
+  const viewBtn = (find: string | undefined, what: string) =>
+    find ? (
+      <button className="text ask-refs-view" title={`Where this note mentions ${what}`} onClick={() => onOpen(noteId, find)}>
+        <Eye size={13} /> View
+      </button>
+    ) : null
   const ignoreBtn = (key: string, what: string) => (
     <button className="icon ask-refs-ignore" aria-label={`Ignore ${what}`} title="Ignore – not needed (kept under Ignored)" onClick={() => setIgnored(key, true)}>
       <EyeOff size={15} />
@@ -176,6 +194,7 @@ export function ReferencesPanel({
               <FileText size={15} />
               <span className="ask-refs-option-text">{titleOf(id)}</span>
             </button>
+            {viewBtn(found?.mentions?.[id], titleOf(id)!)}
             <button className="icon" aria-label={`Remove ${titleOf(id)}`} title="Remove this reference" onClick={() => save(refs.filter((x) => x !== id))}>
               <X size={15} />
             </button>
@@ -200,6 +219,7 @@ export function ReferencesPanel({
                     {sg.title}
                     <span className="ask-refs-where">{sg.reasons.join(' · ')}</span>
                   </span>
+                  {viewBtn(sg.find, sg.title)}
                   <button className="text" onClick={() => save([...refs, sg.noteId])}>
                     <Plus size={13} /> Add
                   </button>
@@ -219,6 +239,7 @@ export function ReferencesPanel({
                 {d.name}
                 <span className="ask-refs-where">Linked, but not in your notes · {d.url!.replace(/^https?:\/\//, '')}</span>
               </span>
+              {viewBtn(d.name, d.name)}
               {importing.includes(d.url!) ? (
                 <span className="ask-refs-where">
                   <Loader2 size={13} className="spin" /> Importing…
@@ -235,9 +256,14 @@ export function ReferencesPanel({
             <div className="ask-refs-where ask-refs-rules">
               Rules it uses that none of your notes has:
               {found.missingRules.slice(0, 12).map((id) => (
-                <button key={id} className="ask-refs-rule" title={`Ignore ${id} – not needed`} onClick={() => setIgnored(`rule:${id}`, true)}>
-                  {id} <X size={11} />
-                </button>
+                <span key={id} className="ask-refs-rule">
+                  <button title={`Where this note uses ${id}`} onClick={() => onOpen(noteId, id)}>
+                    {id}
+                  </button>
+                  <button aria-label={`Ignore ${id}`} title={`Ignore ${id} – not needed`} onClick={() => setIgnored(`rule:${id}`, true)}>
+                    <X size={11} />
+                  </button>
+                </span>
               ))}
               {found.missingRules.length > 12 ? ` and ${found.missingRules.length - 12} more` : ''}
             </div>
@@ -259,6 +285,7 @@ export function ReferencesPanel({
                     {i.detail ? ` · ${i.detail.replace(/^https?:\/\//, '')}` : ''}
                   </span>
                 </span>
+                {viewBtn(i.find, i.name)}
                 <button className="text" onClick={() => setIgnored(i.key, false)}>
                   <RotateCcw size={13} /> Restore
                 </button>

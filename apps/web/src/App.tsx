@@ -517,7 +517,7 @@ export function App() {
       <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />
       <ImageViewerHost />
       <AskChatHost onOpen={followLink} />
-      <ReferencesHost onOpen={(id) => followLink(id)} />
+      <ReferencesHost onOpen={followLink} />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen(true)} />}
       {webImport && <WebImportDialog folderId={webImport.folderId} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
       {paletteOpen && (

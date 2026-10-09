@@ -4780,3 +4780,23 @@ a.button {
   background: transparent;
   border: 1px dashed var(--line);
 }
+.ask-refs-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  font-size: 13px;
+}
+.ask-refs-ref .ask-refs-view {
+  padding: 0 6px;
+}
+.ask-refs-rule button {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+}
+.ask-refs-rule button:first-child {
+  color: var(--accent-text);
+}

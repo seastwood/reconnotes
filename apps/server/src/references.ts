@@ -37,6 +37,8 @@ export interface Suggestion {
   title: string
   /** why: "linked as “FRC 2025 Game Manual”", "defines R402, R403" */
   reasons: string[]
+  /** where the note points to it: text to find in the note */
+  find?: string
 }
 
 export interface References {
@@ -50,6 +52,8 @@ export interface References {
   missingRules: string[]
   /** what you said it doesn't need (kept, to bring back) */
   ignored: Ignored[]
+  /** for each note it refers to (chosen or not): where the note points to it */
+  mentions: Record<string, string>
 }
 
 /** Something found that you said the note doesn't need: a note to add, a document to import, a rule. */
@@ -59,6 +63,8 @@ export interface Ignored {
   kind: 'note' | 'document' | 'rule'
   name: string
   detail?: string
+  /** where the note mentions it */
+  find?: string
 }
 
 /** The keys of what's ignored for a note. */
@@ -198,6 +204,11 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
     return { id, definedIn: hits.filter((n) => definesRule(textOf(n), id)).map((n) => ({ noteId: n, title: titleOf(n) })) }
   }).filter((r) => r.definedIn.length || families.has(r.id.replace(/\d+$/, '')))
 
+  // where the note points to each note it refers to: the document's name, else the first rule it uses from it
+  const mentions: Record<string, string> = {}
+  for (const d of documents.values()) for (const f of d.found) mentions[f.noteId] ??= d.name
+  for (const r of rules) for (const f of r.definedIn) mentions[f.noteId] ??= r.id
+
   // 4. what to read with it: those notes, with the reasons
   const chosen = new Set(askRefs(store, noteId))
   const reasons = new Map<string, string[]>()
@@ -214,14 +225,14 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   const ignored: Ignored[] = []
   const keep = (key: string, as: Omit<Ignored, 'key'>) => (off.has(key) ? (ignored.push({ key, ...as }), false) : true)
   const suggestions = [...reasons]
-    .filter(([id]) => !chosen.has(id) && keep(`note:${id}`, { kind: 'note', name: titleOf(id), detail: reasons.get(id)!.join(' · ') }))
-    .map(([id, r]) => ({ noteId: id, title: titleOf(id), reasons: r, weight: r.length + (byNote.get(id)?.length ?? 0) }))
+    .filter(([id]) => !chosen.has(id) && keep(`note:${id}`, { kind: 'note', name: titleOf(id), detail: reasons.get(id)!.join(' · '), find: mentions[id] }))
+    .map(([id, r]) => ({ noteId: id, title: titleOf(id), reasons: r, find: mentions[id], weight: r.length + (byNote.get(id)?.length ?? 0) }))
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 6)
     .map(({ weight: _w, ...s }) => s)
 
   const docs = [...documents.values()]
-  const missing = docs.filter((d) => d.url && !d.found.length && keep(docKey(d), { kind: 'document', name: d.name, detail: d.url }))
-  const missingRules = rules.filter((r) => !r.definedIn.length && keep(`rule:${r.id}`, { kind: 'rule', name: r.id })).map((r) => r.id)
-  return { documents: docs, rules, suggestions, missing, missingRules, ignored }
+  const missing = docs.filter((d) => d.url && !d.found.length && keep(docKey(d), { kind: 'document', name: d.name, detail: d.url, find: d.name }))
+  const missingRules = rules.filter((r) => !r.definedIn.length && keep(`rule:${r.id}`, { kind: 'rule', name: r.id, find: r.id })).map((r) => r.id)
+  return { documents: docs, rules, suggestions, missing, missingRules, ignored, mentions }
 }

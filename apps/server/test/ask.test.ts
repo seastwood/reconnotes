@@ -692,13 +692,15 @@ describe('what a note refers to', () => {
     await app.sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, 'refsfrc0000001', { source: 'https://pdf.reconnotes/2025GameManual.pdf' }))
     const r = findReferences(app.store, app.sync, 'refsmain000001')
     expect(r.documents.map((d) => [d.name, d.found.map((f) => f.noteId)])).toEqual([['FRC 2025 Game Manual', ['refsfrc0000001']]])
-    expect(r.suggestions[0]).toEqual({ noteId: 'refsfrc0000001', title: '2025 FRC Game Manual', reasons: ['linked as “FRC 2025 Game Manual”', 'defines R402'] })
+    expect(r.suggestions[0]).toEqual({ noteId: 'refsfrc0000001', title: '2025 FRC Game Manual', reasons: ['linked as “FRC 2025 Game Manual”', 'defines R402'], find: 'FRC 2025 Game Manual' })
     // a rule no note has; not a motor's model number
     expect(r.missingRules).toEqual(['R499'])
     expect(r.missing).toEqual([])
     // chosen: no longer suggested
     setAskRefs(app.store, 'refsmain000001', ['refsfrc0000001'])
     expect(findReferences(app.store, app.sync, 'refsmain000001').suggestions).toEqual([])
+    // and where the note points to it, to go there
+    expect(findReferences(app.store, app.sync, 'refsmain000001').mentions).toEqual({ refsfrc0000001: 'FRC 2025 Game Manual' })
   })
 
   it('looks through a Google redirect, and does not suggest the note itself', async () => {
@@ -727,7 +729,7 @@ describe('what a note refers to', () => {
     setIgnoredRef(app.store, 'redirmain00001', 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', true)
     const off = findReferences(app.store, app.sync, 'redirmain00001')
     expect(off.missing).toEqual([])
-    expect(off.ignored).toEqual([{ key: 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', kind: 'document', name: 'PARCEL PANIC Rules', detail: 'https://www.chiefdelphi.com/uploads/short-url/g2T.pdf' }])
+    expect(off.ignored).toEqual([{ key: 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', kind: 'document', name: 'PARCEL PANIC Rules', detail: 'https://www.chiefdelphi.com/uploads/short-url/g2T.pdf', find: 'PARCEL PANIC Rules' }])
     setIgnoredRef(app.store, 'redirmain00001', 'doc:chiefdelphi.com/uploads/short-url/g2t.pdf', false)
     expect(findReferences(app.store, app.sync, 'redirmain00001').missing.length).toBe(1)
   })

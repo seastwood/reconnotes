@@ -225,7 +225,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           <SquarePen size={19} />
         </button>
       </header>
-      {target.noteId && <ReferencesBar noteId={target.noteId} onOpen={(id) => go(id)} />}
+      {target.noteId && <ReferencesBar noteId={target.noteId} onOpen={go} />}
 
       <div
         className="ask-chat-body"
