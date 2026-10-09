@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, BookOpen, Check, ChevronLeft, ChevronRight, CornerLeftUp, FileText, Folder, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, Check, Download, Sparkles, ChevronLeft, ChevronRight, CornerLeftUp, FileText, Folder, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
 import { getNotes, listFolders, readNote } from '@reconnotes/core'
 import { api } from '../lib/api'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
@@ -462,7 +462,36 @@ function RefNotes({ noteId }: { noteId: string }) {
   }
   const save = (next: string[]) => {
     setRefs(next)
-    void api('PUT', '/api/ask/refs', { noteId, refs: next }).catch(() => {})
+    void api('PUT', '/api/ask/refs', { noteId, refs: next })
+      .then(() => setRefsAt(Date.now()))
+      .catch(() => {})
+  }
+  // what the note refers to: notes to read with it, and what's missing – looked again when the refs change or an import finishes
+  const [refsAt, setRefsAt] = useState(0)
+  const [found, setFound] = useState<References | null>(null)
+  const [importing, setImporting] = useState<string[]>([])
+  const doneImports = useJobs((s) => s.jobs.filter((j) => j.kind === 'web-import' && j.input.askRefFor === noteId && isFinished(j)).length)
+  useEffect(() => {
+    let alive = true
+    api<References>('GET', `/api/ask/references?noteId=${noteId}`)
+      .then((r) => alive && setFound(r))
+      .catch(() => {})
+    if (doneImports)
+      api<{ refs: string[] }>('GET', `/api/ask/refs?noteId=${noteId}`)
+        .then((r) => alive && setRefs(r.refs))
+        .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [noteId, refsAt, doneImports])
+  const importDoc = async (url: string) => {
+    setImporting((x) => [...x, url])
+    const own = notes.get(noteId)
+    try {
+      await submitJob({ kind: 'web-import', title: url.replace(/^https?:\/\//, '').slice(0, 120), input: { url, follow: false, maxPages: 1, folderId: own ? readNote(own).folderId : null, askRefFor: noteId } })
+    } catch {
+      setImporting((x) => x.filter((u) => u !== url))
+    }
   }
   if (refs === null) return null
   const shown = refs.filter((id) => title(id) !== null)
@@ -485,6 +514,56 @@ function RefNotes({ noteId }: { noteId: string }) {
           {picking ? <Check size={13} /> : <Plus size={13} />} {picking ? 'Done' : 'Add a note'}
         </button>
       </div>
+      {found && (found.suggestions.length > 0 || found.missing.length > 0 || found.missingRules.length > 0) && (
+        <div className="ask-refs-found">
+          {found.suggestions.length > 0 && (
+            <div className="ask-refs-group">
+              <span className="ask-refs-label">
+                <Sparkles size={13} /> It refers to:
+              </span>
+              {found.suggestions.map((sg) => (
+                <div key={sg.noteId} className="ask-refs-suggest">
+                  <span className="ask-refs-option-text">
+                    {sg.title}
+                    <span className="ask-refs-where">{sg.reasons.join(' · ')}</span>
+                  </span>
+                  <button className="text" onClick={() => save([...refs, sg.noteId])}>
+                    <Plus size={13} /> Add
+                  </button>
+                </div>
+              ))}
+              {found.suggestions.length > 1 && (
+                <button className="text ask-refs-all" onClick={() => save([...refs, ...found.suggestions.map((x) => x.noteId)])}>
+                  Add all
+                </button>
+              )}
+            </div>
+          )}
+          {found.missing.map((d) => (
+            <div key={d.url} className="ask-refs-suggest missing">
+              <span className="ask-refs-option-text">
+                {d.name}
+                <span className="ask-refs-where">Linked, but not in your notes · {d.url!.replace(/^https?:\/\//, '').slice(0, 60)}</span>
+              </span>
+              {importing.includes(d.url!) ? (
+                <span className="ask-refs-where">
+                  <Loader2 size={13} className="spin" /> Importing…
+                </span>
+              ) : (
+                <button className="text" onClick={() => void importDoc(d.url!)}>
+                  <Download size={13} /> Import
+                </button>
+              )}
+            </div>
+          ))}
+          {found.missingRules.length > 0 && (
+            <div className="ask-refs-where ask-refs-rules">
+              Rules it uses that none of your notes has: {found.missingRules.slice(0, 10).join(', ')}
+              {found.missingRules.length > 10 ? ` and ${found.missingRules.length - 10} more` : ''}
+            </div>
+          )}
+        </div>
+      )}
       {picking && <RefPicker noteId={noteId} chosen={refs} onToggle={(id) => save(refs.includes(id) ? refs.filter((x) => x !== id) : [...refs, id])} />}
     </div>
   )
@@ -573,4 +652,10 @@ function RefPicker({ noteId, chosen, onToggle }: { noteId: string; chosen: strin
       )}
     </div>
   )
+}
+
+interface References {
+  suggestions: { noteId: string; title: string; reasons: string[] }[]
+  missing: { name: string; url?: string }[]
+  missingRules: string[]
 }

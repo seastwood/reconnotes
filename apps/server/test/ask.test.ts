@@ -8,6 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { setAskRefs } from '../src/askHistory'
+import { findReferences } from '../src/references'
+import { markdownToNodes } from '../src/importNotes'
+import { updateNote } from '@reconnotes/core'
 import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, recite } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
@@ -669,5 +672,31 @@ describe('a note that refers to another (its manual)', () => {
     expect(labelRefs('Gaps are permissible [1]. Gaps under 1¼ in. are allowed [3].', noteOf, title)).toBe(
       'Gaps are permissible [1]. *(2025 FRC Game Manual)* Gaps under 1¼ in. are allowed [3].',
     )
+  })
+})
+
+describe('what a note refers to', () => {
+  it('finds the manual it links to and the rules it uses, and says what is missing', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk(
+      'refsmain000001',
+      'Trials Manual',
+      'R01. The robot must fit in a 36 in. cube.\n\nR12. BUMPERS shall be constructed as in R402 of the [FRC 2025 Game Manual](https://firstfrc.blob.core.windows.net/frc2025/Manual/2025GameManual.pdf), and padding per R499. Drive with a NEO550 motor.',
+    )
+    await mk('refsfrc0000001', '2025 FRC Game Manual', 'R401 BUMPERS all around.\n\nR402 BUMPER construction. Padding at least 2 1/4 in.')
+    // the manual was uploaded from a device: the same PDF
+    await app.sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, 'refsfrc0000001', { source: 'https://pdf.reconnotes/2025GameManual.pdf' }))
+    const r = findReferences(app.store, app.sync, 'refsmain000001')
+    expect(r.documents.map((d) => [d.name, d.found.map((f) => f.noteId)])).toEqual([['FRC 2025 Game Manual', ['refsfrc0000001']]])
+    expect(r.suggestions[0]).toEqual({ noteId: 'refsfrc0000001', title: '2025 FRC Game Manual', reasons: ['linked as “FRC 2025 Game Manual”', 'defines R402'] })
+    // a rule no note has; not a motor's model number
+    expect(r.missingRules).toEqual(['R499'])
+    expect(r.missing).toEqual([])
+    // chosen: no longer suggested
+    setAskRefs(app.store, 'refsmain000001', ['refsfrc0000001'])
+    expect(findReferences(app.store, app.sync, 'refsmain000001').suggestions).toEqual([])
   })
 })

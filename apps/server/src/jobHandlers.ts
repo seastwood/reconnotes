@@ -32,7 +32,7 @@ import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { meetingNotesText } from './meetingNotes'
-import { saveTurn } from './askHistory'
+import { askRefs, saveTurn, setAskRefs } from './askHistory'
 import { importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
@@ -396,7 +396,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   // a web page (and, if asked, the guide's other pages) into notes (see webImport.ts)
   jobs.register('web-import', async (job) => {
-    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string; splitPdf?: boolean }
+    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string; splitPdf?: boolean; askRefFor?: string }
     const r = await importWebPages(config, store, ai, sync, {
       url: String(i.url ?? ''),
       follow: Boolean(i.follow),
@@ -405,6 +405,11 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       pdfAttachmentId: typeof i.pdfAttachmentId === 'string' ? i.pdfAttachmentId : undefined,
       splitPdf: Boolean(i.splitPdf),
     })
+    // imported as a document a note refers to: Ask reads it with that note from now on
+    if (typeof i.askRefFor === 'string' && i.askRefFor) {
+      const imported = r.noteIds.length > 1 ? r.noteIds.slice(1) : r.noteIds
+      setAskRefs(store, i.askRefFor, [...askRefs(store, i.askRefFor), ...imported])
+    }
     const summary = [
       `${r.pages} page${r.pages === 1 ? '' : 's'}, ${r.pictures} picture${r.pictures === 1 ? '' : 's'}.`,
       ...r.notes.slice(0, 20),

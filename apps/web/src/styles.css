@@ -4613,3 +4613,40 @@ a.button {
   flex: none;
   color: var(--accent);
 }
+/* what the note refers to: notes to add, documents to import */
+.ask-refs-found {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ask-refs-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ask-refs-suggest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ask-refs-suggest.missing {
+  background: rgba(127, 127, 127, 0.12);
+}
+.ask-refs-suggest .text {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  font-size: 13px;
+}
+.ask-refs-all {
+  align-self: flex-start;
+  font-size: 13px;
+}
+.ask-refs-rules {
+  padding: 2px 2px 0;
+}
