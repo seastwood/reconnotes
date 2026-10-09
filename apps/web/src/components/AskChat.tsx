@@ -255,7 +255,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           <div className="ask-chat-empty">
             <MessageCircleQuestion size={34} />
             <p>
-              Ask anything about {target.folderId ? 'the notes in this folder' : 'this note'}. The answer comes only from {target.folderId ? 'them' : 'it'}, and
+              Ask anything about {target.folderId ? 'the notes in this folder' : 'this note'}. The answer comes only from {target.folderId ? 'them' : 'it (and the notes it also reads)'}, and
               each source takes you to the spot it came from.
             </p>
             <p className="hint">Your chats are kept here – come back to them any time.</p>
