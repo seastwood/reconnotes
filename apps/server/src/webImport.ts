@@ -952,6 +952,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
 
   // 4. the notes (in a folder of their own when there are several, with a contents note first)
   const when = new Date().toISOString().slice(0, 10)
+  /** "Oct 9, 2026": for titles */
+  const day = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   const multi = pages.length > 1 || Boolean(prev?.follow)
   const folders = sync.getDoc(WORKSPACE_DOC) ? listFolders(sync.getDoc(WORKSPACE_DOC)!) : []
   let folderId = prev?.folderId && folders.some((f) => f.id === prev.folderId && !f.trashedAt) ? prev.folderId : null
@@ -1042,19 +1044,24 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     if (mains[i] && textLength(mains[i]) < 200 && /__next|__nuxt|id="root"|id="app"|ng-version|data-reactroot/.test(p.html))
       notes.push(`${p.url.href}: the page builds its content with JavaScript in the browser, so only part of it (or none) could be read.`)
     let target = ids[i]
+    let newTitle = ''
+    let yours = ''
     if (prev && !isNew[i]) {
       // changed on the site: the note follows – unless you've edited it, which then stays yours
       const rec = prev.pages[pageKey(p.url)]!
       const m = sync.noteMeta().get(ids[i])
       if (m && m.updatedAt > rec.at + 15_000) {
         target = newId()
+        // named after your note (you may have renamed it): what it is – the site's version of it, and when
+        newTitle = `${m.title || p.title} – latest from the site (${day})`
+        yours = m.title || p.title
         await sync.change(WORKSPACE_DOC, (ws) => {
-          createNote(ws, { id: target, folderId: m.folderId, title: `${p.title} (updated ${when})` })
+          createNote(ws, { id: target, folderId: m.folderId, title: newTitle })
           updateNote(ws, target, { source: p.url.href })
         })
         await sync.change(noteDocName(ids[i]), (doc) => {
           const frag = getContent(doc)
-          const notice = markdownToNodes(`*⚠️ This page has changed on the site (${changes.get(i)}). You’ve edited this note, so it’s kept as it is – the new version: [${esc(p.title)} (updated ${when})](rnnew)*`, {
+          const notice = markdownToNodes(`*⚠️ This page has changed on the site (${changes.get(i)}). You’ve edited this note, so it’s kept as it is – the new version: [${esc(newTitle)}](rnnew)*`, {
             attach: () => null,
             noteFor: (t) => (t === 'rnnew' ? target : null),
           })
@@ -1070,9 +1077,16 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
       }
     }
     // the new version of a note you've edited: its title says so
-    const text = target === ids[i] ? md : md.replace(/^# (.*)$/m, `# $1 (updated ${when})`)
+    const text =
+      target === ids[i]
+        ? md
+        : md
+            .replace(/^# .*$/m, `# ${esc(newTitle)}`)
+            .replace(/^(\*From [^\n]*\*)$/m, `$1\n\n*The site’s latest version of [${esc(yours)}](rnold). You’d edited that note, so it was kept as it was.*`)
+    // links to this page's own headings stay in this note
+    const here = target === ids[i] ? ctx : { ...ctx, noteFor: (t: string) => (t === 'rnold' ? ids[i] : ctx.noteFor(t) === ids[i] ? target : ctx.noteFor(t)) }
     await sync.change(noteDocName(target), (doc) => {
-      const nodes = markdownToNodes(text, ctx)
+      const nodes = markdownToNodes(text, here)
       if (nodes.length) getContent(doc).insert(0, nodes)
     })
     const doc = sync.getDoc(noteDocName(target))

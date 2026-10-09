@@ -311,7 +311,7 @@ describe('importing a web page', () => {
     expect(md(software)).not.toContain('Gradle 9')
     expect(md(software)).toContain('This page has changed on the site')
     const ws = app.sync.getDoc(WORKSPACE_DOC)!
-    const newer = listNotes(ws).find((n) => n.title.startsWith('Software (updated'))!
+    const newer = listNotes(ws).find((n) => n.title.startsWith('Software – latest from the site ('))!
     expect(md(newer.id)).toContain('Deploy with Gradle 9.')
     // the new page: added to the folder, and to the contents
     const vision = listNotes(ws).find((n) => n.title === 'Vision' && n.folderId === r.folderId)
@@ -350,9 +350,15 @@ describe('importing a web page', () => {
     expect(md('oldimport00001')).toContain('Old text.')
     expect(md('oldimport00001')).toContain('This page has changed on the site')
     expect(r.notes[0]).toContain('you’d edited these')
-    const fresh = [...app.sync.noteMeta().values()].find((m) => /^Trials Manual - Cookie Chaos \(updated /.test(m.title) && m.source === url)!.id
-    expect(md(fresh)).toMatch(/^# Trials Manual - Cookie Chaos \(updated /)
-    expect(md(fresh)).toContain('  - [[1.1 PROGRAM HISTORY]]')
+    // named after yours, saying what it is
+    const fresh = [...app.sync.noteMeta().values()].find((m) => /^My manual – latest from the site \(\w{3} \d{1,2}, \d{4}\)$/.test(m.title) && m.source === url)!.id
+    expect(md(fresh)).toMatch(/^# My manual – latest from the site \(/)
+    expect(md(fresh).replace(/\*/g, '')).toContain('The site’s latest version of [[My manual]]. You’d edited that note, so it was kept as it was.')
+    expect(md('oldimport00001').replace(/\*/g, '')).toContain('the new version: [[My manual – latest from the site (')
+    // its contents go to its own headings, not yours
+    const xml = getContent(app.sync.getDoc(noteDocName(fresh))!).toString()
+    expect(xml).toContain(`<notelink find="1.1 PROGRAM HISTORY" label="1.1 PROGRAM HISTORY" noteId="${fresh}"`)
+    expect(xml).toContain(`label="My manual" noteId="oldimport00001"`)
   })
 
   it('says what went wrong with a bad address', async () => {
