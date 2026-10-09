@@ -400,6 +400,24 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
               </button>
             </div>
           )}
+          {/* the meeting notes' working: each part's notes and the model's own final text, as written */}
+          {Boolean(j.result?.draft) && typeof j.result?.draft === "object" && (
+            <details className="job-result job-draft">
+              <summary className="muted">How the AI wrote it</summary>
+              {(() => {
+                const d = j.result!.draft as { parts?: string[]; raw?: string }
+                const all = [...(d.parts ?? []), d.raw ? `Final:\n${d.raw}` : ''].filter(Boolean).join('\n\n')
+                return (
+                  <>
+                    <pre>{all}</pre>
+                    <button className="text" onClick={() => copy(all)}>
+                      <Copy size={13} /> Copy
+                    </button>
+                  </>
+                )
+              })()}
+            </details>
+          )}
           {Array.isArray(j.result?.removedLines) && (j.result.removedLines as string[]).length > 0 && (
             <div className="job-result">
               <div className="muted">

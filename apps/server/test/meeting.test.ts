@@ -437,3 +437,21 @@ describe('a long meeting put together', () => {
     expect(out).not.toContain('**Sweeper service**')
   })
 })
+
+describe('notes in another shape', () => {
+  const said = 'Make space across the road for the dumpster arriving Tuesday. West Machinery to finalize the quote. Leave the crate where it is. Charlie to look into the service agreements.'
+  it('a numbered Summary, plain lines, or a heading per topic – read as bullets, not thrown away', () => {
+    const want = '## Summary\n- **Dumpster Placement**: Make space across the road for the dumpster arriving Tuesday\n- **Tractor Purchase**: West Machinery to finalize the quote'
+    const numbered = groundMeetingNotes('## Summary\n1. **Dumpster Placement**: Make space across the road for the dumpster arriving Tuesday\n2. **Tractor Purchase**: West Machinery to finalize the quote', said, '')
+    const plain = groundMeetingNotes('## Summary\n**Dumpster Placement**: Make space across the road for the dumpster arriving Tuesday\n\n**Tractor Purchase**: West Machinery to finalize the quote', said, '')
+    const headed = groundMeetingNotes('## Summary\n### Dumpster Placement\n- Make space across the road for the dumpster arriving Tuesday.\n### Tractor Purchase\n- West Machinery to finalize the quote.', said, '')
+    expect(numbered).toBe(want)
+    expect(plain).toBe(want)
+    expect(headed).toBe(want)
+  })
+  it('bold or numbered section headings and unchecked to-dos', () => {
+    expect(groundMeetingNotes('**Decisions**\n- Leave the crate where it is.\n\n### Action Items\n1. Charlie to look into the service agreements (no date)', said, '')).toBe(
+      '## Decisions\n- Leave the crate where it is.\n\n## Action Items\n- [ ] Charlie to look into the service agreements',
+    )
+  })
+})

@@ -598,7 +598,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
     const withLinks = att && said.length ? addListenLinks(md, said, att.id).markdown : md
     await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
-    return { result: { noteId, text: preview(md), heardBy, ...(speechError ? { speechError } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
+    return { result: { noteId, text: preview(md), heardBy, ...(speechError ? { speechError } : {}), ...(r.draft ? { draft: r.draft } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
   jobs.register('extract-text', async (job) => {

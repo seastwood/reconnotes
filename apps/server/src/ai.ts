@@ -10,7 +10,7 @@ import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
-import { coverTopics, groundMeetingNotes, partTopics } from './meetingNotes'
+import { coverTopics, groundMeetingNotes, normalizeMeetingNotes, partTopics } from './meetingNotes'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -246,7 +246,7 @@ export class Ai {
    * Meeting notes from a recording's transcript and what was written during
    * the meeting: a summary, decisions, and the action items as a checklist.
    */
-  async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string }> {
+  async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string } }> {
     const said = transcript.replace(/\s+/g, ' ').trim()
     // how long it was, from how much was said (people speak ~140 words a minute)
     const minutes = Math.round(said.split(' ').filter(Boolean).length / 140)
@@ -360,13 +360,15 @@ ${partNotes.join('\n\n')}
 </parts>`
       }
       const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true })
+      const rawOut = raw
       // every topic the parts found is in the Summary, even if putting them together dropped it –
       // then all of it checked against what was said
-      const written = coverTopics(collapseRepeats(unwrapModelOutput(raw)).trim(), partTopics(partNotesAll))
-      return groundMeetingNotes(written, transcript, notes)
+      const written = coverTopics(normalizeMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim()), partTopics(partNotesAll))
+      // the model's own writing kept with the job: when the notes come out poorly, it shows why
+      return { text: groundMeetingNotes(written, transcript, notes), draft: { parts: partNotesAll, raw: rawOut.slice(0, 20000) } }
     })
-    log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.length})`)
-    return { text: result, agent: agent.name }
+    log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.text.length})`)
+    return { text: result.text, agent: agent.name, draft: result.draft }
   }
 
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */

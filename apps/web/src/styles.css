@@ -5070,3 +5070,13 @@ a.button {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--text);
 }
+
+/* Jobs: how the AI wrote a meeting's notes (its per-part notes and final text) */
+.job-draft pre {
+  max-height: 50vh;
+  overflow: auto;
+  font-size: 12px;
+}
+.job-draft summary {
+  cursor: pointer;
+}

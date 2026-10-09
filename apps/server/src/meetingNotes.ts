@@ -33,14 +33,16 @@ export function meetingNotesText(markdown: string): string {
 
 /** "[TBD]", "by TBD", "(deadline: not specified)", "– N/A"… with what led into it */
 const PLACEHOLDER =
-  /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none|undisclosed(?: person)?|unnamed(?: person)?|unknown person|someone|person not (?:named|specified)|unassigned|no owner|owner unknown|anyone)\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
+  /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none|undisclosed(?: person)?|unnamed(?: person)?|unknown person|someone|person not (?:named|specified)|unassigned|no owner|owner unknown|anyone|no date|no deadline|date unknown)\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
 
 export function groundMeetingNotes(text: string, transcript: string, notes: string): string {
   const source = `${transcript}\n${notes}`
   const have = new Set(words(source))
   const found = (w: string) => have.has(w) || [...have].some((h) => h.length >= 4 && w.length >= 4 && h.slice(0, 5) === w.slice(0, 5))
   const grounded = (line: string) => {
-    const body = line.replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, '')
+    // a bullet's bold topic label ("**Tractor Purchase**:") names the topic in the notes' own words –
+    // not names someone said: the rest of the line is what's checked
+    const body = line.replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, '')
     // names: capitalised words (not the first) that were never said or written
     const names = body
       .split(/\s+/)
@@ -56,6 +58,7 @@ export function groundMeetingNotes(text: string, transcript: string, notes: stri
     return hits > 0 && hits / content.length >= 1 / 3
   }
 
+  text = normalizeMeetingNotes(text)
   // placeholders for what wasn't said ("by [TBD]", "(deadline: not specified)") – left out instead
   text = text
     .split('\n')
@@ -144,4 +147,52 @@ export function coverTopics(markdown: string, topics: { topic: string; said: str
   while (at > start + 1 && !lines[at - 1].trim()) at--
   lines.splice(at, 0, ...missing)
   return lines.join('\n')
+}
+
+/** the notes' own sections (a heading that's none of these is a topic inside one) */
+const SECTION = /^(summary|decisions?|open questions?|action items?|next steps|tasks|to-?dos?)\b/i
+
+/**
+ * The notes in the one shape the rest expects: "## Section" headings with "- " bullets under
+ * them. Small models vary it – a numbered list, plain lines, a heading per topic under Summary,
+ * to-dos without a checkbox – and a Summary written any of those ways would otherwise read as
+ * empty and be thrown away.
+ */
+export function normalizeMeetingNotes(text: string): string {
+  const out: string[] = []
+  let section = ''
+  let topic: { at: number; name: string; parts: string[] } | null = null
+  const flush = () => {
+    if (topic) out.splice(topic.at, 0, `- **${topic.name}**${topic.parts.length ? `: ${topic.parts.join('; ')}` : ''}`)
+    topic = null
+  }
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    const h = line.match(/^#{1,6}\s+(.+?)\s*#*$/) ?? line.match(/^\*\*([^*]+?)\*\*:?$/)
+    if (h && SECTION.test(h[1].replace(/[*:]/g, '').trim())) {
+      flush()
+      section = h[1].replace(/[*:]/g, '').trim()
+      out.push(`## ${section}`)
+      continue
+    }
+    if (h && section && /^#/.test(line)) {
+      // a topic's own heading inside a section: its points become one bullet
+      flush()
+      topic = { at: out.length, name: h[1].replace(/\*\*/g, '').replace(/:$/, '').trim(), parts: [] }
+      continue
+    }
+    if (!line.trim()) {
+      if (!topic) out.push('')
+      continue
+    }
+    // a numbered item, or a plain line, is a bullet
+    let item = line.replace(/^(\s*)\d+[.)]\s+/, '$1- ')
+    if (!/^\s*[-*]\s/.test(item) && section) item = `- ${item.trim()}`
+    // to-dos are checkboxes
+    if (/^action|^tasks|^to-?dos|^next steps/i.test(section)) item = item.replace(/^(\s*)[-*]\s+(?!\[[ xX]\])/, '$1- [ ] ')
+    if (topic && /^\s*[-*]\s/.test(item)) topic.parts.push(item.replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, '').replace(/[.;]\s*$/, ''))
+    else out.push(item)
+  }
+  flush()
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
