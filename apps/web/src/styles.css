@@ -5431,3 +5431,37 @@ a.button {
 .word-fix-actions .primary:disabled {
   opacity: 0.5;
 }
+
+/* the meeting setup: how many people (a −/+ stepper) */
+.meeting-setup-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.meeting-setup-count .stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.meeting-setup-count .stepper button {
+  width: 40px;
+  height: 34px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text);
+}
+.meeting-setup-count .stepper button:disabled {
+  opacity: 0.35;
+}
+.meeting-setup-count .stepper b {
+  min-width: 72px;
+  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+}

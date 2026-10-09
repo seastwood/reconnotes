@@ -251,7 +251,7 @@ export class Ai {
     notes: string,
     transcript: string,
     today: string,
-    who: { attendees?: string[]; voices?: number; named?: string[] } = {},
+    who: { attendees?: string[]; people?: number; voices?: number; named?: string[] } = {},
   ): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string; how: string[]; dropped: string[] } }> {
     // a line per speaker's turn ("Jesse: …") when the voices were told apart: kept as lines
     const said = transcript.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
@@ -293,7 +293,10 @@ If no task was said, write "- [ ] No action items" under that heading.`
         ? `
 - The transcript is a line per turn, starting with who spoke: a name, or "Speaker N" for a voice that hasn't been named (${who.voices} voices). The voices were told apart by the sound of them, which is occasionally wrong. Use the names to say who said, suggested, agreed or took on what; for "Speaker N", say "Speaker N" only where who matters (a task's owner), never guess a name for it.`
         : ''
-    const people = attendees.length ? `\n- The people at the meeting: ${attendees.join(', ')}. Spell their names like that.` : ''
+    const count = who.people ?? 0
+    const people =
+      (attendees.length ? `\n- The people at the meeting: ${attendees.join(', ')}. Spell their names like that.` : '') +
+      (count > attendees.length ? `\n- ${count} people were at the meeting${attendees.length ? ' (not all of them named)' : ''}.` : '')
     const agenda = /^#{1,6}\s*agenda\b/im.test(notes)
       ? `\n- The notes have an agenda: give the Summary its topics in that order (then anything else that came up), and list an agenda item nobody got to under Open questions.`
       : ''

@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { createNote, getContent, noteDocName } from '@reconnotes/core'
+import { attendeeNames, attendeesText, createNote, getContent, noteDocName } from '@reconnotes/core'
 import { flushNote } from './ai'
 import { flushUploads } from './attachments'
 import { Store } from './store'
@@ -82,17 +82,38 @@ const setText = (el: Y.XmlElement, text: string) => {
  * "Attendees:" line (Whisper spells them right, and the voices get their names), and the
  * agenda as a list under its own heading (the notes follow its order).
  */
-export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees: string[]; agenda: string[] }) {
+/**
+ * How many people were at a meeting, on its note's Attendees line ("Attendees: Seth, Jesse – 6
+ * people", or "Attendees: 6 people" when nobody's named): the speaker labels find at most that many
+ * voices. Keeps the names already there.
+ */
+export function setPeopleCount(doc: Y.Doc, count: number) {
+  const content = getContent(doc)
+  doc.transact(() => {
+    const kids = content.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
+    const att = kids.find((c) => c.nodeName === 'paragraph' && /^\s*attendees\s*:/i.test(textOf(c)))
+    const names = att ? attendeeNames(textOf(att)) : []
+    const text = `Attendees: ${attendeesText(names, count)}`
+    if (att) setText(att, text)
+    else {
+      const title = kids.find((c) => c.nodeName === 'heading')
+      content.insert(title ? content.toArray().indexOf(title) + 1 : 0, [block('paragraph', text)])
+    }
+  })
+}
+
+export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees: string[]; count?: number; agenda: string[] }) {
   const content = getContent(doc)
   doc.transact(() => {
     const kids = content.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
     const title = kids.find((c) => c.nodeName === 'heading')
     if (setup.title?.trim() && title) setText(title, setup.title.trim())
     let att = kids.find((c) => c.nodeName === 'paragraph' && /^\s*attendees\s*:/i.test(textOf(c)))
-    if (setup.attendees.length) {
-      if (att) setText(att, `Attendees: ${setup.attendees.join(', ')}`)
+    if (setup.attendees.length || setup.count) {
+      const line = `Attendees: ${attendeesText(setup.attendees, setup.count)}`
+      if (att) setText(att, line)
       else {
-        att = block('paragraph', `Attendees: ${setup.attendees.join(', ')}`)
+        att = block('paragraph', line)
         content.insert(title ? content.toArray().indexOf(title) + 1 : 0, [att])
       }
     }

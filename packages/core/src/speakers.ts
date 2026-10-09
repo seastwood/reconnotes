@@ -151,9 +151,13 @@ export function labelledTranscript(turns: SpeakerTurn[], names: Record<number, s
 /** How many different voices spoke. */
 export const voiceCount = (turns: SpeakerTurn[]) => new Set(turns.map((t) => t.speaker)).size
 
+const attendeesLine = (notes: string) => notes.match(/^\s*(?:[-*]\s*)?(?:\*\*)?attendees(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/im)?.[1] ?? ''
+/** "6 people", "– 6 people", "(6 people)", "+ 4 others" on the Attendees line: how many, not who */
+const COUNT = /\s*[–—-]?\s*\(?\s*(\+\s*)?(\d{1,2})\s*(?:people|persons|others?|more)\s*\)?/i
+
 /** The people listed on the note's "Attendees:" line ("Seth, Jesse and Paul"). */
 export function attendeeNames(notes: string): string[] {
-  const line = notes.match(/^\s*(?:[-*]\s*)?(?:\*\*)?attendees(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/im)?.[1] ?? ''
+  const line = attendeesLine(notes).replace(COUNT, '')
   return [
     ...new Set(
       line
@@ -162,4 +166,24 @@ export function attendeeNames(notes: string): string[] {
         .filter((n) => n && n.length <= 40 && /\p{L}/u.test(n)),
     ),
   ].slice(0, 30)
+}
+
+/**
+ * How many people were at the meeting, from its "Attendees:" line: the names listed, or the number
+ * given ("Attendees: 6 people", "Attendees: Seth, Jesse – 6 people", "Seth, Jesse + 4 others"). 0:
+ * not said. Speaker labels find at most this many voices.
+ */
+export function attendeeCount(notes: string): number {
+  const names = attendeeNames(notes).length
+  const m = attendeesLine(notes).match(COUNT)
+  if (!m) return names
+  const n = Number(m[2])
+  return m[1] ? names + n : Math.max(names, n)
+}
+
+/** The Attendees line for these names and/or a number of people ("Seth, Jesse – 6 people", "6 people"). */
+export function attendeesText(names: string[], count = 0): string {
+  const list = names.join(', ')
+  if (!count || count <= names.length) return list
+  return list ? `${list} – ${count} people` : `${count} people`
 }

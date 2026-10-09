@@ -1,5 +1,5 @@
 import { errorText, isFinished, redoJob, useJobs } from '../lib/jobs'
-import { meetingNotesFor } from '../lib/meeting'
+import { meetingNotesFor, setPeopleCount } from '../lib/meeting'
 import { Popover } from '../components/Popover'
 import { showToast } from '../lib/toast'
 import { isSyncConfigured } from '../lib/settings'
@@ -9,7 +9,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { attendeeNames, getNotes, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
+import { attendeeCount, attendeeNames, getNotes, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
@@ -505,6 +505,19 @@ function AudioMenu({
     await redoJob(meeting.id, undefined, fresh)
     showToast(fresh ? 'Reading the recording again, then rewriting the meeting notes (see Jobs)' : 'Rewriting the meeting notes – what you changed in them stays (see Jobs)')
   }
+  // how many people spoke (on the note's Attendees line): the voices told apart again with it
+  const peopleCount = async () => {
+    const now = attendeeCount(noteToMarkdown(doc))
+    const answer = window.prompt('How many people spoke in this recording?', now ? String(now) : '')
+    if (answer === null) return
+    const n = Math.round(Number(answer.trim()))
+    if (!Number.isFinite(n) || n < 1 || n > 30) return showToast('A number from 1 to 30, please')
+    setPeopleCount(doc, n)
+    if (meeting && !running) {
+      await redoJob(meeting.id, undefined, false)
+      showToast(`Telling ${n} voices apart, then rewriting the meeting notes (see Jobs)`)
+    } else showToast(`Saved: ${n} people – used when the meeting notes are written`)
+  }
   const rename = () => {
     const next = window.prompt('Name this recording', name)?.trim()
     const pos = getPos()
@@ -580,6 +593,11 @@ function AudioMenu({
               {editable && (
                 <button onClick={act(insert)}>
                   <TextQuote size={16} /> Insert transcript into note
+                </button>
+              )}
+              {editable && isSyncConfigured() && (
+                <button onClick={act(peopleCount)}>
+                  <Users size={16} /> How many people spoke…
                 </button>
               )}
               {editable && isSyncConfigured() && (

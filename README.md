@@ -268,7 +268,10 @@ the word times Whisper gives). While a recording plays, a slim player stays unde
 its own player scrolls out of view, and the transcript scrolls in its own box.
 
 **New meeting** opens the meeting's note with an optional setup first: its name, who's there (people
-from recent meetings are a tap away) and the agenda – then **Start recording** (or **Just record**).
+from recent meetings are a tap away) – or just how many people, with no time for names – and the
+agenda, then **Start recording** (or **Just record**). The number goes on the note's Attendees line
+("Attendees: 6 people") and caps how many voices the speaker labels find; a recording's ⋯ → *How many
+people spoke…* sets it afterwards and redoes the notes with the voices told apart again.
 The names are Whisper's spelling hint; the notes follow the agenda. With the speaker service
 (`deploy/diarize.py`, see the Speaches setup guide, step 13) the transcript is told apart by voice:
 each turn is labelled, you name the voices with a tap, and the meeting notes say who said what.

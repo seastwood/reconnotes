@@ -24,6 +24,7 @@ import {
   parseSpeakerNames,
   speakerNamesKey,
   speakerAt,
+  attendeeCount,
   speakerTurns,
   mergeMinorVoices,
   voiceCount,
@@ -274,8 +275,10 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const threshold = ai.agents.settings().speakerThreshold
     const was = speakersThreshold(store, att.id)
     const kept = newReading ? null : speakerSegments(store, att.id)
-    // (voices told apart before the setting existed were at its default)
-    let segments = kept && (was ?? SPEAKER_THRESHOLD) === threshold ? kept : null
+    // told apart again when the setting changed (voices told apart before it existed were at its
+    // default), or how many people were there did (you said, or changed it, since)
+    const wasMost = store.getSetting<number>(`speakersMost:${att.id}`) ?? 0
+    let segments = kept && (was ?? SPEAKER_THRESHOLD) === threshold && wasMost === most ? kept : null
     if (!segments) {
       const speech = ai.agents.chain('audio').find((a) => a.kind === 'openai' && a.enabled)
       let voices: Voices = {}
@@ -288,6 +291,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       if (!segments && kept && !newReading) segments = kept
       else if (segments || newReading) {
         setSpeakers(store, att.id, segments, threshold)
+        store.setSetting(`speakersMost:${att.id}`, most)
         // new turns, new numbers: the voices named again – by who they sound like (people you've
         // named in other recordings), where the service says what each one sounds like
         if (segments && Object.keys(voices).length) {
@@ -438,7 +442,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     setWordTimes(store, att.id, times)
     store.setAttachmentText(att.id, text, 'done')
     // who spoke when, for the new words (any recording – a meeting or not)
-    if (times?.length) await speakerTurnsFor(att, times, true, attendeeNames(noteToMarkdown(noteDoc(noteId))).length)
+    if (times?.length) await speakerTurnsFor(att, times, true, attendeeCount(noteToMarkdown(noteDoc(noteId))))
     else setSpeakers(store, att.id, null)
     sync.reindexNotesFor(att.id)
     return { result: { noteId, text: preview(text), heardBy: by }, agent: by }
@@ -656,6 +660,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     // and the people you said were there: Whisper spells their names right, and they cap the voices
     const notes = meetingNotesText(noteToMarkdown(withoutAiResults(doc)))
     const attendees = attendeeNames(notes)
+    // how many were there: the names, or a number given ("Attendees: 6 people") – the most voices to find
+    const people = attendeeCount(notes)
     let transcript = ''
     let agent: string | null = null
     let times: { word: string; start: number; end: number }[] | undefined
@@ -710,12 +716,12 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     // who said what: the transcript as turns by voice, named where you've named them
     const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
     const newReading = Boolean(times) || fresh
-    const turns = att && said.length ? await speakerTurnsFor(att, said, newReading, attendees.length) : null
+    const turns = att && said.length ? await speakerTurnsFor(att, said, newReading, people) : null
     // (read again: telling the voices apart may have just named them – people recognised by voice)
     const names = att ? parseSpeakerNames(getTranscripts(noteDoc(noteId)).get(speakerNamesKey(att.id)) ?? null) : {}
     const voices = turns ? voiceCount(turns) : 0
     const heard = turns && voices >= 2 ? labelledTranscript(turns, names) : transcript
-    const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, voices, named: Object.values(names) })
+    const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, people, voices, named: Object.values(names) })
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
     const md = r.text
       .split('\n')

@@ -617,6 +617,24 @@ describe('who said what', () => {
       learnVoice(app.store, 'speakersaudio001', 1, 'Jesse')
       // someone new: nobody's name
       expect(recogniseVoices(app.store, { 0: [0, 0, 1] })).toEqual({})
+
+      // no time for names: just how many people – the voices are told apart again, at most that many
+      await app.sync.change(noteDocName('notespeakers0002'), (doc) => {
+        const p = new Y.XmlElement('paragraph')
+        p.insert(0, [new Y.XmlText('Attendees: 5 people')])
+        getContent(doc).insert(0, [p])
+      })
+      asked = ''
+      prompts.length = 0
+      const counted = (await fetch(`${base}/api/jobs/${next.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${counted.id}/wait`)).job.status).toBe('done')
+      expect(asked).toBe('/diarize?speakers=5&threshold=0.9')
+      expect(prompts.at(-1)).toContain('5 people were at the meeting')
+      // …and not again while it stays the same
+      asked = ''
+      const same = (await fetch(`${base}/api/jobs/${counted.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${same.id}/wait`)).job.status).toBe('done')
+      expect(asked).toBe('')
     } finally {
       whisper.close()
       diarizer.close()

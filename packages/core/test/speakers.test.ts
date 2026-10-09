@@ -70,3 +70,19 @@ describe('voices heard for a moment', () => {
     expect(mergeMinorVoices(segs)).toEqual(segs)
   })
 })
+
+describe('how many people were there', () => {
+  it('from the names, or the number given', async () => {
+    const { attendeeCount, attendeeNames, attendeesText } = await import('../src/speakers')
+    expect(attendeeCount('Attendees: Seth, Jesse and Paul')).toBe(3)
+    expect(attendeeCount('Attendees: 6 people')).toBe(6)
+    expect(attendeeNames('Attendees: 6 people')).toEqual([])
+    expect(attendeeCount('Attendees: Seth, Jesse – 6 people')).toBe(6)
+    expect(attendeeNames('Attendees: Seth, Jesse – 6 people')).toEqual(['Seth', 'Jesse'])
+    expect(attendeeCount('Attendees: Seth, Jesse + 4 others')).toBe(6)
+    expect(attendeeCount('Attendees:')).toBe(0)
+    expect(attendeesText(['Seth', 'Jesse'], 6)).toBe('Seth, Jesse – 6 people')
+    expect(attendeesText([], 5)).toBe('5 people')
+    expect(attendeesText(['Seth', 'Jesse'], 2)).toBe('Seth, Jesse')
+  })
+})
