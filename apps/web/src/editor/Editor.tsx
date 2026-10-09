@@ -30,6 +30,7 @@ import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { CodeCopy } from './codeCopy'
+import { ListenButtons } from './listenButtons'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { RelatedNotes } from '../components/RelatedNotes'
@@ -102,6 +103,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
         LinkOpener,
         CodeCopy,
+        ListenButtons,
         TaskList,
         TaskItem.configure({ nested: true }),
         JobTag,

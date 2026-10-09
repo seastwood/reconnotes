@@ -2441,24 +2441,34 @@ li[data-checked='true'] .due-chip button {
   }
 }
 
-/* a meeting note's ▶ link: plays the recording from where that was said */
-.ProseMirror a[href^='listen:'] {
+/* a meeting note's ▶ link: a button (listenButtons.ts) that plays the recording from where that was said;
+   the link's own text is hidden behind it */
+.ProseMirror .listen-text {
+  display: none;
+}
+.ProseMirror .listen-button {
   display: inline-block;
-  padding: 0 7px;
+  padding: 0 8px;
   margin: 0 2px;
+  min-height: 24px;
+  border: none;
   border-radius: 999px;
+  font: inherit;
   font-size: 0.82em;
-  line-height: 1.6;
+  line-height: 1.7;
   font-variant-numeric: tabular-nums;
-  text-decoration: none;
   white-space: nowrap;
+  vertical-align: baseline;
   color: var(--accent-text);
-  background: rgba(224, 161, 0, 0.14);
+  background: rgba(224, 161, 0, 0.16);
   cursor: pointer;
-  /* a button, not text: a tap doesn't select it or put the cursor in it */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+.ProseMirror .listen-button:active {
+  background: rgba(224, 161, 0, 0.32);
 }
 .audio-transcript-actions {
   display: flex;
