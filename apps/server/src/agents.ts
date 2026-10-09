@@ -131,11 +131,19 @@ export function streaming<T>(onText: (soFar: string) => void, run: () => Promise
 
 export type Part = { text: string } | { image: Buffer; mime: string } | { pdf: Buffer }
 
+/** A transcript with each word's time in the recording (seconds), for following along as it plays. */
+export interface TimedTranscript {
+  text: string
+  words?: { word: string; start: number; end: number }[]
+}
+
 export interface Backend {
   generate(parts: Part[], maxTokens: number): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
   /** `prompt`: words to expect (names, terms) – a hint, where the server takes one */
   transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string>
+  /** …with when each word is said (Whisper's word timestamps), where the server gives them */
+  transcribeTimed?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<TimedTranscript>
   /** Text → vectors that capture meaning (embedding models, e.g. nomic-embed-text), for search by meaning. */
   embed?(texts: string[]): Promise<number[][]>
 }
@@ -662,27 +670,45 @@ class OpenAiBackend implements Backend {
    * (Speaches / faster-whisper-server, whisper.cpp, LocalAI…) also offer.
    */
   async transcribe(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string> {
-    const form = new FormData()
-    form.append('file', new Blob([new Uint8Array(audio)], { type: mime || 'application/octet-stream' }), filename || audioFileName(mime))
-    form.append('model', this.agent.model || 'whisper-1')
-    form.append('response_format', 'json')
-    // your names and terms: Whisper spells what it hears like the words it was "told" before
-    if (prompt) form.append('prompt', prompt)
-    const res = await fetchWithHints(trimSlash(this.agent.baseUrl) + '/audio/transcriptions', {
-      method: 'POST',
-      headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},
-      // a long recording takes a while, even on a GPU
-      signal: timeoutSignal(Math.max(this.agent.timeoutSec, 900) * 1000),
-      body: form,
-    })
+    return (await this.transcribeTimed(audio, mime, filename, prompt)).text
+  }
+
+  async transcribeTimed(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<TimedTranscript> {
+    const send = async (timed: boolean) => {
+      const form = new FormData()
+      form.append('file', new Blob([new Uint8Array(audio)], { type: mime || 'application/octet-stream' }), filename || audioFileName(mime))
+      form.append('model', this.agent.model || 'whisper-1')
+      // with each word's time (to follow along as it plays), where the server can
+      form.append('response_format', timed ? 'verbose_json' : 'json')
+      if (timed) form.append('timestamp_granularities[]', 'word')
+      // your names and terms: Whisper spells what it hears like the words it was "told" before
+      if (prompt) form.append('prompt', prompt)
+      return fetchWithHints(trimSlash(this.agent.baseUrl) + '/audio/transcriptions', {
+        method: 'POST',
+        headers: this.agent.apiKey ? { Authorization: `Bearer ${this.agent.apiKey}` } : {},
+        // a long recording takes a while, even on a GPU
+        signal: timeoutSignal(Math.max(this.agent.timeoutSec, 900) * 1000),
+        body: form,
+      })
+    }
+    let res = await send(true)
+    // a server without word times (some whisper.cpp builds): the words alone
+    if (res.status === 400 || res.status === 422) res = await send(false)
     if (!res.ok) throw new Error(`server returned ${res.status}: ${(await res.text()).slice(0, 300)}`)
-    const text = await res.text()
+    const body = await res.text()
     try {
-      return String((JSON.parse(text) as { text?: string }).text ?? '').trim()
+      const j = JSON.parse(body) as { text?: string; words?: { word?: string; start?: number; end?: number }[]; segments?: { words?: { word?: string; start?: number; end?: number }[] }[] }
+      const raw = j.words ?? j.segments?.flatMap((sg) => sg.words ?? []) ?? []
+      const words = raw
+        .filter((w) => typeof w.word === 'string' && typeof w.start === 'number' && typeof w.end === 'number')
+        .map((w) => ({ word: w.word!.trim(), start: w.start!, end: w.end! }))
+        .filter((w) => w.word)
+      return { text: String(j.text ?? '').trim(), ...(words.length ? { words } : {}) }
     } catch {
-      return text.trim()
+      return { text: body.trim() }
     }
   }
+
 }
 
 /** A file name with the right extension: Whisper servers pick the decoder from it. */

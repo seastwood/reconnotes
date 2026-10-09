@@ -4903,3 +4903,12 @@ a.button {
   font-size: 12px;
   color: var(--muted);
 }
+/* a recording's transcript following along as it plays */
+.audio-transcript.timed .timed-word {
+  border-radius: 3px;
+  cursor: pointer;
+}
+.audio-transcript.timed .timed-word.spoken {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+}

@@ -1,7 +1,7 @@
 import { errorText } from '../lib/jobs'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Scissors, Share, TextQuote } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
@@ -10,6 +10,7 @@ import * as Y from 'yjs'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
 import { workspaceDoc } from '../lib/workspace'
+import { FollowAlong } from './FollowAlong'
 import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
@@ -399,6 +400,10 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const transcript = useAttachmentText(node.attrs.attachmentId)
   // who transcribed it: the server's speech-to-text (Whisper…) or Apple's on the phone
   const heardBy = useAttachmentText(node.attrs.attachmentId, `by:att:${node.attrs.attachmentId}`)
+  // when each word is said (Whisper): the transcript follows along as it plays
+  const timing = useAttachmentText(node.attrs.attachmentId, `timing:att:${node.attrs.attachmentId}`)
+  const playerRef = useRef<HTMLAudioElement | null>(null)
+  const player = useCallback(() => playerRef.current, [])
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
@@ -456,11 +461,18 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       )}
       {url ? (
         <audio
-          ref={(el) => registerPlayer(node.attrs.attachmentId, el)}
+          ref={(el) => {
+            playerRef.current = el
+            registerPlayer(node.attrs.attachmentId, el)
+          }}
           controls
           src={url}
           preload="metadata"
-          onPlay={(e) => replaying && followPlayhead(e.currentTarget)}
+          onPlay={(e) => {
+            if (replaying) followPlayhead(e.currentTarget)
+            // a transcript that follows along: shown as it plays
+            if (timing && transcript) setOpen(true)
+          }}
           onSeeked={(e) => replaying && setPlayhead(e.currentTarget)}
         />
       ) : (
@@ -486,7 +498,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       {open && transcript && (
         <>
           {heardBy && <div className="audio-transcript-by">Transcribed by {heardBy}</div>}
-          <div className="audio-transcript">{highlight(transcript, findQuery)}</div>
+          {findQuery.trim() ? <div className="audio-transcript">{highlight(transcript, findQuery)}</div> : <FollowAlong text={transcript} timing={timing} player={player} />}
           <div className="audio-transcript-actions">
             <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>
               <Copy size={14} /> {copied ?? 'Copy'}

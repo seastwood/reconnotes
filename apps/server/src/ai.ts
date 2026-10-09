@@ -349,15 +349,17 @@ ${partNotes.join('\n\n')}
   }
 
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
-  async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string }> {
+  async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string; words?: { word: string; start: number; end: number }[] }> {
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
       if (!backend.transcribe)
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
-      const text = collapseRepeats(await backend.transcribe(data, mime, filename, this.vocabulary?.speechPrompt() || undefined))
-      return text
+      const prompt = this.vocabulary?.speechPrompt() || undefined
+      // with each word's time, where the server gives it (to follow along as it plays)
+      const r = backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt) : { text: await backend.transcribe(data, mime, filename, prompt) }
+      return { text: collapseRepeats(r.text), words: r.words }
     })
-    log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.length} chars)`)
-    return { text: result, agent: agent.name }
+    log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.text.length} chars${result.words ? `, ${result.words.length} timed words` : ''})`)
+    return { text: result.text, agent: agent.name, ...(result.words ? { words: result.words } : {}) }
   }
   get autoHandwriting() {
     return this.agents.settings().autoHandwriting && this.canHandwriting

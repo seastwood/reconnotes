@@ -20,7 +20,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment, APPLE_SPEECH, setTranscribedBy, transcribedBy } from './attachments'
+import { processAttachment, APPLE_SPEECH, setTranscribedBy, setWordTimes, transcribedBy } from './attachments'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
@@ -229,11 +229,13 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const onDevice = String(job.input.transcript ?? '').trim()
     let text: string
     let by: string
+    let times: { word: string; start: number; end: number }[] | undefined
     if (ai.agents.available('audio') && !onDevice) {
       if (!store.hasBlob(att.id)) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
       const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
       text = r.text
       by = r.agent
+      times = r.words
     } else if (onDevice) {
       text = onDevice
       by = APPLE_SPEECH
@@ -243,6 +245,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     }
     if (!text.trim()) throw new Error('No speech was recognised in this recording.')
     setTranscribedBy(store, att.id, by)
+    setWordTimes(store, att.id, times)
     store.setAttachmentText(att.id, text, 'done')
     sync.reindexNotesFor(att.id)
     return { result: { noteId, text: preview(text), heardBy: by }, agent: by }
@@ -456,6 +459,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const onDevice = String(job.input.transcript ?? '').trim()
     let transcript = ''
     let agent: string | null = null
+    let times: { word: string; start: number; end: number }[] | undefined
     // the server's speech-to-text (Whisper) reads a meeting far better: it comes first when there is one
     const serverHears = ai.agents.available('audio')
     const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
@@ -468,6 +472,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
         transcript = r.text
         agent = r.agent
+        times = r.words
       } catch (e) {
         if (!onDevice && !saved) throw e
       }
@@ -478,12 +483,15 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
       transcript = r.text
       agent = r.agent
+      times = r.words
     }
     // who heard it: the server's speech-to-text, or the phone (Apple)
     const heardBy = agent ?? (transcript === onDevice ? APPLE_SPEECH : savedBy)
     // the recording becomes searchable by what was said – the better reading replacing the phone's
     if (att && transcript && (transcript !== att.text || (heardBy && heardBy !== savedBy))) {
       if (heardBy) setTranscribedBy(store, att.id, heardBy)
+      // a new reading: its word times (none for Apple's)
+      if (agent !== savedBy || times) setWordTimes(store, att.id, times)
       store.setAttachmentText(att.id, transcript, 'done')
       sync.reindexNotesFor(att.id)
     }

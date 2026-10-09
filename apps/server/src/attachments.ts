@@ -33,6 +33,7 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
       const r = await ai.transcribeAudio(data, att.mime, att.name)
       text = r.text
       setTranscribedBy(store, att.id, r.agent)
+      setWordTimes(store, att.id, r.words)
     }
   } catch (err) {
     log.error(`text extraction failed for ${att.id} (${att.mime})`, err)
@@ -83,3 +84,19 @@ export function setTranscribedBy(store: Store, attachmentId: string, by: string)
 
 /** Apple's on-device reading (made for dictation): a server's speech-to-text should replace it. */
 export const APPLE_SPEECH = 'Apple speech recognition (on the phone)'
+
+/** Transcripts-map key (in the note) of a recording's word times: JSON, see `setWordTimes`. */
+export const timingKey = (attachmentId: string) => `timing:att:${attachmentId}`
+
+/**
+ * When each word of a recording's transcript is said – kept with it (and copied into the note) so the
+ * transcript can follow along as it plays. Compact: [word, start, end] in hundredths of a second.
+ * None (a reading without times, e.g. Apple's): cleared, so old times don't stay with new words.
+ */
+export function setWordTimes(store: Store, attachmentId: string, words?: { word: string; start: number; end: number }[]) {
+  store.setSetting(`wordTimes:${attachmentId}`, words?.length ? JSON.stringify({ v: 1, w: words.map((x) => [x.word, Math.round(x.start * 100), Math.round(x.end * 100)]) }) : null)
+}
+
+export function wordTimes(store: Store, attachmentId: string): string | null {
+  return store.getSetting<string | null>(`wordTimes:${attachmentId}`) ?? null
+}

@@ -142,11 +142,16 @@ export class SyncEngine {
     // and who transcribed a recording (Whisper, or Apple on the phone): shown with its transcript
     const byAll = this.store.getSetting<Record<string, string>>('transcribedBy') ?? {}
     const by = Object.keys(attTexts).filter((id) => byAll[id] && transcripts.get(`by:att:${id}`) !== byAll[id])
-    if (missing.length || by.length) {
+    // …and when each word is said (to follow along as it plays); none: cleared
+    const times = Object.keys(attTexts)
+      .map((id) => [id, this.store.getSetting<string | null>(`wordTimes:${id}`) ?? null] as const)
+      .filter(([id, t]) => (transcripts.get(`timing:att:${id}`) ?? null) !== t)
+    if (missing.length || by.length || times.length) {
       void this.change(noteDocName(noteId), (d) => {
         const tr = getTranscripts(d)
         for (const [id, t] of missing) tr.set(`att:${id}`, t)
         for (const id of by) tr.set(`by:att:${id}`, byAll[id])
+        for (const [id, t] of times) t ? tr.set(`timing:att:${id}`, t) : tr.delete(`timing:att:${id}`)
       }).catch((err) => log.error('could not write attachment text', err))
     }
 

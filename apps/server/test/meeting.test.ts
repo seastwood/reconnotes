@@ -209,9 +209,14 @@ describe('a long meeting, heard by the server', () => {
 
 describe('Transcribe on a recording', () => {
   it('replaces the recording’s own transcript – with the server’s speech-to-text, else the phone’s – and says who made it', async () => {
+    let asked = ''
     const whisper = http.createServer(async (req, res) => {
-      for await (const _ of req);
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: 'We need to figure out plans for tomorrow.' }))
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      asked = Buffer.concat(chunks).toString('latin1')
+      // with word times, as Speaches / OpenAI give them for verbose_json
+      const words = ['We', 'need', 'to', 'figure', 'out', 'plans', 'for', 'tomorrow.'].map((word, i) => ({ word: ` ${word}`, start: i * 0.4, end: i * 0.4 + 0.35 }))
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: 'We need to figure out plans for tomorrow.', words }))
     })
     await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
     const { getTranscripts } = await import('@reconnotes/core')
@@ -239,6 +244,13 @@ describe('Transcribe on a recording', () => {
       // the recording's transcript is replaced – nothing written into the note
       expect(tr().get('att:transcribeaudio01')).toBe('We need to figure out plans for tomorrow.')
       expect(tr().get('by:att:transcribeaudio01')).toBe('Whisper turbo')
+      // with each word's time, to follow along as it plays
+      expect(asked).toMatch(/name="response_format"\r\n\r\nverbose_json/)
+      expect(asked).toMatch(/name="timestamp_granularities\[\]"\r\n\r\nword/)
+      const { parseWordTimes } = await import('@reconnotes/core')
+      const times = parseWordTimes(tr().get('timing:att:transcribeaudio01'))!
+      expect(times.map((w) => w.word)).toEqual(['We', 'need', 'to', 'figure', 'out', 'plans', 'for', 'tomorrow.'])
+      expect(times[7].start).toBeCloseTo(2.8)
       expect(getContent(app.sync.getDoc(noteDocName('transcribe0000001'))!).toString()).not.toContain('plans for tomorrow')
 
       // no speech-to-text on the server: the phone is asked, and its reading kept with the recording
@@ -250,6 +262,8 @@ describe('Transcribe on a recording', () => {
       for (let i = 0; i < 40 && tr().get('att:transcribeaudio01') !== 'Testing meeting mode.'; i++) await new Promise((r) => setTimeout(r, 50))
       expect(tr().get('att:transcribeaudio01')).toBe('Testing meeting mode.')
       expect(tr().get('by:att:transcribeaudio01')).toBe(APPLE_SPEECH)
+      // Apple's reading has no word times: Whisper's are gone with its words
+      expect(tr().get('timing:att:transcribeaudio01')).toBeUndefined()
     } finally {
       whisper.close()
     }
