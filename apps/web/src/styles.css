@@ -950,6 +950,39 @@ button.text {
   padding: 1px 4px;
   border-radius: 4px;
 }
+/* inside a code block: one background for the block, not a strip behind every line */
+.note-content pre code {
+  font-size: inherit;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.note-content pre {
+  position: relative;
+  padding-right: 44px;
+}
+/* the block's Copy button (codeCopy.ts) */
+.note-content pre .code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--accent-text);
+  background: var(--paper);
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.note-content pre .code-copy.done {
+  color: #10b981;
+}
 .note-content blockquote {
   border-left: 3px solid var(--accent);
   margin: 0.5em 0;
