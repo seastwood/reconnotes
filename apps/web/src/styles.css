@@ -4841,3 +4841,44 @@ a.button {
 .ask-refs-rule button:first-child {
   color: var(--accent-text);
 }
+/* after following a link in a note: back to where the link was */
+.editor-col {
+  position: relative;
+}
+.link-back {
+  position: absolute;
+  left: 14px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 28px);
+  padding: 4px 4px 4px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.link-back-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--accent-text);
+  font-weight: 600;
+  font-size: 15px;
+}
+.link-back-to {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--muted);
+}
+.link-back .icon {
+  width: 30px;
+  height: 30px;
+  color: var(--muted);
+}

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createNote, getContent, listFolders, listNotes, noteDocName, noteToMarkdown, updateNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
-import { adoptImport, importWebPages, importsFor, refreshImport } from '../src/webImport'
+import { adoptImport, contentsEntries, importWebPages, importsFor, refreshImport } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 
 let app: App
@@ -442,5 +442,45 @@ describe('Markdown from pages and PDFs', () => {
     const xml = getContent(doc).toString()
     expect(xml).toContain('Foam (~58 mm) and 4½ in (~114 mm) tall, ')
     expect(xml).toMatch(/<strike>gone<\/strike>/)
+  })
+})
+
+describe('a PDF’s table of contents', () => {
+  it('becomes a list nested by its numbers, each line going to its heading in the note', async () => {
+    const { makePdf } = await import('./pdfHelper')
+    const pdf = makePdf([
+      [[24, 'Contents'], [11, '1 Introduction ............................ 2'], [11, '1.1 Overview ............................ 2'], [11, '2 Game Rules ....................... 3'], [11, '2.1 Fouls ............................ 3']],
+      [[24, '1 Introduction'], [16, '1.1 Overview'], [11, 'Welcome to the game.']],
+      [[24, '2 Game Rules'], [16, '2.1 Fouls'], [11, 'G301 Robots may not damage the field.']],
+    ])
+    const pdfServer = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(pdf))
+    await new Promise<void>((r) => pdfServer.listen(0, '127.0.0.1', () => r()))
+    try {
+      const url = `http://127.0.0.1:${(pdfServer.address() as AddressInfo).port}/Contents.pdf`
+      const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url, folderId: null })
+      const m = md(r.noteIds[0])
+      expect(m).toContain('- [[1 Introduction]]\n  - [[1.1 Overview]]\n- [[2 Game Rules]]\n  - [[2.1 Fouls]]')
+      expect(m).not.toContain('.....')
+      const xml = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
+      expect(xml).toContain(`<notelink find="2.1 Fouls" label="2.1 Fouls" noteId="${r.noteIds[0]}"`)
+    } finally {
+      pdfServer.close()
+    }
+  })
+
+  it('reads its entries even where the dots and page numbers run into the next one', () => {
+    const text =
+      '1.10 Question and Answer System ............................................................ 12 2 FIRST Season Overview ....................................................... 13 3 Game Sponsor Recognition ........................................................ 15 4 Game Overview ...................... 17 5 ARENA ................................ 19 5.1 FIELD........................................ 19 5.2 Areas, Zones, & Markings.................................. 21 5.3 REEF ........................ 23 5.4.1 CAGE ............. 26'
+    expect(contentsEntries(text).map((e) => `${e.num} ${e.title} ${e.page}`)).toEqual([
+      '1.10 Question and Answer System 12',
+      '2 FIRST Season Overview 13',
+      '3 Game Sponsor Recognition 15',
+      '4 Game Overview 17',
+      '5 ARENA 19',
+      '5.1 FIELD 19',
+      '5.2 Areas, Zones, & Markings 21',
+      '5.3 REEF 23',
+      '5.4.1 CAGE 26',
+    ])
   })
 })

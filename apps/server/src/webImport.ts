@@ -1297,7 +1297,10 @@ async function pdfPages(data: Buffer, url: URL, split = false): Promise<Page[]> 
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
     const html = `<html><head><title>${esc(name)}</title></head><body><main><h1>${esc(name)}</h1>${body}</main></body></html>`
     const { document } = parseHTML(html)
-    return [{ url, title: '', html, doc: document as unknown as Document, pdfPages: [sections[0].pages[0], sections[sections.length - 1].pages[1]] }]
+    // its table of contents: a list, each line going to its heading
+    linkContents(document as unknown as Document)
+    const linked = document.toString()
+    return [{ url, title: '', html: linked, doc: document as unknown as Document, pdfPages: [sections[0].pages[0], sections[sections.length - 1].pages[1]] }]
   }
   const used = new Map<string, number>()
   return sections.map((sec) => {
@@ -1311,6 +1314,78 @@ async function pdfPages(data: Buffer, url: URL, split = false): Promise<Page[]> 
     const { document } = parseHTML(sec.html)
     return { url: u, title: '', html: sec.html, doc: document as unknown as Document, pdfPages: sec.pages }
   })
+}
+
+/** A table of contents line's leader dots ("……… 12"). */
+const LEADERS = /(?:\.\s*){5,}|…{2,}/
+
+/**
+ * The entries of a PDF's table of contents, from its text – where the dots
+ * and page numbers run into the next entry ("…… 12 2 FIRST Season Overview ……
+ * 13 3 Game Sponsor Recognition"): number, title, page.
+ */
+export function contentsEntries(text: string): { num: string | null; title: string; page: number }[] {
+  const t = text.replace(/…/g, '...').replace(/\s+/g, ' ')
+  const out: { num: string | null; title: string; page: number }[] = []
+  for (const m of t.matchAll(/(?:^|\s)(?:(\d{1,2}(?:\.\d{1,3}){0,4})\.?\s+)?(\p{L}[^.]*?(?:\.(?!\s*\.)[^.]*?)*?)\s*(?:\.\s*){3,}\s*(\d{1,4})(?=\s|$)/gu)) {
+    const title = m[2].replace(/\s+/g, ' ').trim()
+    if (title.length < 2 || title.length > 120) continue
+    out.push({ num: m[1] ?? null, title, page: Number(m[3]) })
+  }
+  return out
+}
+
+/**
+ * A PDF's table of contents (paragraphs of dot leaders and page numbers): a
+ * list nested by its numbers (5, 5.1, 5.1.2), each line a link to its heading
+ * further on – which the page's links turn into links within the note.
+ */
+export function linkContents(doc: Document): void {
+  const norm = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}.]+/gu, ' ').trim()
+  const paras = [...doc.querySelectorAll('p')]
+  const done = new Set<Element>()
+  let k = 0
+  for (const first of paras) {
+    if (done.has(first) || !LEADERS.test(first.textContent ?? '')) continue
+    // the run: paragraphs with leaders, and the short bits between them ("5.1", "FIELD…")
+    const run: Element[] = []
+    for (let el: Element | null = first; el && el.tagName === 'P'; el = el.nextElementSibling) {
+      const txt = el.textContent ?? ''
+      const nextHas = LEADERS.test(el.nextElementSibling?.textContent ?? '')
+      if (!LEADERS.test(txt) && !(txt.length < 80 && nextHas)) break
+      run.push(el)
+    }
+    run.forEach((el) => done.add(el))
+    const entries = contentsEntries(run.map((el) => el.textContent ?? '').join(' '))
+    if (entries.length < 3) continue
+    // each entry's heading: by its number ("5.2 …"), else its title – after the contents
+    const headings = [...doc.querySelectorAll('h1, h2, h3, h4, h5, h6')].filter((h) => run[run.length - 1].compareDocumentPosition(h) & 4)
+    const items = entries.map((e) => {
+      const want = norm(e.num ? `${e.num} ${e.title}` : e.title)
+      const h =
+        headings.find((x) => norm(x.textContent ?? '') === want) ??
+        (e.num ? headings.find((x) => norm(x.textContent ?? '').startsWith(`${e.num} `)) : undefined) ??
+        headings.find((x) => norm(x.textContent ?? '').replace(/^[\d.]+\s+/, '') === norm(e.title))
+      if (h && !h.getAttribute('id')) h.setAttribute('id', `rn-contents-${++k}`)
+      return { depth: e.num ? e.num.split('.').length - 1 : 0, label: e.num ? `${e.num} ${e.title}` : e.title, id: h?.getAttribute('id') ?? null }
+    })
+    // nested lists, by depth
+    const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    let html = ''
+    let depth = -1
+    for (const it of items) {
+      const d = Math.min(it.depth, depth + 1)
+      if (d > depth) html += '<ul>'.repeat(d - depth)
+      else html += '</li>' + '</ul></li>'.repeat(depth - d)
+      html += `<li>${it.id ? `<a href="#${it.id}">${esc(it.label)}</a>` : esc(it.label)}`
+      depth = d
+    }
+    html += '</li>' + '</ul></li>'.repeat(depth) + '</ul>'
+    const holder = doc.createElement('div')
+    holder.innerHTML = html
+    run[0].replaceWith(...holder.childNodes)
+    for (const el of run.slice(1)) el.remove()
+  }
 }
 
 /** "the PDF at …" for a source line: a link to it, unless it came from this device. */

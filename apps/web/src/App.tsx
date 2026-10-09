@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeft } from 'lucide-react'
+import { ArrowLeft, PanelLeft, X } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
 import { NoteList } from './components/NoteList'
@@ -249,6 +249,56 @@ export function App() {
     setNav({ ...nav, noteId: id })
     setPane('note')
   }
+  /** links followed from inside a note: the places to come back to (the note, and how far down it was) */
+  const [backTo, setBackTo] = useState<{ noteId: string; scroll: number }[]>([])
+  const viaLink = useRef(false)
+  const restoreScroll = useRef<number | null>(null)
+  const followFromNote = (id: string, find?: string) => {
+    if (nav.noteId) {
+      const scroll = document.querySelector('.editor-col .editor-scroll')?.scrollTop ?? 0
+      setBackTo((b) => [...b, { noteId: nav.noteId!, scroll }].slice(-30))
+      // to another note: that change of note isn't one that forgets the way back
+      viaLink.current = id !== nav.noteId
+    }
+    followLink(id, find)
+  }
+  const goBackTo = () => {
+    const last = backTo.at(-1)
+    if (!last) return
+    setBackTo((b) => b.slice(0, -1))
+    setFindOnOpen(null)
+    restoreScroll.current = last.scroll
+    if (last.noteId === nav.noteId) return void scrollBack()
+    if (!isOpenable(last.noteId)) return
+    viaLink.current = true
+    setNav({ ...nav, noteId: last.noteId })
+    setPane('note')
+  }
+  /** back where it was: once the note has drawn (a long one takes a moment) */
+  const scrollBack = () => {
+    const to = restoreScroll.current
+    if (to === null) return
+    let tries = 0
+    const go = () => {
+      const el = document.querySelector('.editor-col .editor-scroll')
+      if (el && (el.scrollHeight - el.clientHeight >= to || tries > 40)) {
+        el.scrollTop = to
+        restoreScroll.current = null
+      } else if (tries++ <= 40) requestAnimationFrame(go)
+    }
+    requestAnimationFrame(go)
+  }
+  // opened some other way (the list, search): the way back is forgotten
+  useEffect(() => {
+    if (viaLink.current) viaLink.current = false
+    else setBackTo([])
+    scrollBack()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav.noteId])
+  const noteTitle = (id: string) => {
+    const m = getNotes(workspaceDoc).get(id)
+    return (m && readNote(m).title) || 'the note'
+  }
   const isOpenable = (id: string) => {
     const m = getNotes(workspaceDoc).get(id)
     return Boolean(m && !readNote(m).trashedAt)
@@ -483,7 +533,7 @@ export function App() {
               doc={noteDoc.doc}
               folderId={note?.folderId ?? null}
               onOpenNote={openNote}
-              onFollowLink={followLink}
+              onFollowLink={followFromNote}
               onBack={narrow ? () => setPane(fromSearch && search.trim() ? 'folders' : 'list') : undefined}
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
@@ -506,6 +556,17 @@ export function App() {
                   )}
                 </>
               )}
+            </div>
+          )}
+          {backTo.length > 0 && nav.noteId && (
+            <div className="link-back">
+              <button className="link-back-go" onClick={goBackTo} title="Back to where the link was">
+                <ArrowLeft size={16} /> Back
+                {backTo.at(-1)!.noteId !== nav.noteId && <span className="link-back-to">to {noteTitle(backTo.at(-1)!.noteId)}</span>}
+              </button>
+              <button className="icon" aria-label="Forget the way back" onClick={() => setBackTo([])}>
+                <X size={15} />
+              </button>
             </div>
           )}
         </main>
