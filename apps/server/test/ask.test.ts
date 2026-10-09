@@ -668,6 +668,9 @@ describe('a note that refers to another (its manual)', () => {
     expect(prompts.at(-1)).toMatch(/REFERENCED DOCUMENT \(applies only where "Cookie Chaos manual" points to it – it uses only “A. Padding” of R402 from it\) – "FRC 2025 Game Manual"/)
     // and only that: none of its other rules
     expect(prompts.at(-1)).not.toContain('Some other rule about wiring')
+    // and what R12 points to comes right after it in the lines most about the question
+    const key = prompts.at(-1)!.split('The lines of the notes above most about the question')[1]
+    expect(key).toMatch(/R12\. BUMPERS are required[^\n]*\n\[\d+\] \(R402 in "FRC 2025 Game Manual", which that rule points to\) R402 BUMPER construction\. A\. Padding/)
   })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
@@ -778,6 +781,24 @@ describe('a manual that takes part of another one', () => {
     expect(only).toContain('A. Padding: a stacked pair of pool noodles')
     for (const t of ['R401', 'Backing', 'cable ties', 'R403']) expect(only).not.toContain(t)
     expect(only).toContain('Only “A. Padding” of R402 applies here')
+  })
+
+  it('finds the part by its name when the PDF lost its letter ("• Padding – …")', () => {
+    const frc = [
+      'R402 *BUMPER construction. BUMPERS must consist of the following:',
+      '',
+      '- Padding – A minimum of 2 ¼ in. (~58 mm) depth of foam padding, of one of the following:',
+      '- Pool noodles (hollow or solid) or backer rod',
+      '- Foam floor tiles',
+      '',
+      'Multiple types of foam may be used within a single BUMPER.',
+      '',
+      '- Backing – A backer at least 4 ½ in. (~115 mm) tall.',
+      '- Fastening System – hook-and-loop tape and cable ties may not be used.',
+    ].join('\n')
+    const only = onlyRules(frc, pointedRules(R12, [frc]))
+    for (const t of ['Padding – A minimum of 2 ¼ in.', 'Pool noodles', 'Foam floor tiles', 'Multiple types of foam']) expect(only).toContain(t)
+    for (const t of ['Backing', 'cable ties']) expect(only).not.toContain(t)
   })
 
   it('the rule about the thing asked is the key line, whole – with its exceptions', () => {

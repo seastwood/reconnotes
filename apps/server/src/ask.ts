@@ -347,6 +347,35 @@ export async function askNotes(
       }
       keyed.push(sec ? { ...l, n: added.get(sec)! } : l)
     }
+    // a key line pointing to a referenced rule for its details ("constructed as described in the “A. Padding” section of R402"):
+    // those details right after it – they're the answer as much as it is
+    if (onlyPointed) {
+      const given = new Set<string>()
+      for (let i = 0; i < keyed.length; i++) {
+        const k = keyed[i]
+        if (isRef.has(noteOfN(k.n) ?? '')) continue
+        for (const r of onlyPointed.keys()) {
+          if (given.has(r) || !new RegExp(`\\b${r}\\b`).test(k.line)) continue
+          let n = sources.find((x) => isRef.has(x.noteId) && definesRule(texts.get(x.n) ?? '', r))?.n
+          if (n === undefined) {
+            const def = everySection.find((x) => isRef.has(x.noteId) && definesRule(x.text, r))
+            if (!def) continue
+            add(def.noteId, def.text.length > PER_NOTE ? excerpt(def.text, [r.toLowerCase(), ...words], PER_NOTE) : def.text, def)
+            n = sources.length
+          }
+          const text = onlyRules(texts.get(n)!, new Map([[r, onlyPointed.get(r) ?? null]]))
+          const line = text
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+            .replace(/^\s*[-*]\s+/gm, '• ')
+            .replace(/\s+/g, ' ')
+            .trim()
+          if (!line) continue
+          given.add(r)
+          keyed.splice(i + 1, 0, { n, line: `(${r} in "${meta.get(noteOfN(n) ?? '')?.title || 'the referenced document'}", which that rule points to) ${line.length > 1200 ? `${line.slice(0, 1200)}…` : line}` })
+          i++
+        }
+      }
+    }
   }
   const key = (_context: string) => {
     const lines = keyed
@@ -363,7 +392,7 @@ export async function askNotes(
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.${
     refs.length
-      ? `\n- "${meta.get(pinned[0])?.title || 'The main note'}" is the main document; ${refs.map((id) => `"${meta.get(id)?.title || 'Untitled'}"`).join(', ')} ${refs.length === 1 ? 'is' : 'are'} referred to by it. The main document decides: a referenced document's rule applies only where the main document points to it (e.g. "as described in R402"). Where the main document says something itself, or the two differ, give the main document's rule – not the referenced one's. When a fact comes from a referenced document, say so ("in the FRC manual…").`
+      ? `\n- "${meta.get(pinned[0])?.title || 'The main note'}" is the main document; ${refs.map((id) => `"${meta.get(id)?.title || 'Untitled'}"`).join(', ')} ${refs.length === 1 ? 'is' : 'are'} referred to by it. The main document decides: a referenced document's rule applies only where the main document points to it (e.g. "as described in R402"). Where the main document says something itself, or the two differ, give the main document's rule – not the referenced one's. When a fact comes from a referenced document, say so ("in the FRC manual…"). Where the main document points to a referenced rule for details ("constructed as described in R402"), give those details from it – each value with its unit.`
       : ''
   }
 - Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
@@ -442,7 +471,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     if (yesNo && key[0] && saysNo(text) && PERMITS.test(key[0].line))
       text += `\n\n**Check this:** the answer says no, but the note’s most relevant line allows some of it (“${clip(sentencesOf(key[0].line).find((x) => PERMITS.test(x)) ?? key[0].line, 200)}”) [${key[0].n}].`
     if (quote.length)
-      text += `\n\n${pinned.length === 1 && quote.every((l) => sources.find((x) => x.n === l.n)?.noteId === pinned[0]) ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, /^[A-Z]{1,3}\d{1,4}\b/.test(l.line) ? 900 : 320)} [${l.n}]`).join('\n')}`
+      text += `\n\n${pinned.length === 1 && quote.every((l) => sources.find((x) => x.n === l.n)?.noteId === pinned[0]) ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, /^\(?[A-Z]{1,3}\d{1,4}\b/.test(l.line) ? 1200 : 320)} [${l.n}]`).join('\n')}`
   }
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)
@@ -488,10 +517,18 @@ export function onlyRules(text: string, pointed: Map<string, string | null>): st
     while (end < lines.length && !/^#{1,6}\s/.test(lines[end]) && !(ruleAt(lines[end]) && ruleAt(lines[end]) !== r)) end++
     let block = lines.slice(start, end)
     if (part) {
-      // the rule's opening, then only that part ("A. Padding: …" up to "B. …")
+      // the rule's opening, then only that part: "A. Padding: …" up to "B. …" – or, its letters lost
+      // (a PDF's list), "• Padding – …" up to "• Backing – …"
       const label = part.replace(/[.:\s]+$/, '').toLowerCase()
-      const partAt = (l: string) => /^\s*(?:[-*]\s+|\*\*)?\(?[A-Z][.)]\s/.test(l)
-      const from = block.findIndex((l) => partAt(l) && l.toLowerCase().replace(/\*/g, '').includes(label))
+      const name = label.replace(/^\(?[a-z][.)]\s*/, '')
+      const lettered = (l: string) => /^\s*(?:[-*]\s+|\*\*)?\(?[A-Z][.)]\s/.test(l)
+      const named = (l: string) => /^\s*[-*]\s+\**\p{Lu}[\p{L}]+(?:[ /&][\p{L}]+){0,3}\**\s*[–—:-]\s/u.exec(l)
+      let partAt = lettered
+      let from = block.findIndex((l) => lettered(l) && l.toLowerCase().replace(/\*/g, '').includes(label))
+      if (from < 0) {
+        partAt = (l) => Boolean(named(l))
+        from = block.findIndex((l) => named(l)?.[0].replace(/[-*\s–—:]+/g, ' ').trim().toLowerCase() === name)
+      }
       if (from > 0) {
         let to = from + 1
         while (to < block.length && !partAt(block[to])) to++
