@@ -4841,24 +4841,32 @@ a.button {
 .ask-refs-rule button:first-child {
   color: var(--accent-text);
 }
-/* after following a link in a note: back to where the link was */
+/* after following a link in a note: back to where the link was – the same pill as "Back to chat" */
 .editor-col {
   position: relative;
 }
 .link-back {
   position: absolute;
-  left: 14px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  z-index: 30;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 70px);
+  z-index: 89;
   display: flex;
   align-items: center;
   gap: 2px;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 32px);
   padding: 4px 4px 4px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  box-shadow: var(--shadow);
+  border-radius: 22px;
+  background: var(--accent);
+  color: #1c1c1e;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+/* "Back to chat" is showing too: just above it */
+.link-back.above-chat {
+  bottom: calc(env(safe-area-inset-bottom) + 126px);
+}
+.link-back button {
+  color: inherit;
 }
 .link-back-go {
   display: inline-flex;
@@ -4866,19 +4874,10 @@ a.button {
   gap: 6px;
   min-width: 0;
   padding: 6px 8px;
-  color: var(--accent-text);
   font-weight: 600;
-  font-size: 15px;
 }
 .link-back-to {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 400;
-  color: var(--muted);
-}
-.link-back .icon {
-  width: 30px;
-  height: 30px;
-  color: var(--muted);
 }

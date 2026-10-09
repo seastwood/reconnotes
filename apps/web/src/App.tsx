@@ -11,7 +11,8 @@ import { NoteEditor } from './editor/Editor'
 import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
-import { safeLocalGet, safeLocalSet } from './lib/store'
+import { safeLocalGet, safeLocalSet, useStore } from './lib/store'
+import { askChat } from './lib/askChat'
 import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
@@ -252,6 +253,8 @@ export function App() {
   /** links followed from inside a note: the places to come back to (the note, and how far down it was) */
   const [backTo, setBackTo] = useState<{ noteId: string; scroll: number }[]>([])
   const viaLink = useRef(false)
+  // "Back to chat" is showing: the link's way back goes above it
+  const chatAside = useStore(askChat, (s) => Boolean(s.target && s.hidden))
   const restoreScroll = useRef<number | null>(null)
   const followFromNote = (id: string, find?: string) => {
     if (nav.noteId) {
@@ -559,10 +562,10 @@ export function App() {
             </div>
           )}
           {backTo.length > 0 && nav.noteId && (
-            <div className="link-back">
+            <div className={`link-back${chatAside ? ' above-chat' : ''}`}>
               <button className="link-back-go" onClick={goBackTo} title="Back to where the link was">
-                <ArrowLeft size={16} /> Back
-                {backTo.at(-1)!.noteId !== nav.noteId && <span className="link-back-to">to {noteTitle(backTo.at(-1)!.noteId)}</span>}
+                <ArrowLeft size={16} />
+                <span className="link-back-to">{backTo.at(-1)!.noteId !== nav.noteId ? `Back to ${noteTitle(backTo.at(-1)!.noteId)}` : 'Back'}</span>
               </button>
               <button className="icon" aria-label="Forget the way back" onClick={() => setBackTo([])}>
                 <X size={15} />
