@@ -64,6 +64,8 @@ import { workspaceDoc } from '../lib/workspace'
 import { duplicateNote, newNoteFromTemplate, saveAsTemplate } from '../lib/templates'
 import { trashNotes } from '../lib/noteActions'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
+import { meetingStart } from '../lib/meeting'
+import { useStore } from '../lib/store'
 import { takeQuickAction } from '../lib/appLinks'
 import { openAskChat } from '../lib/askChat'
 import { openRefs, useRefs } from '../lib/refs'
@@ -664,6 +666,13 @@ function AudioRecorder({ editor, noteId, onError }: { editor: Editor; noteId: st
     }, 400)
     return () => clearTimeout(t)
   }, [noteId])
+  // a new meeting's setup said Start
+  const meetingNow = useStore(meetingStart, (m) => m.noteId === noteId)
+  useEffect(() => {
+    if (!meetingNow) return
+    meetingStart.set({ noteId: null })
+    void startRef.current({ meeting: true })
+  }, [meetingNow])
 
   const picker = (
     <input

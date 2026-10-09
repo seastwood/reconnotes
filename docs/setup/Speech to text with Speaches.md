@@ -406,6 +406,233 @@ Reading the bar:
 - **"full"** in red, and a red outline: less than 5% left. The next model to load may not fit.
 - **"On the CPU: …"** in red: a model that didn't fit, so it runs slowly. ReconNotes reloads it fully on the next job.
 
+## 13. Tell who said what (optional)
+
+Whisper writes down what was said, not who said it. A second small service, which comes with ReconNotes, tells the voices apart. With it, a recording's transcript shows who's speaking ("Speaker 1", "Speaker 2"…; tap one to give them a name), and the meeting notes say who said, suggested, agreed to or took on what.
+
+It runs on the CPU, so it doesn't take GPU memory from Whisper or the language model. It takes about 5 seconds per minute of audio: roughly 2 minutes for a 25-minute meeting. It uses sherpa-onnx with pyannote's segmentation model and NVIDIA's TitaNet voice model (about 45 MB, downloaded on first start).
+
+Install it in the Speaches container, next to Speaches:
+
+```bash
+mkdir -p /opt/diarize
+```
+
+```bash
+cd /opt/diarize
+```
+
+```bash
+uv venv
+```
+
+```bash
+uv pip install sherpa-onnx numpy
+```
+
+(`uv: command not found`? Run `source $HOME/.local/bin/env` first, as in step 3.)
+
+The script is `deploy/diarize.py` in your ReconNotes folder. Copy it to `/opt/diarize/diarize.py`, from inside the ReconNotes folder on the ReconNotes machine:
+
+```bash
+scp deploy/diarize.py root@<speaches address>:/opt/diarize/diarize.py
+```
+
+Or open `nano /opt/diarize/diarize.py` on the Speaches machine and paste all of this:
+
+```python
+#!/usr/bin/env python3
+"""
+Who spoke when, for ReconNotes
+==============================
+
+Whisper writes down what was said, not who said it. This small server splits
+a recording into turns by voice ("speaker 1 from 0:00 to 0:07, speaker 2…"),
+so ReconNotes can label the transcript and the meeting notes can say who
+said and agreed what. It runs on the CPU (it doesn't take GPU memory from
+Whisper or the language model): about 5 seconds per minute of audio.
+
+It uses sherpa-onnx with pyannote's segmentation model and NVIDIA NeMo's
+TitaNet voice model, downloaded once on first start.
+
+    python3 diarize.py            # serves http://0.0.0.0:9402/
+
+    POST /diarize?speakers=N      the recording (any format ffmpeg reads) as the body;
+                                  N (optional): at most this many people spoke
+    -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3}
+
+ReconNotes looks for it on port 9402 of the speech-to-text server's address.
+Needs: ffmpeg, and `pip install sherpa-onnx numpy`.
+"""
+import json
+import os
+import subprocess
+import tarfile
+import tempfile
+import threading
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import numpy as np
+import sherpa_onnx
+
+PORT = int(os.environ.get("DIARIZE_PORT", "9402"))
+MODELS = os.environ.get("DIARIZE_MODELS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "diarize-models"))
+# how alike two stretches of speech must be to count as one person (higher: fewer speakers)
+THRESHOLD = float(os.environ.get("DIARIZE_THRESHOLD", "0.9"))
+THREADS = int(os.environ.get("DIARIZE_THREADS", str(max(1, (os.cpu_count() or 2) - 1))))
+
+RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
+SEGMENTATION = os.path.join(MODELS, "sherpa-onnx-pyannote-segmentation-3-0", "model.onnx")
+EMBEDDING = os.path.join(MODELS, "nemo_en_titanet_small.onnx")
+
+
+def fetch_models():
+    os.makedirs(MODELS, exist_ok=True)
+    if not os.path.exists(SEGMENTATION):
+        print("downloading the segmentation model…", flush=True)
+        tar = os.path.join(MODELS, "segmentation.tar.bz2")
+        urllib.request.urlretrieve(f"{RELEASES}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", tar)
+        with tarfile.open(tar) as t:
+            t.extractall(MODELS)
+        os.remove(tar)
+    if not os.path.exists(EMBEDDING):
+        print("downloading the voice model…", flush=True)
+        urllib.request.urlretrieve(f"{RELEASES}/speaker-recongition-models/nemo_en_titanet_small.onnx", EMBEDDING)
+
+
+def diarizer(clusters=-1):
+    cfg = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+        segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+            pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=SEGMENTATION),
+            num_threads=THREADS,
+        ),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=EMBEDDING, num_threads=THREADS),
+        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=clusters, threshold=THRESHOLD),
+        min_duration_on=0.3,
+        min_duration_off=0.5,
+    )
+    if not cfg.validate():
+        raise RuntimeError("the diarization models are missing or broken – delete the models folder and start again")
+    return sherpa_onnx.OfflineSpeakerDiarization(cfg)
+
+
+def decode(data: bytes, rate: int) -> np.ndarray:
+    """Any audio → 16 kHz mono float samples (ffmpeg). From a file, not a pipe: an iPhone's .m4a
+    keeps its index at the end, which ffmpeg can't reach in a pipe."""
+    with tempfile.NamedTemporaryFile(suffix=".audio") as f:
+        f.write(data)
+        f.flush()
+        out = subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-i", f.name, "-ac", "1", "-ar", str(rate), "-f", "f32le", "pipe:1"],
+            capture_output=True, check=True,
+        ).stdout
+    return np.frombuffer(out, dtype=np.float32)
+
+
+def segments(sd, samples):
+    return [{"start": round(s.start, 2), "end": round(s.end, 2), "speaker": int(s.speaker)} for s in sd.process(samples).sort_by_start_time()]
+
+
+lock = threading.Lock()
+
+
+class Handler(BaseHTTPRequestHandler):
+    def answer(self, status, body):
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        self.answer(200, {"ok": True, "threshold": THRESHOLD})
+
+    def do_POST(self):
+        url = urllib.parse.urlparse(self.path)
+        if url.path != "/diarize":
+            return self.answer(404, {"error": "POST /diarize"})
+        try:
+            data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            most = int(urllib.parse.parse_qs(url.query).get("speakers", ["0"])[0] or 0)
+            with lock:  # one recording at a time: it uses every CPU core it's given
+                sd = diarizer()
+                samples = decode(data, sd.sample_rate)
+                found = segments(sd, samples)
+                # more voices than people there: grouped again into that many
+                if most > 0 and len({s["speaker"] for s in found}) > most:
+                    found = segments(diarizer(most), samples)
+            # speakers numbered in the order they first speak
+            order = {}
+            for s in found:
+                s["speaker"] = order.setdefault(s["speaker"], len(order))
+            self.answer(200, {"segments": found, "speakers": len(order), "seconds": round(len(samples) / sd.sample_rate, 2)})
+        except subprocess.CalledProcessError as e:
+            self.answer(400, {"error": "couldn't read the audio: " + e.stderr.decode(errors="replace")[-300:]})
+        except Exception as e:  # noqa: BLE001
+            self.answer(500, {"error": str(e)})
+
+    def log_message(self, *args):
+        pass
+
+
+if __name__ == "__main__":
+    fetch_models()
+    diarizer()  # check the models load before saying we're ready
+    print(f"ready on port {PORT} (threshold {THRESHOLD}, {THREADS} threads)", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+```
+
+Try it (the first start downloads the models, then says `ready on port 9402`):
+
+```bash
+/opt/diarize/.venv/bin/python /opt/diarize/diarize.py
+```
+
+In another shell, give it the test recording from step 8:
+
+```bash
+curl -s -X POST --data-binary @/tmp/test.flac http://localhost:9402/diarize
+```
+
+It should answer with one speaker, e.g. `{"segments": [{"start": 0.3, "end": 10.9, "speaker": 0}], "speakers": 1, …}`. Stop it with **Ctrl+C** and make it a service:
+
+```bash
+nano /etc/systemd/system/diarize.service
+```
+
+```ini
+[Unit]
+Description=Who spoke when, for ReconNotes (port 9402)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/diarize
+ExecStart=/opt/diarize/.venv/bin/python /opt/diarize/diarize.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+```
+
+```bash
+systemctl enable --now diarize
+```
+
+ReconNotes looks for it on port 9402 at your speech-to-text agent's address, so there's nothing to set in the app. From then on:
+
+- **Meetings**: the notes are written from the transcript as turns ("Jesse: …", "Speaker 2: …"). The names on the note's **Attendees** line (the meeting's setup asks for them) are Whisper's spelling hint, and also the most voices it will find.
+- **The transcript** under a recording shows a coloured label where each speaker starts. Tap a label to say who it is: the attendees are one tap away, or type a name. Then **Redo the notes with the names** under the transcript rewrites the meeting notes with them.
+- **Transcribe** on any recording labels its speakers too.
+
+If it finds more voices than there were people (one person counted twice), add `Environment=DIARIZE_THRESHOLD=0.95` to the service; if it merges two people into one, try `0.8`. Then `systemctl daemon-reload && systemctl restart diarize`. Listing the attendees fixes the first case on its own.
+
 ## Updating Speaches
 
 ```bash
@@ -438,5 +665,6 @@ Then repeat the `patchelf` line from step 5 and the `uv pip install "nvidia-cudn
 | works by hand but not as a service | the service is missing the `LD_LIBRARY_PATH` line (step 9) |
 | Jobs says "Apple speech recognition" | ReconNotes can't reach Speaches: check the agent's address ends in `:8000/v1` (step 10) |
 | notes model "partly on the CPU" after a meeting | caught as the model loads, before the job runs (step 11); update ReconNotes if you still see it |
+| no speaker labels in transcripts | the speaker service isn't running, or port 9402 is blocked: `curl -s http://<speaches address>:9402/` from the ReconNotes machine (step 13) |
 | the bar in Jobs doesn't appear | the GPU monitor isn't running, or port 9401 is blocked: `curl -s http://<speaches address>:9401/` from the ReconNotes machine (step 12) |
 | a meeting job says "Done by Apple speech recognition" with a **Speech-to-text: Failed** line | the reason is on that line; `journalctl -u speaches -n 50` shows Speaches' side (step 11) |

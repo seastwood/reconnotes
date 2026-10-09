@@ -25,7 +25,7 @@ import {
   type AiSettings,
   warmOllama,
 } from './agents'
-import { initialTextStatus, queueAttachment, retryAttachments } from './attachments'
+import { initialTextStatus, queueAttachment, retryAttachments, attendeesFor } from './attachments'
 import { listBackups, runBackup } from './backup'
 import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
@@ -392,7 +392,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const data = fs.readFileSync(store.blobPath(att.id))
     const { text, agent } = await jobs.run(
       { kind: 'transcribe', title: att.name || 'Recording', device: deviceName(req) },
-      () => ai.transcribeAudio(data, att.mime, att.name),
+      () => ai.transcribeAudio(data, att.mime, att.name, attendeesFor(store, sync, att.id)),
       (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
     )
     store.setAttachmentText(att.id, text, 'done')

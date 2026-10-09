@@ -32,3 +32,13 @@ describe('who said what', () => {
     expect(parseSpeakerNames('{"0":"Seth","1":" ","x":"y"}')).toEqual({ 0: 'Seth' })
   })
 })
+
+describe('the people at a meeting', () => {
+  it('reads the Attendees line, however it is written', async () => {
+    const { attendeeNames } = await import('../src/speakers')
+    expect(attendeeNames('# Meeting\n\nAttendees: Seth, Jesse and Paul\n\n## Notes')).toEqual(['Seth', 'Jesse', 'Paul'])
+    expect(attendeeNames('**Attendees:** Q; Brandon & Seth')).toEqual(['Q', 'Brandon', 'Seth'])
+    expect(attendeeNames('Attendees: ')).toEqual([])
+    expect(attendeeNames('No list here')).toEqual([])
+  })
+})

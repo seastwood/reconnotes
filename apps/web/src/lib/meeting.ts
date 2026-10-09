@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import { createNote, getContent, noteDocName } from '@reconnotes/core'
 import { flushNote } from './ai'
 import { flushUploads } from './attachments'
-import { quickAction } from './appLinks'
+import { Store } from './store'
 import { submitJob } from './jobs'
 import { isSyncConfigured } from './settings'
 import { deviceCanDecode, transcribeOnDevice, useDeviceSpeech } from './speech'
@@ -39,10 +39,91 @@ export async function startMeeting(folderId: string | null): Promise<string> {
     getContent(handle.doc).insert(0, [block('heading', title, { level: 1 }), block('paragraph', 'Attendees: '), block('heading', 'Notes', { level: 2 }), block('paragraph')])
   })
   setTimeout(close, 3000)
-  // the note's recorder starts as soon as it's open
-  quickAction.set({ noteId: id, action: 'meeting' })
+  // the note opens with its setup (who's there, the agenda – all optional), then records
+  meetingSetup.set({ noteId: id })
   return id
 }
+
+/** The meeting note waiting for its setup (shown at the top of it until started or skipped). */
+export const meetingSetup = new Store<{ noteId: string | null }>({ noteId: null })
+/** Start the meeting's recording in this note (the setup's Start button; the note's recorder listens). */
+export const meetingStart = new Store<{ noteId: string | null }>({ noteId: null })
+
+const RECENT = 'reconnotes.recentAttendees'
+/** People from your recent meetings (one tap to add them again). */
+export function recentAttendees(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT) ?? '[]') as unknown
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 24) : []
+  } catch {
+    return []
+  }
+}
+function rememberAttendees(names: string[]) {
+  try {
+    localStorage.setItem(RECENT, JSON.stringify([...new Set([...names, ...recentAttendees()])].slice(0, 24)))
+  } catch {
+    /* private mode */
+  }
+}
+
+const textOf = (el: Y.XmlElement) =>
+  el
+    .toArray()
+    .map((c) => (c instanceof Y.XmlText ? c.toString() : ''))
+    .join('')
+const setText = (el: Y.XmlElement, text: string) => {
+  el.delete(0, el.length)
+  el.insert(0, [new Y.XmlText(text)])
+}
+
+/**
+ * Put the meeting's setup into its note: the name in the title, who's there on the
+ * "Attendees:" line (Whisper spells them right, and the voices get their names), and the
+ * agenda as a list under its own heading (the notes follow its order).
+ */
+export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees: string[]; agenda: string[] }) {
+  const content = getContent(doc)
+  doc.transact(() => {
+    const kids = content.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
+    const title = kids.find((c) => c.nodeName === 'heading')
+    if (setup.title?.trim() && title) setText(title, setup.title.trim())
+    let att = kids.find((c) => c.nodeName === 'paragraph' && /^\s*attendees\s*:/i.test(textOf(c)))
+    if (setup.attendees.length) {
+      if (att) setText(att, `Attendees: ${setup.attendees.join(', ')}`)
+      else {
+        att = block('paragraph', `Attendees: ${setup.attendees.join(', ')}`)
+        content.insert(title ? content.toArray().indexOf(title) + 1 : 0, [att])
+      }
+    }
+    const items = setup.agenda.map((a) => a.trim()).filter(Boolean)
+    if (items.length) {
+      const list = new Y.XmlElement('bulletList')
+      list.insert(
+        0,
+        items.map((t) => {
+          const li = new Y.XmlElement('listItem')
+          li.insert(0, [block('paragraph', t)])
+          return li
+        }),
+      )
+      const after = att ?? title
+      const at = after ? content.toArray().indexOf(after) + 1 : 0
+      content.insert(at, [block('heading', 'Agenda', { level: 2 }), list])
+    }
+  })
+  if (setup.attendees.length) rememberAttendees(setup.attendees)
+}
+
+/** "Seth, Jesse and Paul" → the names. */
+export const splitNames = (text: string) => [
+  ...new Set(
+    text
+      .split(/\s*(?:,|;|\band\b|&|\n)\s*/i)
+      .map((n) => n.trim())
+      .filter(Boolean),
+  ),
+]
 
 /** The meeting's recording is in the note: write the meeting notes (a job). */
 export async function writeMeetingNotes(noteId: string, attachmentId: string, blob: Blob) {

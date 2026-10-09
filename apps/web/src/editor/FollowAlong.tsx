@@ -1,12 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { alignWordTimes, parseWordTimes, spanAt } from '@reconnotes/core'
+import { alignWordTimes, parseWordTimes, spanAt, speakerAt, speakerName, type SpeakerSegment } from '@reconnotes/core'
 
 /**
  * A recording's transcript that follows along as it plays: the word being
  * said is highlighted (and kept in view), and tapping a word plays from there.
  * Needs the word times Whisper gives; without them, plain text.
  */
-export function FollowAlong({ text, timing, player }: { text: string; timing: string | null; player: () => HTMLAudioElement | null }) {
+export function FollowAlong({
+  text,
+  timing,
+  player,
+  speakers,
+  names = {},
+  onSpeaker,
+}: {
+  text: string
+  timing: string | null
+  player: () => HTMLAudioElement | null
+  /** who spoke when (the speaker-label service): a label where each turn starts */
+  speakers?: SpeakerSegment[] | null
+  names?: Record<number, string>
+  /** a speaker's label tapped (to name them) */
+  onSpeaker?: (speaker: number, anchor: HTMLElement) => void
+}) {
   const spans = useMemo(() => {
     const words = parseWordTimes(timing)
     return words?.length ? alignWordTimes(text, words) : []
@@ -68,7 +84,30 @@ export function FollowAlong({ text, timing, player }: { text: string; timing: st
   if (!spans.length) return <div className="audio-transcript">{text}</div>
   const parts: React.ReactNode[] = []
   let at = 0
+  let lastSpeaker: number | null = null
   spans.forEach((s, i) => {
+    // a new speaker's turn: their label, on a new line
+    const who = speakers?.length ? speakerAt(speakers, s.start, s.end) : null
+    if (who !== null && who !== lastSpeaker) {
+      if (lastSpeaker !== null) parts.push(<br key={`br${i}`} />)
+      parts.push(
+        <button
+          key={`sp${i}`}
+          type="button"
+          className={`speaker-label speaker-${who % 6}${names[who] ? ' named' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSpeaker?.(who, e.currentTarget)
+          }}
+          title={names[who] ? `${names[who]} – tap to change` : 'Who is this? Tap to name them'}
+        >
+          {speakerName(names, who)}
+        </button>,
+      )
+      lastSpeaker = who
+      // the turn's own words start the line (not the space before them)
+      if (s.from > at) at = s.from
+    }
     if (s.from > at) parts.push(text.slice(at, s.from))
     parts.push(
       <span

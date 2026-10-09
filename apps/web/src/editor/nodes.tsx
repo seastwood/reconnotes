@@ -5,11 +5,11 @@ import { showToast } from '../lib/toast'
 import { isSyncConfigured } from '../lib/settings'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, TextQuote, Trash2, Users } from 'lucide-react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { getNotes, getTranscripts, newId, readNote, wordsKey, type Stroke } from '@reconnotes/core'
+import { attendeeNames, getNotes, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
@@ -394,6 +394,67 @@ function followPlayhead(el: HTMLAudioElement) {
 }
 
 /**
+ * Name a voice in a recording's transcript: one of the note's attendees, or any name. The names
+ * are kept in the note (every device shows them) and the meeting notes use them when redone.
+ */
+function SpeakerNamer({
+  speaker,
+  anchor,
+  names,
+  doc,
+  attachmentId,
+  onClose,
+}: {
+  speaker: number
+  anchor: HTMLElement
+  names: Record<number, string>
+  doc: Y.Doc
+  attachmentId: string
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLElement | null>(anchor)
+  ref.current = anchor
+  const attendees = useMemo(() => attendeeNames(noteToMarkdown(doc)), [doc])
+  const set = (name: string | null) => {
+    const next: Record<number, string> = { ...names }
+    if (name?.trim()) next[speaker] = name.trim()
+    else delete next[speaker]
+    getTranscripts(doc).set(speakerNamesKey(attachmentId), JSON.stringify(next))
+    onClose()
+  }
+  const taken = new Set(Object.entries(names).filter(([k]) => Number(k) !== speaker).map(([, v]) => v))
+  return (
+    <Popover anchorRef={ref} onClose={onClose}>
+      <div className="menu-label">Who is {speakerName(names, speaker)}?</div>
+      {attendees.map((n) => (
+        <button key={n} className={names[speaker] === n ? 'checked' : ''} onClick={() => set(n)}>
+          <Users size={16} /> {n}
+          {taken.has(n) && <span className="muted"> (another voice too)</span>}
+        </button>
+      ))}
+      {attendees.length > 0 && <div className="menu-sep" />}
+      <button onClick={() => set(window.prompt(`Name ${speakerName(names, speaker)}`, names[speaker] ?? '') ?? names[speaker] ?? null)}>
+        <Pencil size={16} /> Type a name…
+      </button>
+      {names[speaker] && (
+        <button onClick={() => set(null)}>
+          <X size={16} /> Clear the name
+        </button>
+      )}
+    </Popover>
+  )
+}
+
+/** The meeting notes last written from a recording (to redo in place). */
+function useMeetingJob(noteId: string | undefined, attachmentId: string) {
+  return useJobs((s) =>
+    s.jobs
+      .filter((j) => j.kind === 'meeting' && j.noteId === noteId && j.input?.attachmentId === attachmentId && !j.replacedBy && j.status !== 'cancelled')
+      .sort((a, b) => b.createdAt - a.createdAt)[0],
+  )
+}
+
+/**
  * A recording's ⋯ menu: what can be done with it – meeting notes (written, redone, redone from a
  * fresh transcript), its transcript, the file itself, and moving or removing it. Not every
  * recording is a meeting: the meeting items are there for any, the rest work the same.
@@ -424,11 +485,7 @@ function AudioMenu({
   const [open, setOpen] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
   // the meeting notes last written from this recording (to redo in place)
-  const meeting = useJobs((s) =>
-    s.jobs
-      .filter((j) => j.kind === 'meeting' && j.noteId === noteId && j.input?.attachmentId === attachmentId && !j.replacedBy && j.status !== 'cancelled')
-      .sort((a, b) => b.createdAt - a.createdAt)[0],
-  )
+  const meeting = useMeetingJob(noteId, attachmentId)
   const running = meeting && !isFinished(meeting)
   const editable = editor.isEditable
   const act = (f: () => unknown) => () => {
@@ -559,6 +616,13 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const heardBy = useAttachmentText(node.attrs.attachmentId, `by:att:${node.attrs.attachmentId}`)
   // when each word is said (Whisper): the transcript follows along as it plays
   const timing = useAttachmentText(node.attrs.attachmentId, `timing:att:${node.attrs.attachmentId}`)
+  // who spoke when, and the names you gave the voices
+  const speakerText = useAttachmentText(node.attrs.attachmentId, speakersKey(node.attrs.attachmentId))
+  const namesText = useAttachmentText(node.attrs.attachmentId, speakerNamesKey(node.attrs.attachmentId))
+  const speakers = useMemo(() => parseSpeakers(speakerText), [speakerText])
+  const names = useMemo(() => parseSpeakerNames(namesText), [namesText])
+  const [naming, setNaming] = useState<{ speaker: number; anchor: HTMLElement } | null>(null)
+  const meetingJob = useMeetingJob(ctx?.noteId, node.attrs.attachmentId)
   const playerRef = useRef<HTMLAudioElement | null>(null)
   const player = useCallback(() => playerRef.current, [])
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null)
@@ -687,12 +751,40 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       {open && transcript && (
         <>
           {heardBy && <div className="audio-transcript-by">Transcribed by {heardBy}</div>}
+          {speakers && timing && (
+            <div className="audio-transcript-by">
+              {new Set(speakers.map((x) => x.speaker)).size} voices · tap a speaker to name them
+              {Object.keys(names).length > 0 && meetingJob && isFinished(meetingJob) && (
+                <>
+                  {' · '}
+                  <button
+                    className="link"
+                    onClick={() =>
+                      void redoJob(meetingJob.id).then(() => showToast('Rewriting the meeting notes with the names – what you changed in them stays (see Jobs)'))
+                    }
+                  >
+                    Redo the notes with the names
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {naming && ctx && (
+            <SpeakerNamer
+              speaker={naming.speaker}
+              anchor={naming.anchor}
+              names={names}
+              doc={ctx.doc}
+              attachmentId={node.attrs.attachmentId}
+              onClose={() => setNaming(null)}
+            />
+          )}
           {findQuery.trim() ? (
             <div className="audio-transcript" ref={findBox}>
               {highlight(transcript, findQuery)}
             </div>
           ) : (
-            <FollowAlong text={transcript} timing={timing} player={player} />
+            <FollowAlong text={transcript} timing={timing} player={player} speakers={speakers} names={names} onSpeaker={(speaker, anchor) => setNaming({ speaker, anchor })} />
           )}
           <div className="audio-transcript-actions">
             <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>

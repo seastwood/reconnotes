@@ -30,7 +30,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, transcribedBy, wordTimes } from './attachments'
+import { attendeesFor, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
@@ -332,7 +332,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     let times: { word: string; start: number; end: number }[] | undefined
     if (ai.agents.available('audio') && !onDevice) {
       if (!store.hasBlob(att.id)) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
-      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
+      const people = attendeesFor(store, sync, att.id)
+      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, people)
+      setHeardWith(store, att.id, people)
       text = r.text
       by = r.agent
       times = r.words
@@ -577,7 +579,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
     const savedBy = att ? transcribedBy(store, att.id) : null
     // already read by the server's speech-to-text: that – not the phone's reading, nor one nobody knows the source of
-    if (!fresh && serverHears && saved && savedBy && savedBy !== APPLE_SPEECH) (transcript = saved), (agent = savedBy)
+    // …unless it was read without the names of the people there, which were written down since
+    const knewNames = !att || attendees.every((n) => heardWith(store, att.id).includes(n))
+    if (!fresh && knewNames && serverHears && saved && savedBy && savedBy !== APPLE_SPEECH) (transcript = saved), (agent = savedBy)
     else if (serverHears && att && store.hasBlob(att.id)) {
       reportProgress('Transcribing the recording…')
       try {
@@ -585,6 +589,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         transcript = r.text
         agent = r.agent
         times = r.words
+        setHeardWith(store, att.id, attendees)
       } catch (e) {
         if (!onDevice && !saved) throw e
         // the phone's reading instead – and the job says why

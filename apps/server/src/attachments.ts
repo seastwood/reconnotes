@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { encodeWordTimes, encodeSpeakers, parseSpeakers, type SpeakerSegment } from '@reconnotes/core'
+import { attendeeNames, encodeWordTimes, encodeSpeakers, noteDocName, noteToMarkdown, parseSpeakers, type SpeakerSegment } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
@@ -31,7 +31,10 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
     else if (isAiImage(att.mime)) text = await ai.imageText(data, att.mime)
     else if (att.mime === 'application/pdf') text = await ai.pdfText(data)
     else {
-      const r = await ai.transcribeAudio(data, att.mime, att.name)
+      // the people on its note's "Attendees:" line: Whisper spells them right
+      const people = attendeesFor(store, sync, att.id)
+      const r = await ai.transcribeAudio(data, att.mime, att.name, people)
+      setHeardWith(store, att.id, people)
       text = r.text
       setTranscribedBy(store, att.id, r.agent)
       setWordTimes(store, att.id, r.words)
@@ -121,4 +124,26 @@ export function setSpeakers(store: Store, attachmentId: string, segments: Speake
 }
 export function speakerSegments(store: Store, attachmentId: string): SpeakerSegment[] | null {
   return parseSpeakers(store.getSetting<string | null>(`speakers:${attachmentId}`) ?? null)
+}
+
+/** The people listed on the "Attendees:" line of the note(s) a recording is in. */
+export function attendeesFor(store: Store, sync: SyncEngine, attachmentId: string): string[] {
+  const out = new Set<string>()
+  for (const noteId of store.notesReferencing(attachmentId)) {
+    const doc = sync.getDoc(noteDocName(noteId))
+    if (doc) for (const n of attendeeNames(noteToMarkdown(doc))) out.add(n)
+  }
+  return [...out]
+}
+
+/**
+ * The names Whisper was given as a hint when it last read a recording. A meeting whose
+ * attendees it didn't know (read in the background before they were written down) reads
+ * it again with them.
+ */
+export function setHeardWith(store: Store, attachmentId: string, names: string[]) {
+  store.setSetting(`heardWith:${attachmentId}`, names.length ? names : null)
+}
+export function heardWith(store: Store, attachmentId: string): string[] {
+  return store.getSetting<string[] | null>(`heardWith:${attachmentId}`) ?? []
 }

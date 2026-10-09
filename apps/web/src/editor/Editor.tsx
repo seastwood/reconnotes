@@ -30,6 +30,9 @@ import { FindInNote } from './find'
 import { FindBar } from './FindBar'
 import { Hashtags } from './hashtags'
 import { CodeCopy } from './codeCopy'
+import { MeetingSetup } from './MeetingSetup'
+import { useStore } from '../lib/store'
+import { meetingSetup } from '../lib/meeting'
 import { ListenButtons } from './listenButtons'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
@@ -282,6 +285,8 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
   }
 
   const isEmpty = useEditorState({ editor, selector: (s) => s.editor?.isEmpty ?? true })
+  // a new meeting: its setup first (who's there, the agenda), then it records
+  const settingUp = useStore(meetingSetup, (m) => m.noteId === noteId)
 
   if (!editor) return null
   return (
@@ -304,6 +309,14 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
+            {settingUp && (
+              <MeetingSetup
+                noteId={noteId}
+                doc={doc}
+                title={editor.state.doc.firstChild?.textContent ?? ''}
+                onStart={() => setTimeout(() => editor.commands.setTextSelection(editor.state.doc.content.size - 1), 0)}
+              />
+            )}
             {/* The blank space below the text is part of the editable area (padding),
                 so writing there with Scribble or tapping there behaves like the text. */}
             <EditorContent editor={editor} className={isEmpty ? 'is-empty' : ''} />

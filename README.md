@@ -260,6 +260,12 @@ talked about in the recording (found by the words the point and the transcript s
 the word times Whisper gives). While a recording plays, a slim player stays under the toolbar once
 its own player scrolls out of view, and the transcript scrolls in its own box.
 
+**New meeting** opens the meeting's note with an optional setup first: its name, who's there (people
+from recent meetings are a tap away) and the agenda – then **Start recording** (or **Just record**).
+The names are Whisper's spelling hint; the notes follow the agenda. With the speaker service
+(`deploy/diarize.py`, see the Speaches setup guide, step 13) the transcript is told apart by voice:
+each turn is labelled, you name the voices with a tap, and the meeting notes say who said what.
+
 A self-hosted Whisper server next to ReconNotes. Without Docker (e.g. in an LXC container), follow
 [`docs/setup/Speech to text with Speaches.md`](docs/setup/Speech%20to%20text%20with%20Speaches.md),
 which includes fixes for the usual GPU-library problems. With Docker (uses the GPU if Docker has access to it):
