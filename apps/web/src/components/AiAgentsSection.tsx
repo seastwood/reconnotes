@@ -497,6 +497,15 @@ function AgentForm({ agent, onCancel, onSaved }: { agent?: Agent; onCancel: () =
           </span>
         </label>
       )}
+      {kind === 'ollama' && (
+        <label className="check">
+          <input type="checkbox" checked={Boolean(form.think)} onChange={(e) => set({ think: e.target.checked })} /> Let it think before answering
+          <span className="hint">
+            For thinking models (qwen3, deepseek-r1…): it reasons first, so it answers questions about rules and manuals more carefully – but
+            each answer takes longer. Best on an agent you use only for “Ask your notes”.
+          </span>
+        </label>
+      )}
       {kind === 'anthropic' && (
         <label>
           Thinking effort

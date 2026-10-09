@@ -17,6 +17,8 @@ export interface Agent {
   timeoutSec: number
   prompt: string
   effort: 'low' | 'medium' | 'high'
+  /** Ollama thinking models: let it reason before answering */
+  think?: boolean
   reading: ReadingMode
   /** Claude: stop using it once it has cost this much this month (US$); 0 = no limit */
   monthlyLimitUsd?: number

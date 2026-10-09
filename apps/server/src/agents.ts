@@ -51,6 +51,8 @@ export interface AgentConfig {
   reading: ReadingMode
   /** Claude only: stop using this agent once it has cost this much (US$) this month; 0 = no limit */
   monthlyLimitUsd?: number
+  /** Ollama thinking models: let it reason before answering (better answers, slower) */
+  think?: boolean
 }
 
 /** Resolve "auto": Claude reads whole pages well; other (often OCR) models do better line by line. */
@@ -267,6 +269,8 @@ const ollamaInfo = new Map<string, { at: number; info: Promise<OllamaModelInfo> 
 
 /** Room for a thinking model's reasoning, on top of its answer. */
 const THINK_ROOM = 6144
+/** how much it may think when "Let it think" is on (a small GPU writes ~30 tokens a second) */
+const THINK_ROOM_ASKED = 3072
 
 /** Thinking was cut off by the token limit (in the thinking field, or an unclosed <think> in the text). */
 const ranOutThinking = (r: OllamaReply) =>
@@ -457,6 +461,16 @@ class OllamaBackend implements Backend {
     // Qwen's "/no_think" switch, which some models honour instead of think:false
     const noThinkText = `${text}\n\n/no_think`
 
+    if (info.thinking && this.agent.think) {
+      // asked to think ("Let it think"): reason first, with room for it – a bounded amount, so a
+      // small model that would think forever still gets to answer (below, without thinking)
+      const roomy = limit + THINK_ROOM_ASKED
+      const thought = await attempt('chat with thinking', () => this.chat(text, images, roomy, ctxFor(roomy), true)).catch((e) => {
+        tried.push(`chat with thinking: ${(e as Error).message}`)
+        return null
+      })
+      if (thought !== null) return thought
+    }
     if (info.thinking) {
       // 1. thinking models: these jobs don't need reasoning – ask for the answer straight away
       const quick = await attempt('chat without thinking', () => this.chat(noThinkText, images, limit, ctxFor(limit), false))
@@ -888,7 +902,9 @@ export async function probeAgent(agent: AgentConfig): Promise<ProbeResult> {
         const info = (await show.json()) as { capabilities?: string[] }
         if (info.capabilities?.includes('thinking'))
           warnings.push(
-            `"${agent.model}" is a thinking model. ReconNotes asks it to answer without thinking, and gives it extra room when it thinks anyway – but that is slower, and small thinking models sometimes never finish. If it does, use a version that doesn't think (often tagged "instruct", e.g. ${suggestInstruct(agent.model)}).`,
+            agent.think
+              ? `"${agent.model}" is a thinking model, and "Let it think" is on: it reasons before each answer – better answers to questions about rules and manuals, but each takes longer (a minute or more on a small GPU). If it thinks too long, it answers without thinking instead.`
+              : `"${agent.model}" is a thinking model. ReconNotes asks it to answer without thinking (faster), and gives it extra room when it thinks anyway. Turn on "Let it think" for better reasoning – worth it for "Ask your notes", slower for everything else.`,
           )
         if (info.capabilities && !info.capabilities.includes('vision') && agent.vision)
           warnings.push(`Ollama reports that "${agent.model}" can't read images, so it won't work for handwriting or images. Turn off "Reads images" or pick a vision model.`)
@@ -1190,6 +1206,7 @@ function withDefaults(a: Partial<AgentConfig>): AgentConfig {
     effort: effortOf(a.effort ?? 'medium'),
     reading: a.reading === 'page' || a.reading === 'lines' ? a.reading : 'auto',
     monthlyLimitUsd: Number(a.monthlyLimitUsd) > 0 ? Number(a.monthlyLimitUsd) : 0,
+    think: kind === 'ollama' && a.think === true,
   }
 }
 
@@ -1226,6 +1243,7 @@ export function validateAgent(input: Partial<AgentConfig>): AgentConfig {
   a.enabled = Boolean(a.enabled)
   a.vision = Boolean(a.vision)
   a.monthlyLimitUsd = Math.max(0, Math.min(100000, Number(a.monthlyLimitUsd) || 0))
+  a.think = a.kind === 'ollama' && Boolean(a.think)
   return a
 }
 
