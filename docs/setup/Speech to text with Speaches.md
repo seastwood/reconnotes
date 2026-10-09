@@ -643,9 +643,45 @@ ReconNotes looks for it on port 9402 at your speech-to-text agent's address, so 
 - **The transcript** under a recording shows a coloured label where each speaker starts. Tap a label to say who it is: the attendees are one tap away, or type a name. Then **Redo the notes with the names** under the transcript rewrites the meeting notes with them.
 - **Transcribe** on any recording labels its speakers too.
 
-How alike two voices must be to count as one person is a setting in ReconNotes: **Settings → AI agents → Speaker labels**. If it finds more voices than there were people (one person counted twice), move it toward **Fewer voices**; if it merges two people into one, toward **More voices**. A recording is labelled again with the new setting the next time you redo its meeting notes (⋯ → Redo meeting notes). Listing the attendees also fixes the first case on its own.
+### Too many or too few speakers
 
-Already running an older copy of the script? Copy the new one over it and `systemctl restart diarize` – the old one ignores the setting and uses `DIARIZE_THRESHOLD` from its service file (0.9 if that isn't set).
+The **threshold** decides how alike two stretches of speech must be to count as one person. It's 0.9 to start.
+
+- One person shown as two speakers → raise it (0.93, then 0.95).
+- Two people merged into one → lower it (0.85, then 0.8).
+
+Listing the attendees when you start a meeting also stops one person being counted twice.
+
+**Option A – in ReconNotes (easiest).** **Settings → AI agents → Speaker labels**: move the slider toward **Fewer voices** (higher) or **More voices** (lower). This needs the current `diarize.py` – if you set it up before the slider existed, copy the new script over the old one (as above) and `systemctl restart diarize` once. Once the new script is in, the slider always wins over Option B.
+
+**Option B – on the Speaches machine.** No need to find the service file – `systemctl edit` opens an empty override for it:
+
+```bash
+systemctl edit diarize
+```
+
+In the editor that opens, type these two lines in the blank space near the top (between the comment lines), then save and exit (nano: Ctrl+O, Enter, Ctrl+X):
+
+```ini
+[Service]
+Environment=DIARIZE_THRESHOLD=0.95
+```
+
+Restart it and check the new value:
+
+```bash
+systemctl restart diarize
+curl -s http://localhost:9402/
+```
+
+It should answer `{"ok": true, "threshold": 0.95}`. To go back to 0.9, run `systemctl revert diarize && systemctl restart diarize`.
+
+Recordings that already have labels keep them until you redo them:
+
+- After Option A: ⋯ → **Redo meeting notes** tells the voices apart again with the new setting.
+- After Option B: ReconNotes can't tell the service changed, so use ⋯ → **Redo from a fresh transcript** (it transcribes again too, so it takes longer).
+
+Check the names you gave the voices afterwards: a different split can number them differently.
 
 ## Updating Speaches
 
