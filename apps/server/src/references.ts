@@ -184,10 +184,26 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   }
 
   // 3. rules it uses without saying them, and the notes that do
-  const all = [...new Set([...md.matchAll(RULE_ID)].map((m) => m[0]))]
-  // rule families the note itself writes rules in (R, G…): not model numbers like "NEO550"
+  // not part numbers: "P/N R07-100-RNEA", "Rev R0062-B"
+  const said = [...md.matchAll(RULE_ID)].filter((m) => {
+    const before = md.slice(Math.max(0, m.index! - 24), m.index)
+    const after = md.slice(m.index! + m[0].length, m.index! + m[0].length + 2)
+    return !/^[-–/][A-Za-z0-9]/.test(after) && !/[-–/][A-Za-z0-9]*$/.test(before) && !/\b(P\/?N|part|model|SKU|item|cat(alog)?)\b[\s.#:no]*$/i.test(before)
+  })
+  const all = [...new Set(said.map((m) => m[0]))]
+  // the rules the note itself writes (R12, G301): their letters and how many digits – "NEO550" isn't one
+  const shape = (r: string) => `${r.replace(/\d+$/, '')}${r.match(/\d+$/)![0].length}`
   const families = new Set(all.filter((r) => definesRule(md, r)).map((r) => r.replace(/\d+$/, '')))
-  const used = all.filter((r) => !definesRule(md, r))
+  const shapes = new Set(all.filter((r) => definesRule(md, r)).map(shape))
+  // a rule numbered unlike the note's own ones counts only where it's cited as a rule ("per R402", "R402 of the …", "(R402)")
+  const cited = (r: string) =>
+    said.some((m) => {
+      if (m[0] !== r) return false
+      const before = md.slice(Math.max(0, m.index! - 30), m.index)
+      const after = md.slice(m.index! + r.length, m.index! + r.length + 12)
+      return /\b(rules?|per|see|under|violat\w*|in|of|by|with|and|or)\s+$/i.test(before) || /\(\s*$/.test(before) || /^\s*(of|in)\s/i.test(after) || /^\s*\)/.test(after)
+    })
+  const used = all.filter((r) => !definesRule(md, r) && (shapes.has(shape(r)) || cited(r)))
   const texts = new Map<string, string>()
   const textOf = (id: string) => {
     if (!texts.has(id)) {
@@ -202,7 +218,7 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
       .map((h) => h.noteId)
       .filter((n) => n !== noteId && meta.get(n) && !meta.get(n)!.trashedAt)
     return { id, definedIn: hits.filter((n) => definesRule(textOf(n), id)).map((n) => ({ noteId: n, title: titleOf(n) })) }
-  }).filter((r) => r.definedIn.length || families.has(r.id.replace(/\d+$/, '')))
+  }).filter((r) => r.definedIn.length || shapes.has(shape(r.id)) || (families.has(r.id.replace(/\d+$/, '')) && cited(r.id)))
 
   // where the note points to each note it refers to: the document's name, else the first rule it uses from it
   const mentions: Record<string, string> = {}

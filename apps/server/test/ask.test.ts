@@ -701,6 +701,13 @@ describe('what a note refers to', () => {
     expect(findReferences(app.store, app.sync, 'refsmain000001').suggestions).toEqual([])
     // and where the note points to it, to go there
     expect(findReferences(app.store, app.sync, 'refsmain000001').mentions.refsfrc0000001).toBe('FRC 2025 Game Manual')
+    // a part number isn't a rule: the game manual doesn't refer to the trials manual for "R01"
+    await app.sync.change(noteDocName('refsfrc0000001'), (doc) =>
+      void getContent(doc).insert(getContent(doc).length, markdownToNodes('Examples include Norgren regulator P/N R01-100-RNEA and Rev R0062.', { attach: () => null, noteFor: () => null })),
+    )
+    const back = findReferences(app.store, app.sync, 'refsfrc0000001')
+    expect(back.suggestions.map((sg) => sg.noteId)).not.toContain('refsmain000001')
+    expect(back.missingRules).toEqual([])
   })
 
   it('looks through a Google redirect, and does not suggest the note itself', async () => {
