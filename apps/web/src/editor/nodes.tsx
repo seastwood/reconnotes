@@ -345,21 +345,6 @@ async function copyText(text: string) {
   }
 }
 
-/** The transcript with the words being searched for (⌘F) marked. */
-function highlight(text: string, query: string) {
-  const q = query.trim().toLocaleLowerCase()
-  if (!q) return text
-  const out: (string | React.ReactElement)[] = []
-  const lower = text.toLocaleLowerCase()
-  let i = 0
-  for (let at = lower.indexOf(q); at >= 0; at = lower.indexOf(q, at + q.length)) {
-    out.push(text.slice(i, at), <mark key={at} className="find-match current">{text.slice(at, at + q.length)}</mark>)
-    i = at + q.length
-  }
-  out.push(text.slice(i))
-  return out
-}
-
 /** Is there writing in this note from while the recording was made? */
 function useLinkedInk(startedAt: number | null, endedAt: number | null): boolean {
   const ctx = useContext(NoteContext)
@@ -636,7 +621,6 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     [attachmentId],
   )
   // Find landed in the transcript: its match in view inside the transcript's own scroll area
-  const findBox = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
@@ -657,11 +641,6 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     if (findHere) setOpen(true)
   }, [findHere])
   const findQuery = useEditorState({ editor, selector: ({ editor: e }) => (e ? (findKey.getState(e.state)?.query ?? '') : '') })
-  useEffect(() => {
-    const box = findBox.current
-    const mark = box?.querySelector<HTMLElement>('mark')
-    if (box && mark) box.scrollTop = mark.offsetTop - box.offsetTop - box.clientHeight / 3
-  }, [findQuery, findHere, open])
   const [error, setError] = useState<string | null>(null)
   const transcribe = async () => {
     if (busy) return
@@ -779,13 +758,15 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
               onClose={() => setNaming(null)}
             />
           )}
-          {findQuery.trim() ? (
-            <div className="audio-transcript" ref={findBox}>
-              {highlight(transcript, findQuery)}
-            </div>
-          ) : (
-            <FollowAlong text={transcript} timing={timing} player={player} speakers={speakers} names={names} onSpeaker={(speaker, anchor) => setNaming({ speaker, anchor })} />
-          )}
+          <FollowAlong
+            text={transcript}
+            timing={timing}
+            player={player}
+            speakers={speakers}
+            names={names}
+            onSpeaker={(speaker, anchor) => setNaming({ speaker, anchor })}
+            query={findQuery}
+          />
           <div className="audio-transcript-actions">
             <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>
               <Copy size={14} /> {copied ?? 'Copy'}

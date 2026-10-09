@@ -33,6 +33,8 @@ export interface AiSettings {
   autoHandwriting: boolean
   autoImageText: boolean
   autoAudio: boolean
+  /** speaker labels: how alike two voices must be to count as one person (0.5–1) */
+  speakerThreshold: number
 }
 
 export interface AgentsState {

@@ -118,7 +118,14 @@ export interface AiSettings {
   autoImageText: boolean
   /** transcribe new recordings and audio files in the background (for search) */
   autoAudio: boolean
+  /**
+   * Speaker labels: how alike two stretches of speech must be to count as one person
+   * (0.5–1). Higher: fewer voices; lower: more.
+   */
+  speakerThreshold: number
 }
+
+export const SPEAKER_THRESHOLD = 0.9
 
 /**
  * Set while a caller wants the reply as it's written (e.g. "Ask your notes"):
@@ -1274,7 +1281,7 @@ export class AgentRegistry {
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
     const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ask: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
-    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true }
+    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true, speakerThreshold: s.speakerThreshold ?? SPEAKER_THRESHOLD }
   }
 
   get(id: string): AgentConfig | undefined {
@@ -1328,6 +1335,8 @@ export class AgentRegistry {
     if (typeof patch.autoHandwriting === 'boolean') s.autoHandwriting = patch.autoHandwriting
     if (typeof patch.autoImageText === 'boolean') s.autoImageText = patch.autoImageText
     if (typeof patch.autoAudio === 'boolean') s.autoAudio = patch.autoAudio
+    if (typeof patch.speakerThreshold === 'number' && Number.isFinite(patch.speakerThreshold))
+      s.speakerThreshold = Math.round(Math.min(1, Math.max(0.5, patch.speakerThreshold)) * 100) / 100
     this.store.setSetting(SETTINGS_KEY, s)
     return s
   }

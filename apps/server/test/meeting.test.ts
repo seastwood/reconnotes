@@ -504,7 +504,7 @@ describe('who said what', () => {
       expect(done.error ?? done.status).toBe('done')
       // the attendees: Whisper's hint, and at most three voices
       expect(hint.startsWith('Seth, Jesse, Charlie')).toBe(true)
-      expect(asked).toBe('/diarize?speakers=3')
+      expect(asked).toBe('/diarize?speakers=3&threshold=0.9')
       expect(done.result.voices).toBe(2)
       // the model read it as turns
       expect(prompts[0]).toContain('Speaker 1: Jesse, is the sample testing a code requirement?\nSpeaker 2: I think so, every twenty years. Then Charlie\nSpeaker 1: looks into it.')
@@ -523,6 +523,22 @@ describe('who said what', () => {
       expect((await api('GET', `/api/jobs/${again.id}/wait`)).job.status).toBe('done')
       expect(asked).toBe('')
       expect(prompts[0]).toContain('Seth: Jesse, is the sample testing a code requirement?\nJesse: I think so')
+
+      // the speaker-label setting changed: the next redo tells the voices apart again, with it
+      app.ai.agents.updateSettings({ speakerThreshold: 0.95 })
+      expect(app.ai.agents.settings().speakerThreshold).toBe(0.95)
+      const third = (await fetch(`${base}/api/jobs/${again.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${third.id}/wait`)).job.status).toBe('done')
+      expect(asked).toBe('/diarize?speakers=3&threshold=0.95')
+      // …and not again after that
+      asked = ''
+      const fourth = (await fetch(`${base}/api/jobs/${third.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${fourth.id}/wait`)).job.status).toBe('done')
+      expect(asked).toBe('')
+      // out of range: kept within 0.5–1
+      app.ai.agents.updateSettings({ speakerThreshold: 3 })
+      expect(app.ai.agents.settings().speakerThreshold).toBe(1)
+      app.ai.agents.updateSettings({ speakerThreshold: 0.9 })
     } finally {
       whisper.close()
       diarizer.close()

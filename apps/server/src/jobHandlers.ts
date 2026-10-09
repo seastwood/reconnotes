@@ -30,12 +30,12 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { attendeesFor, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, transcribedBy, wordTimes } from './attachments'
+import { attendeesFor, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
-import type { AiTask } from './agents'
+import { SPEAKER_THRESHOLD, type AiTask } from './agents'
 import { guessedWords } from './vocabulary'
 import { dueDateIn, todayLabel } from './timeRange'
 import { scopeFromInput } from './access'
@@ -233,19 +233,26 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   /**
    * A recording's turns by voice: kept from before, or asked of the speaker-label service
-   * (deploy/diarize.py) – for a new reading of it always, since its words have new times.
+   * (deploy/diarize.py) – for a new reading of it always, since its words have new times, and
+   * when the speaker-label setting changed since they were told apart.
    * None when there's no service: the transcript is then just without speakers.
    */
   const speakerTurnsFor = async (att: { id: string; mime: string }, words: { word: string; start: number; end: number }[], newReading: boolean, most: number) => {
-    let segments = newReading ? null : speakerSegments(store, att.id)
+    const threshold = ai.agents.settings().speakerThreshold
+    const was = speakersThreshold(store, att.id)
+    const kept = newReading ? null : speakerSegments(store, att.id)
+    // (voices told apart before the setting existed were at its default)
+    let segments = kept && (was ?? SPEAKER_THRESHOLD) === threshold ? kept : null
     if (!segments) {
       const speech = ai.agents.chain('audio').find((a) => a.kind === 'openai' && a.enabled)
       if (speech && store.hasBlob(att.id) && (await diarizeAvailable(speech.baseUrl))) {
         reportProgress('Telling the voices apart…')
-        segments = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most)
+        segments = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most, threshold)
       }
-      if (segments || newReading) {
-        setSpeakers(store, att.id, segments)
+      // the service couldn't be asked again: the voices as they were
+      if (!segments && kept && !newReading) segments = kept
+      else if (segments || newReading) {
+        setSpeakers(store, att.id, segments, threshold)
         sync.reindexNotesFor(att.id)
       }
     }

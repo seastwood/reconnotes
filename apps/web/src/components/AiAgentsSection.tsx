@@ -240,12 +240,55 @@ export function AiAgentsSection() {
             />
             Transcribe new recordings and audio files for search (needs an “Audio to text” agent)
           </label>
+          <SpeakerLabelsSetting value={state.settings.speakerThreshold ?? 0.9} onSave={(v) => void apply(agentsApi.updateSettings({ speakerThreshold: v }))} />
           <RereadButton />
           <VocabularySection />
           <TestBenchSection />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * How readily the speaker-label service (deploy/diarize.py) counts two stretches of speech as
+ * different people. Saved a moment after you stop moving it.
+ */
+function SpeakerLabelsSetting({ value, onSave }: { value: number; onSave: (v: number) => void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  useEffect(() => {
+    if (draft === value) return
+    const t = setTimeout(() => onSave(draft), 600)
+    return () => clearTimeout(t)
+  }, [draft, value, onSave])
+  return (
+    <>
+      <h3>Speaker labels</h3>
+      <div className="speaker-threshold">
+        <span className="muted">More voices</span>
+        <input
+          type="range"
+          min={0.7}
+          max={1}
+          step={0.01}
+          value={draft}
+          onChange={(e) => setDraft(Number(e.target.value))}
+          aria-label="How alike two voices must be to count as one person"
+        />
+        <span className="muted">Fewer voices</span>
+        <b>{draft.toFixed(2)}</b>
+        {draft !== 0.9 && (
+          <button className="text" onClick={() => setDraft(0.9)}>
+            Default
+          </button>
+        )}
+      </div>
+      <p className="hint">
+        For the speaker-label service: how alike two voices must be to count as one person (0.90 by default). One person shown as two speakers? Move it toward Fewer
+        voices. Two people merged into one? Toward More voices. A recording gets new labels the next time you redo its meeting notes.
+      </p>
+    </>
   )
 }
 

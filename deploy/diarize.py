@@ -14,8 +14,11 @@ TitaNet voice model, downloaded once on first start.
 
     python3 diarize.py            # serves http://0.0.0.0:9402/
 
-    POST /diarize?speakers=N      the recording (any format ffmpeg reads) as the body;
-                                  N (optional): at most this many people spoke
+    POST /diarize?speakers=N&threshold=T
+                                  the recording (any format ffmpeg reads) as the body;
+                                  N (optional): at most this many people spoke;
+                                  T (optional): how alike voices must be to count as one
+                                  person, 0.5–1 (ReconNotes sends its setting; else DIARIZE_THRESHOLD)
     -> {"segments": [{"start": 0.32, "end": 6.87, "speaker": 0}, ...], "speakers": 3}
 
 ReconNotes looks for it on port 9402 of the speech-to-text server's address.
@@ -60,14 +63,14 @@ def fetch_models():
         urllib.request.urlretrieve(f"{RELEASES}/speaker-recongition-models/nemo_en_titanet_small.onnx", EMBEDDING)
 
 
-def diarizer(clusters=-1):
+def diarizer(clusters=-1, threshold=THRESHOLD):
     cfg = sherpa_onnx.OfflineSpeakerDiarizationConfig(
         segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
             pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=SEGMENTATION),
             num_threads=THREADS,
         ),
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=EMBEDDING, num_threads=THREADS),
-        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=clusters, threshold=THRESHOLD),
+        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=clusters, threshold=threshold),
         min_duration_on=0.3,
         min_duration_off=0.5,
     )
@@ -114,14 +117,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.answer(404, {"error": "POST /diarize"})
         try:
             data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-            most = int(urllib.parse.parse_qs(url.query).get("speakers", ["0"])[0] or 0)
+            query = urllib.parse.parse_qs(url.query)
+            most = int(query.get("speakers", ["0"])[0] or 0)
+            threshold = min(1.0, max(0.5, float(query.get("threshold", [THRESHOLD])[0] or THRESHOLD)))
             with lock:  # one recording at a time: it uses every CPU core it's given
-                sd = diarizer()
+                sd = diarizer(threshold=threshold)
                 samples = decode(data, sd.sample_rate)
                 found = segments(sd, samples)
                 # more voices than people there: grouped again into that many
                 if most > 0 and len({s["speaker"] for s in found}) > most:
-                    found = segments(diarizer(most), samples)
+                    found = segments(diarizer(most, threshold), samples)
             # speakers numbered in the order they first speak
             order = {}
             for s in found:

@@ -1953,6 +1953,8 @@ button.link {
 }
 .find-block.find-match.current {
   background: none;
+  /* a whole block (a recording, a picture) keeps its own colours: only the matched words are dark-on-yellow */
+  color: inherit;
   outline-color: var(--accent);
 }
 /* matching words inside handwriting and pictures */
@@ -5066,6 +5068,12 @@ a.button {
   border-radius: 3px;
   cursor: pointer;
 }
+.audio-transcript mark.find-match {
+  color: inherit;
+}
+.audio-transcript mark.find-match.current {
+  color: #1a1a1a;
+}
 .audio-transcript.timed .timed-word.spoken {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--text);
@@ -5197,4 +5205,17 @@ a.button {
   border-color: var(--accent);
   color: #1c1c1e;
   font-weight: 600;
+}
+
+/* Settings → AI agents: the speaker-label slider */
+.speaker-threshold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.speaker-threshold input[type='range'] {
+  flex: 1;
+  min-width: 120px;
 }

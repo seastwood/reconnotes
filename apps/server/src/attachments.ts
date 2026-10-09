@@ -119,8 +119,14 @@ export function wordTimes(store: Store, attachmentId: string): string | null {
  * the note so every device can show who spoke. A new reading of the recording (other word
  * times) clears them – they're made again with it.
  */
-export function setSpeakers(store: Store, attachmentId: string, segments: SpeakerSegment[] | null) {
+/** `threshold`: how alike voices had to be to count as one person when they were told apart */
+export function setSpeakers(store: Store, attachmentId: string, segments: SpeakerSegment[] | null, threshold?: number) {
   store.setSetting(`speakers:${attachmentId}`, segments?.length ? encodeSpeakers(segments) : null)
+  store.setSetting(`speakersAt:${attachmentId}`, segments?.length && threshold !== undefined ? threshold : null)
+}
+/** The threshold a recording's voices were told apart with (null: not known – kept as it is). */
+export function speakersThreshold(store: Store, attachmentId: string): number | null {
+  return store.getSetting<number | null>(`speakersAt:${attachmentId}`) ?? null
 }
 export function speakerSegments(store: Store, attachmentId: string): SpeakerSegment[] | null {
   return parseSpeakers(store.getSetting<string | null>(`speakers:${attachmentId}`) ?? null)
