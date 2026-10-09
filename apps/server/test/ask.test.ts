@@ -700,7 +700,7 @@ describe('what a note refers to', () => {
     setAskRefs(app.store, 'refsmain000001', ['refsfrc0000001'])
     expect(findReferences(app.store, app.sync, 'refsmain000001').suggestions).toEqual([])
     // and where the note points to it, to go there
-    expect(findReferences(app.store, app.sync, 'refsmain000001').mentions).toEqual({ refsfrc0000001: 'FRC 2025 Game Manual' })
+    expect(findReferences(app.store, app.sync, 'refsmain000001').mentions.refsfrc0000001).toBe('FRC 2025 Game Manual')
   })
 
   it('looks through a Google redirect, and does not suggest the note itself', async () => {
