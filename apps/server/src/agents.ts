@@ -3,7 +3,7 @@ import { newId } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { log } from './log'
-import { jobSignal, reportAgent, timeoutSignal } from './jobs'
+import { jobSignal, reportAgent, reportProgress, timeoutSignal } from './jobs'
 import { parseWyomingUri, toPcm, wyomingDescribe, wyomingTranscribe } from './wyoming'
 import { spawn } from 'node:child_process'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -465,6 +465,7 @@ class OllamaBackend implements Backend {
       // asked to think ("Let it think"): reason first, with room for it – a bounded amount, so a
       // small model that would think forever still gets to answer (below, without thinking)
       const roomy = limit + THINK_ROOM_ASKED
+      reportProgress(`${this.agent.name} is thinking it through…`)
       const thought = await attempt('chat with thinking', () => this.chat(text, images, roomy, ctxFor(roomy), true)).catch((e) => {
         tried.push(`chat with thinking: ${(e as Error).message}`)
         return null

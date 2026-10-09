@@ -353,7 +353,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
       if (!NOT_FOUND.test(again.text)) ({ text: raw, agent } = again)
     }
   }
-  let text = listify(raw)
+  // the AI's own list of citations at the end ("Citations: 1 R401…"): the sources are listed under the answer already
+  let text = listify(raw).replace(/\n+\s*(?:\*\*)?(?:citations|sources|references)(?:\*\*)?:?(?:\*\*)?\s*\n(?:\s*(?:[-*]\s*)?\[?\d+\]?[.):]?\s[^\n]*\n?)+\s*$/i, '')
   // the list items of the note sections the question is about, that the answer left out
   // (a yes/no question isn't asking for a list)
   const yesNo = /^\s*(?:can|could|is|are|was|were|does|do|did|should|may|must|will|would|has|have)\b/i.test(question)
@@ -451,7 +452,11 @@ function sentenceEnds(t: string): number[] {
 /** A rule line that allows something. */
 const PERMITS = /\b(?:are|is) (?:permitted|allowed)\b|\bmay\b(?! not)|\bpermitted\b/i
 /** An answer whose first sentence says no. */
-const saysNo = (answer: string) => /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(answer.split(/(?<=[.!?])\s/)[0] ?? '')
+const saysNo = (answer: string) => {
+  const first = answer.split(/(?<=[.!?])\s/)[0] ?? ''
+  // "No, unless…": the exception is given – not a flat no
+  return /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(first) && !/\b(?:unless|except|only if|as long as|provided that|other than)\b/i.test(first)
+}
 
 /** Words an answer uses when it reasons beyond what the notes say. */
 const INFERENCE = /\b(?:it can be (?:inferred|assumed|concluded)|can be inferred|(?:this|which|these|that) (?:suggests?|implies|indicates?)|(?:suggests?|implies) that|it (?:is|seems) (?:clear|likely|reasonable|safe to (?:say|assume))|presumably|theoretically|it would seem|one could (?:argue|assume)|by extension|we can (?:infer|assume|conclude)|(?:further )?(?:support|reinforc|strengthen)\w* (?:the idea|the notion|this|that)|could (?:be (?:seen|interpreted|considered|viewed)|imply)|would (?:likely|probably|presumably)|likely (?:violates?|be|not|means?)|there (?:is|are) no (?:provisions?|allowances?|exceptions?) (?:for|allowing)|in other words|this means that|indirectly|would (?:violate|break|breach|create|cause|result in|be (?:a )?(?:violation|against|illegal|prohibited|not allowed))|(?:therefore|thus|hence),? (?:any|it|this|a|the robot))\b/i
