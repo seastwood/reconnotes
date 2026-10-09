@@ -2455,6 +2455,10 @@ li[data-checked='true'] .due-chip button {
   color: var(--accent-text);
   background: rgba(224, 161, 0, 0.14);
   cursor: pointer;
+  /* a button, not text: a tap doesn't select it or put the cursor in it */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .audio-transcript-actions {
   display: flex;
