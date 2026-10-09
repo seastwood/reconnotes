@@ -45,15 +45,16 @@ export function FollowAlong({ text, timing, player }: { text: string; timing: st
   useEffect(() => {
     const el = player()
     if (current < 0 || !el || el.paused || Date.now() - userScrolledAt.current < 4000) return
+    // within the transcript's own scroll area – the note itself stays where you are
     const word = box.current?.querySelector<HTMLElement>('.spoken')
-    const scroller = box.current?.closest('.editor-scroll')
+    const scroller = box.current
     if (!word || !scroller) return
     const r = word.getBoundingClientRect()
     const v = scroller.getBoundingClientRect()
-    if (r.top < v.top + 60 || r.bottom > v.bottom - 100) scroller.scrollTo({ top: scroller.scrollTop + (r.top - v.top) - v.height / 3, behavior: 'smooth' })
+    if (r.top < v.top + 20 || r.bottom > v.bottom - 30) scroller.scrollTo({ top: scroller.scrollTop + (r.top - v.top) - v.height / 3, behavior: 'smooth' })
   }, [current, player])
   useEffect(() => {
-    const scroller = box.current?.closest('.editor-scroll')
+    const scroller = box.current
     if (!scroller) return
     const mark = () => (userScrolledAt.current = Date.now())
     scroller.addEventListener('touchmove', mark, { passive: true })
@@ -62,7 +63,7 @@ export function FollowAlong({ text, timing, player }: { text: string; timing: st
       scroller.removeEventListener('touchmove', mark)
       scroller.removeEventListener('wheel', mark)
     }
-  }, [])
+  }, [spans.length])
 
   if (!spans.length) return <div className="audio-transcript">{text}</div>
   const parts: React.ReactNode[] = []

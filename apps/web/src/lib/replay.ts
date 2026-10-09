@@ -75,3 +75,20 @@ export function strokeAt(strokes: Stroke[], x: number, y: number, radius: number
 export function hasLinkedInk(strokes: Stroke[], startedAt: number, endedAt: number): boolean {
   return strokes.some((s) => s.t && s.t >= startedAt - 1000 && s.t <= endedAt)
 }
+
+/**
+ * A meeting note's ▶ link (listen:<recording>@<seconds>): play the recording from that moment.
+ * False when it isn't such a link; a message when the recording can't be played here.
+ */
+export function playListenLink(href: string, say: (msg: string) => void): boolean {
+  const m = href.match(/^listen:([a-z0-9]+)@(\d+)$/i)
+  if (!m) return false
+  const el = players.get(m[1])
+  if (!el) {
+    say('That recording isn’t in this note, or hasn’t downloaded to this device yet.')
+    return true
+  }
+  el.currentTime = Number(m[2])
+  void el.play().catch(() => undefined)
+  return true
+}

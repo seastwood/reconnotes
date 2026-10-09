@@ -1,6 +1,8 @@
 import { Extension } from '@tiptap/core'
 import { Plugin } from '@tiptap/pm/state'
 import { openExternal, openableUrl } from '../lib/appLinks'
+import { playListenLink } from '../lib/replay'
+import { showToast } from '../lib/toast'
 
 /**
  * Tap or click a link in a note to open it (Safari / a new tab). A drag that
@@ -13,7 +15,10 @@ export const LinkOpener = Extension.create({
     let down: { x: number; y: number; t: number; href: string } | null = null
     const linkAt = (target: EventTarget | null) => {
       const a = (target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
-      return a && a.closest('.ProseMirror') ? openableUrl(a.getAttribute('href') ?? '') : null
+      if (!a || !a.closest('.ProseMirror')) return null
+      const href = a.getAttribute('href') ?? ''
+      // a meeting note's ▶ link: plays its recording from there
+      return href.startsWith('listen:') ? href : openableUrl(href)
     }
     return [
       new Plugin({
@@ -29,7 +34,7 @@ export const LinkOpener = Extension.create({
               down = null
               if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || Date.now() - d.t > 600) return false
               if (linkAt(e.target) !== d.href) return false
-              openExternal(d.href)
+              if (!playListenLink(d.href, showToast)) openExternal(d.href)
               return false
             },
             // the browser's own link following stays off (it would replace the app)

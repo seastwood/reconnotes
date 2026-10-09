@@ -2356,6 +2356,72 @@ li[data-checked='true'] .due-chip button {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+  /* its own scroll area: a long meeting doesn't push the note away, Copy / Insert stay below it */
+  max-height: min(42vh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(127, 127, 127, 0.08);
+}
+
+/* a recording playing while its player is out of view: a slim player under the toolbar */
+.docked-player {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--paper);
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+}
+.docked-player .docked-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 30%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.docked-player .docked-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+.docked-player input[type='range'] {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--accent);
+}
+@media (max-width: 480px) {
+  .docked-player .docked-name {
+    display: none;
+  }
+}
+
+/* a meeting note's ▶ link: plays the recording from where that was said */
+.ProseMirror a[href^='listen:'] {
+  display: inline-block;
+  padding: 0 7px;
+  margin: 0 2px;
+  border-radius: 999px;
+  font-size: 0.82em;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--accent-text);
+  background: rgba(224, 161, 0, 0.14);
+  cursor: pointer;
 }
 .audio-transcript-actions {
   display: flex;

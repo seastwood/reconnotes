@@ -11,6 +11,7 @@ import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
 import { workspaceDoc } from '../lib/workspace'
 import { FollowAlong } from './FollowAlong'
+import { DockedPlayer } from './DockedPlayer'
 import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
 import { NoteContext } from '../drawing/DrawingNode'
@@ -404,6 +405,18 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const timing = useAttachmentText(node.attrs.attachmentId, `timing:att:${node.attrs.attachmentId}`)
   const playerRef = useRef<HTMLAudioElement | null>(null)
   const player = useCallback(() => playerRef.current, [])
+  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null)
+  const attachmentId = node.attrs.attachmentId as string
+  const audioRef = useCallback(
+    (el: HTMLAudioElement | null) => {
+      playerRef.current = el
+      registerPlayer(attachmentId, el)
+      setAudioEl(el)
+    },
+    [attachmentId],
+  )
+  // Find landed in the transcript: its match in view inside the transcript's own scroll area
+  const findBox = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
@@ -424,6 +437,11 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     if (findHere) setOpen(true)
   }, [findHere])
   const findQuery = useEditorState({ editor, selector: ({ editor: e }) => (e ? (findKey.getState(e.state)?.query ?? '') : '') })
+  useEffect(() => {
+    const box = findBox.current
+    const mark = box?.querySelector<HTMLElement>('mark')
+    if (box && mark) box.scrollTop = mark.offsetTop - box.offsetTop - box.clientHeight / 3
+  }, [findQuery, findHere, open])
   const [error, setError] = useState<string | null>(null)
   const transcribe = async () => {
     if (busy) return
@@ -461,10 +479,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       )}
       {url ? (
         <audio
-          ref={(el) => {
-            playerRef.current = el
-            registerPlayer(node.attrs.attachmentId, el)
-          }}
+          ref={audioRef}
           controls
           src={url}
           preload="metadata"
@@ -498,7 +513,13 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       {open && transcript && (
         <>
           {heardBy && <div className="audio-transcript-by">Transcribed by {heardBy}</div>}
-          {findQuery.trim() ? <div className="audio-transcript">{highlight(transcript, findQuery)}</div> : <FollowAlong text={transcript} timing={timing} player={player} />}
+          {findQuery.trim() ? (
+            <div className="audio-transcript" ref={findBox}>
+              {highlight(transcript, findQuery)}
+            </div>
+          ) : (
+            <FollowAlong text={transcript} timing={timing} player={player} />
+          )}
           <div className="audio-transcript-actions">
             <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>
               <Copy size={14} /> {copied ?? 'Copy'}
@@ -524,6 +545,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
           </div>
         </>
       )}
+      <DockedPlayer audio={audioEl} anchor={audioEl} name={node.attrs.name || 'Recording'} />
     </NodeViewWrapper>
   )
 }

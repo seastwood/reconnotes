@@ -95,7 +95,8 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       extensions: [
         StarterKit.configure({
           undoRedo: false, // the shared Yjs undo manager handles history
-          link: { openOnClick: false, autolink: true },
+          // listen:<recording>@<seconds> – a meeting note's ▶ link into its recording
+          link: { openOnClick: false, autolink: true, isAllowedUri: (url, ctx) => /^listen:[a-z0-9]+@\d+$/i.test(url) || ctx.defaultValidate(url) },
         }),
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
         LinkOpener,

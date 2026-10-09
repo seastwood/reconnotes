@@ -1,4 +1,5 @@
 import { log } from './log'
+import { addListenLinks } from './listen'
 import fs from 'node:fs'
 import * as Y from 'yjs'
 import {
@@ -15,13 +16,14 @@ import {
   readNote,
   speechToParagraphs,
   updateNote,
+  parseWordTimes,
 } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment, APPLE_SPEECH, sentWordTimes, setTranscribedBy, setWordTimes, transcribedBy } from './attachments'
+import { processAttachment, APPLE_SPEECH, sentWordTimes, setTranscribedBy, setWordTimes, transcribedBy, wordTimes } from './attachments'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
@@ -520,7 +522,10 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         return due ? `${m[1]}${m[2]} !${due}` : l
       })
       .join('\n')
-    await writeResult(sync, noteId, job.id, md, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
+    // each point with a ▶ link to where it was said in the recording (where words have times)
+    const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
+    const withLinks = att && said.length ? addListenLinks(md, said, att.id).markdown : md
+    await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
     return { result: { noteId, text: preview(md), heardBy, ...(speechError ? { speechError } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
