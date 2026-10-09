@@ -378,10 +378,10 @@ export async function speechLoaded(agent: AgentConfig): Promise<string[] | null>
 }
 
 /** Ask Speaches to let go of its model (other servers can't be asked, and are left alone). */
-async function unloadSpeech(agent: AgentConfig): Promise<boolean> {
-  if (agent.kind !== 'openai' || !agent.model) return false
+async function unloadSpeech(agent: AgentConfig, model = agent.model): Promise<boolean> {
+  if (agent.kind !== 'openai' || !model) return false
   try {
-    const res = await fetch(`${speechRoot(agent)}/api/ps/${agent.model}`, { method: 'DELETE', headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {}, signal: AbortSignal.timeout(5000) })
+    const res = await fetch(`${speechRoot(agent)}/api/ps/${model}`, { method: 'DELETE', headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {}, signal: AbortSignal.timeout(5000) })
     return res.ok
   } catch {
     return false
@@ -398,13 +398,26 @@ const speechInUse = new Map<string, AgentConfig>()
 export function speechUsed(agent: AgentConfig) {
   if (agent.kind === 'openai' && agent.model) speechInUse.set(`${speechRoot(agent)}|${agent.model}`, agent)
 }
-/** The speech servers that still have their model loaded. */
-async function speechHolding(): Promise<AgentConfig[]> {
-  const out: AgentConfig[] = []
-  for (const [key, agent] of speechInUse) {
-    const loaded = await speechLoaded(agent)
-    if (loaded?.includes(agent.model)) out.push(agent)
-    else speechInUse.delete(key)
+/** the speech-to-text agents set up (the registry fills this in) */
+let speechAgents: () => AgentConfig[] = () => []
+/** could a speech-to-text server be holding GPU memory? (one used lately, or one set up) */
+const speechMaybe = () => speechInUse.size > 0 || speechAgents().length > 0
+
+/**
+ * What the speech-to-text servers have in memory now – Whisper, and Speaches' voice detector
+ * (silero VAD), which Speaches never unloads by itself and which takes ~0.4 GB of the GPU.
+ * Each server once, with the models it holds.
+ */
+async function speechHolding(): Promise<{ agent: AgentConfig; models: string[] }[]> {
+  const seen = new Set<string>()
+  const out: { agent: AgentConfig; models: string[] }[] = []
+  for (const agent of [...speechInUse.values(), ...speechAgents()]) {
+    const root = speechRoot(agent)
+    if (seen.has(root)) continue
+    seen.add(root)
+    const models = (await speechLoaded(agent)) ?? []
+    if (models.length) out.push({ agent, models })
+    else for (const [k, a] of speechInUse) if (speechRoot(a) === root) speechInUse.delete(k)
   }
   return out
 }
@@ -417,9 +430,12 @@ function rememberSpeechOut(base: string, model: string) {
   spendStore.setSetting(SPEECH_OUT_KEY, { ...(spendStore.getSetting<Record<string, boolean>>(SPEECH_OUT_KEY) ?? {}), [`${base}|${model}`]: true })
   log.info(`${model} doesn't fit on the GPU beside the speech-to-text model – from now on that's unloaded first`)
 }
-async function clearSpeech(speech: AgentConfig[], forModel: string) {
-  const done = await Promise.all(speech.map(async (a) => ((await unloadSpeech(a)) ? (speechInUse.delete(`${speechRoot(a)}|${a.model}`), a.model) : null)))
-  const names = done.filter(Boolean)
+async function clearSpeech(speech: { agent: AgentConfig; models: string[] }[], forModel: string) {
+  const names: string[] = []
+  for (const { agent, models } of speech) {
+    for (const m of models) if (await unloadSpeech(agent, m)) names.push(m)
+    for (const [k, a] of speechInUse) if (speechRoot(a) === speechRoot(agent)) speechInUse.delete(k)
+  }
   if (names.length) log.info(`made room on the GPU for ${forModel}: unloaded ${names.join(', ')} (speech-to-text)`)
 }
 
@@ -525,9 +541,9 @@ export async function ensureFits(agent: AgentConfig, ctx: number) {
   const self = all.find((m) => sameModel(m.name, agent.model))
   if (self && !spilled(self) && loadedCtx.get(key) === ctx) return
   // nothing else in the GPU's memory: nothing to make room from (the request loads it as usual)
-  if (!all.some((m) => !sameModel(m.name, agent.model)) && !speechInUse.size) return
+  if (!all.some((m) => !sameModel(m.name, agent.model)) && !speechMaybe()) return
   // Whisper's known not to leave room for it: out before it loads
-  const speech = speechInUse.size ? await speechHolding() : []
+  const speech = speechMaybe() ? await speechHolding() : []
   if (speech.length && needsSpeechOut(base, agent.model)) await clearSpeech(speech, agent.model)
   reportProgress(`Loading ${agent.model}…`)
   if (!(await loadOllama(base, agent.model, ctx))) return
@@ -536,7 +552,7 @@ export async function ensureFits(agent: AgentConfig, ctx: number) {
   const me = now?.find((m) => sameModel(m.name, agent.model))
   if (!me || !spilled(me)) return
   const others = (now ?? []).filter((m) => m !== me).map((m) => m.name)
-  const whisper = speechInUse.size ? await speechHolding() : []
+  const whisper = speechMaybe() ? await speechHolding() : []
   if (!others.length && !whisper.length) return
   if (whisper.length) {
     rememberSpeechOut(base, agent.model)
@@ -556,7 +572,7 @@ async function makeRoom(agent: AgentConfig): Promise<string[]> {
   const self = models.find((m) => sameModel(m.name, agent.model))
   if (self && !spilled(self)) return []
   // Whisper (Speaches) on the same GPU: out only if this model was squeezed beside it
-  const speech = speechInUse.size ? await speechHolding() : []
+  const speech = speechMaybe() ? await speechHolding() : []
   if (speech.length && self) rememberSpeechOut(base, agent.model)
   if (speech.length && (self || needsSpeechOut(base, agent.model))) await clearSpeech(speech, agent.model)
   const others = models.filter((m) => m !== self)
@@ -635,10 +651,13 @@ class OllamaBackend implements Backend {
       const need = inputTokens + predict + 512
       const cap = Math.min(info.contextLength ?? 32768, 32768)
       const want = Math.min(cap, [8192, 16384, 32768].find((b) => b >= need) ?? 32768)
-      // a different size makes Ollama load the model again: keep a bigger one it already has
+      // a different size makes Ollama load the model again: keep a bigger one it already has –
+      // unless the GPU is tight, where the bigger one may not fit beside anything (a few seconds'
+      // reload beats running partly on the CPU)
       const key = `${trimSlash(this.agent.baseUrl)}|${this.agent.model}`
       const last = lastCtx.get(key)
-      const ctx = last && last.ctx > want && Date.now() - last.at < 30 * 60_000 ? last.ctx : want
+      const tight = Boolean(gpuInfo(trimSlash(this.agent.baseUrl)).tight)
+      const ctx = last && last.ctx > want && !tight && Date.now() - last.at < 30 * 60_000 ? last.ctx : want
       lastCtx.set(key, { ctx, at: Date.now() })
       return ctx
     }
@@ -1218,6 +1237,7 @@ export class AgentRegistry {
     config: Config,
   ) {
     spendStore = store
+    speechAgents = () => this.chain('audio').filter((a) => a.kind === 'openai' && a.enabled)
     if (store.getSetting(AGENTS_KEY) === null) this.seedFromEnv(config)
     this.adoptTranscribeEnv(config)
   }

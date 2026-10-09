@@ -427,9 +427,10 @@ describe('a long meeting put together', () => {
     ]
     const topics = partTopics(parts)
     expect(topics.map((t) => t.topic)).toEqual(['Sprinkler testing', 'Dumpster', 'Tractor purchase', 'Sweeper service'])
-    const written = '## Summary\n- **Sprinkler testing**: 20-year sample testing; unsure if required\n- Dumpster space across the road for Tuesday\n\n## Decisions\n- Service the sweeper this morning\n\n## Action items\n- [ ] Charlie to look into the testing'
+    const written = '## Summary\n- **Sprinkler testing**: 20-year sample testing; unsure if required\n- Dumpster space across the road for Tuesday\n\n## Decisions\n- Service the sweeper this morning\n\n## Open questions\n- Tractor purchase: details pending the quote\n\n## Action items\n- [ ] Charlie to look into the testing'
     const out = coverTopics(written, topics)
     // the tractor was dropped: back in the Summary, after its last bullet
+    // the tractor was dropped (it's only an open question): back in the Summary, after its last bullet
     expect(out).toContain('- **Tractor purchase**: West Machinery coming out to finalize the quote, trade-in value of the current tractor\n\n## Decisions')
     // the others are there already (the sweeper under Decisions) – not added twice
     expect(out.split('Sprinkler').length - 1).toBe(1)
@@ -450,8 +451,8 @@ describe('notes in another shape', () => {
     expect(headed).toBe(want)
   })
   it('bold or numbered section headings and unchecked to-dos', () => {
-    expect(groundMeetingNotes('**Decisions**\n- Leave the crate where it is.\n\n### Action Items\n1. Charlie to look into the service agreements (no date)', said, '')).toBe(
-      '## Decisions\n- Leave the crate where it is.\n\n## Action Items\n- [ ] Charlie to look into the service agreements',
+    expect(groundMeetingNotes('## Summary\n- **Crate (Continued)**: Leave the crate where it is.\n\n**Decisions**\n- Leave the crate where it is.\n\n### Action Items\n1. Charlie to look into the service agreements (no date)', said, '')).toBe(
+      '## Summary\n- **Crate**: Leave the crate where it is.\n\n## Decisions\n- Leave the crate where it is.\n\n## Action Items\n- [ ] Charlie to look into the service agreements',
     )
   })
 })

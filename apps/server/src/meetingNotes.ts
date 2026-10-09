@@ -98,7 +98,7 @@ export function partTopics(partNotes: string[]): { topic: string; said: string }
     for (const line of part.split('\n')) {
       const t = line.match(/^\s*[-*]\s*(?:\*\*)?Topic(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$/i)
       if (t) {
-        cur = { topic: t[1].replace(/\*\*/g, '').trim(), said: '' }
+        cur = { topic: t[1].replace(/\*\*/g, '').replace(/\s*\((?:cont(?:inued|'d)?\.?)\)/i, '').trim(), said: '' }
         out.push(cur)
         continue
       }
@@ -123,8 +123,11 @@ export function coverTopics(markdown: string, topics: { topic: string; said: str
   const bullets = lines.slice(start + 1, end).filter((l) => /^\s*[-*]\s/.test(l))
   const stems = (s: string) => new Set(s.split(/\s+/).map(stem).filter(telling))
   const said = bullets.map(stems)
-  // and what else the notes say (a topic can be summed up under Decisions instead)
-  const rest = stems(lines.slice(end).join(' '))
+  // a topic can be summed up under Decisions instead – not under Open questions or Action items,
+  // which say what's left to do, not what was discussed
+  const dec = lines.findIndex((l) => /^#{1,6}\s+decisions?\b/i.test(l))
+  const decEnd = dec < 0 ? -1 : lines.findIndex((l, i) => i > dec && /^#{1,6}\s/.test(l))
+  const rest = stems(dec < 0 ? '' : lines.slice(dec + 1, decEnd < 0 ? lines.length : decEnd).join(' '))
   const missing: string[] = []
   const seen = new Set<string>()
   for (const t of topics) {
@@ -178,15 +181,17 @@ export function normalizeMeetingNotes(text: string): string {
     if (h && section && /^#/.test(line)) {
       // a topic's own heading inside a section: its points become one bullet
       flush()
-      topic = { at: out.length, name: h[1].replace(/\*\*/g, '').replace(/:$/, '').trim(), parts: [] }
+      topic = { at: out.length, name: h[1].replace(/\*\*/g, '').replace(/:$/, '').replace(/\s*\((?:cont(?:inued|'d)?\.?)\)/i, '').trim(), parts: [] }
       continue
     }
     if (!line.trim()) {
       if (!topic) out.push('')
       continue
     }
+    // "**Topic (Continued)**:" – a part's carry-over, not something to show
+    const tidy = line.replace(/\s*\((?:cont(?:inued|'d)?\.?)\)(?=\s*\**\s*:)/i, '')
     // a numbered item, or a plain line, is a bullet
-    let item = line.replace(/^(\s*)\d+[.)]\s+/, '$1- ')
+    let item = tidy.replace(/^(\s*)\d+[.)]\s+/, '$1- ')
     if (!/^\s*[-*]\s/.test(item) && section) item = `- ${item.trim()}`
     // to-dos are checkboxes
     if (/^action|^tasks|^to-?dos|^next steps/i.test(section)) item = item.replace(/^(\s*)[-*]\s+(?!\[[ xX]\])/, '$1- [ ] ')

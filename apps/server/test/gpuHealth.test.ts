@@ -53,9 +53,9 @@ describe('how full the GPU is', () => {
     expect(h.gpus).toEqual([{ host: '127.0.0.1', name: 'NVIDIA GeForce GTX 1070', totalMb: 8192, usedMb: 7540, otherMb: 0 }])
     const whisper = h.speech.find((m) => m.model.includes('whisper'))!
     const vad = h.speech.find((m) => m.model.includes('vad'))!
-    // 7540 used − 5940 Ollama = 1600: the voice detector's small share, Whisper the rest
+    // 7540 used − 5940 Ollama = 1600: the voice detector's share as measured (~0.4 GB), Whisper the rest
     expect(whisper.measured).toBe(true)
     expect(vad.mb + whisper.mb).toBe(1600)
-    expect(vad.mb).toBeLessThan(100)
+    expect(vad.mb).toBe(400) // the voice detector: small, but its GPU runtime takes ~0.4 GB
   })
 })

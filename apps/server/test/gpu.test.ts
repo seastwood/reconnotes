@@ -21,6 +21,8 @@ const unloads: string[] = []
 const served: { name: string; vram: number }[] = []
 /** Whisper in Speaches, on the same GPU (MB it holds; 0 = not loaded) */
 let whisperMb = 0
+/** Speaches' voice detector (silero VAD): it never unloads by itself (MB; 0 = not loaded) */
+let vadMb = 0
 const speechUnloads: string[] = []
 let server: http.Server
 let speaches: http.Server
@@ -49,7 +51,7 @@ beforeAll(async () => {
     const have = loaded.find((m) => m.name === body.model)
     if (!have || have.ctx !== ctx) {
       loaded = loaded.filter((m) => m.name !== body.model)
-      const used = loaded.reduce((a, m) => a + m.vram, 0) + whisperMb
+      const used = loaded.reduce((a, m) => a + m.vram, 0) + whisperMb + vadMb
       // a bigger context takes more memory (40 MB per 1K beyond 8K)
       const size = (SIZES[body.model] ?? 1000) + (Math.max(0, ctx - 8192) / 1024) * 40
       loaded.push({ name: body.model, size, vram: Math.max(0, Math.min(size, GPU - used)), ctx })
@@ -64,10 +66,11 @@ beforeAll(async () => {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     if (req.method === 'DELETE') {
       speechUnloads.push(req.url!)
-      whisperMb = 0
+      if (req.url!.endsWith('silero_vad_v5')) vadMb = 0
+      else whisperMb = 0
       return res.end('{}')
     }
-    res.end(JSON.stringify({ models: whisperMb ? ['whisper-turbo'] : [] }))
+    res.end(JSON.stringify({ models: [...(whisperMb ? ['whisper-turbo'] : []), ...(vadMb ? ['silero_vad_v5'] : [])] }))
   })
   await new Promise<void>((r) => speaches.listen(0, '127.0.0.1', () => r()))
   speechUrl = `http://127.0.0.1:${(speaches.address() as AddressInfo).port}/v1`
@@ -222,6 +225,25 @@ describe('a model that grows while it’s used', () => {
     await run('qwen3:8b', 70_000)
     expect(unloads).toEqual([])
     expect(on('nomic-embed-text:latest')).toBeTruthy()
+    GPU = 7000
+  })
+})
+
+describe('Speaches\u2019 voice detector', () => {
+  it('is unloaded too when the notes model doesn\u2019t fit beside it – Whisper long gone', async () => {
+    // what you saw: Whisper unloaded after 5 minutes, the voice detector still holding 0.4 GB,
+    // and qwen3 at 32K (7.06 GB) on a 7.4 GB GPU
+    GPU = 7400
+    whisperMb = 0
+    vadMb = 400
+    speechUsed(validateAgent({ name: 'Whisper', kind: 'openai', baseUrl: speechUrl, model: 'whisper-turbo' }))
+    loaded = [{ name: 'qwen2.5:3b', size: 300, vram: 300, ctx: 2048 }]
+    speechUnloads.length = 0
+    served.length = 0
+    await run('qwen3:8b', 70_000)
+    expect(speechUnloads).toContain('/api/ps/silero_vad_v5')
+    const q = on('qwen3:8b')!
+    expect(served.at(-1)).toEqual({ name: 'qwen3:8b', vram: q.size })
     GPU = 7000
   })
 })

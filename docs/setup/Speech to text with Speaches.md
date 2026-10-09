@@ -229,6 +229,7 @@ Environment=WHISPER__INFERENCE_DEVICE=cuda
 Environment=WHISPER__COMPUTE_TYPE=int8
 Environment=ENABLE_UI=false
 Environment=STT_MODEL_TTL=300
+Environment=VAD_MODEL_TTL=300
 Environment=LD_LIBRARY_PATH=<the path echo printed>
 ExecStart=/opt/speaches/.venv/bin/uvicorn --factory --host 0.0.0.0 --port 8000 speaches.main:create_app
 Restart=on-failure
@@ -254,6 +255,8 @@ systemctl status speaches
 It should say `active (running)`. Run the test from step 8 once more to check the service works too. It starts by itself after a reboot.
 
 - `STT_MODEL_TTL=300` keeps Whisper loaded for 5 minutes after the last transcription, so recordings in a row don't wait for it to load. `-1` keeps it loaded forever, and `0` unloads it straight away.
+- `VAD_MODEL_TTL=300` does the same for Speaches' voice detector (`silero_vad_v5`, see step 11). Without it, Speaches keeps the detector loaded forever, holding about 0.4 GB of the GPU.
+- Already running Speaches without the `VAD_MODEL_TTL` line? Add it, then run `systemctl daemon-reload` and `systemctl restart speaches`.
 - To see its log: `journalctl -u speaches -f`.
 
 ## 10. Add it in ReconNotes
@@ -279,7 +282,7 @@ Whisper and Ollama's models share the GPU's memory. On a big card, both simply s
 
 It also happens the other way round: a language model still loaded from the last job can leave Whisper too little memory, and it fails ("CUDA failed with error out of memory" in `journalctl -u speaches`). Then ReconNotes unloads Ollama's models and lets Whisper try again. When that's what it took, it remembers, and from then on makes room before Whisper starts. If Whisper still fails, a meeting falls back to the phone's own transcript, and the job shows why under **Speech-to-text**.
 
-For language models, ReconNotes handles this by itself too: while Whisper is loaded, it loads the next model first and checks it fits, before the job starts. If the model was squeezed, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' small voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. It's tiny and stays loaded, and Whisper itself is what gets unloaded after 5 minutes (`STT_MODEL_TTL`) or when a model needs the room.
+For language models, ReconNotes handles this by itself too: while Whisper is loaded, it loads the next model first and checks it fits, before the job starts. If the model was squeezed, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. The model itself is tiny, but it runs with its own GPU runtime, which takes about 0.4 GB. When a model needs the room, ReconNotes unloads it along with Whisper, and `VAD_MODEL_TTL` (step 9) lets Speaches release it after 5 minutes idle too.
 
 ## 12. See how full the GPU is (optional)
 

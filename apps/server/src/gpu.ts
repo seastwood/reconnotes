@@ -77,11 +77,12 @@ export async function gpuAt(host: string): Promise<GpuCard[] | null> {
 
 /**
  * About how much GPU memory a speech-to-text model takes (MB), from its name – when nothing measures it.
- * Whisper sizes, with the room it needs to work; Speaches' voice detector is tiny.
+ * Whisper sizes, with the room it needs to work; Speaches' voice detector, small but with its own GPU runtime.
  */
 export function speechEstimateMb(model: string): number {
   const m = model.toLowerCase()
-  if (/vad|silero/.test(m)) return 50
+  // small, but run with its own GPU runtime (measured ~0.4 GB)
+  if (/vad|silero/.test(m)) return 400
   if (/tiny/.test(m)) return 300
   if (/base/.test(m)) return 400
   if (/small/.test(m)) return 800
