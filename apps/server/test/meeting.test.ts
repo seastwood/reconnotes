@@ -32,6 +32,8 @@ beforeAll(async () => {
     const j = JSON.parse(body)
     if (j.keep_alive === 0) return (llmLoaded = llmLoaded.filter((m) => m !== j.model)), res.end('{}')
     if (!llmLoaded.includes(j.model)) llmLoaded.push(j.model)
+    // loading the model before a request (prompt ''): not a request
+    if (j.prompt === '' && !j.messages) return res.end('{}')
     prompts.push(j.messages?.[0]?.content ?? '')
     const content = '## Summary\n- Doug orders the parts; the gym needs booking\n\n## Action items\n- [ ] Doug – order the parts by Friday\n- [ ] Book the gym'
     res.end(JSON.stringify({ message: { role: 'assistant', content }, done_reason: 'stop', eval_count: 5 }))
@@ -454,5 +456,76 @@ describe('notes in another shape', () => {
     expect(groundMeetingNotes('## Summary\n- **Crate (Continued)**: Leave the crate where it is.\n\n**Decisions**\n- Leave the crate where it is.\n\n### Action Items\n1. Charlie to look into the service agreements (no date)', said, '')).toBe(
       '## Summary\n- **Crate**: Leave the crate where it is.\n\n## Decisions\n- Leave the crate where it is.\n\n## Action Items\n- [ ] Charlie to look into the service agreements',
     )
+  })
+})
+
+describe('who said what', () => {
+  it('a meeting transcript in speaker turns – named where you named them – with attendees as Whisper’s hint and a cap on voices', async () => {
+    const { DIARIZE_PORT, forgetDiarizeHosts } = await import('../src/diarize')
+    forgetDiarizeHosts()
+    const said = 'Jesse, is the sample testing a code requirement? I think so, every twenty years. Then Charlie looks into it. Yep, I will.'
+    const words = said.split(' ').map((word, i) => ({ word: ` ${word}`, start: i * 0.5, end: i * 0.5 + 0.4 }))
+    let hint = ''
+    const whisper = http.createServer(async (req, res) => {
+      if (req.method === 'DELETE' || req.url === '/api/ps') return res.end('{"models":[]}')
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      hint = /name="prompt"\r\n\r\n([^\r]*)/.exec(Buffer.concat(chunks).toString('latin1'))?.[1] ?? ''
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: said, words }))
+    })
+    let asked = ''
+    // the speaker-label service: three turns, two voices
+    const diarizer = http.createServer(async (req, res) => {
+      for await (const _ of req) void _
+      asked = req.url ?? ''
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      if (req.method === 'GET') return res.end('{"ok":true}')
+      res.end(JSON.stringify({ segments: [{ start: 0, end: 3.9, speaker: 0 }, { start: 4, end: 7.9, speaker: 1 }, { start: 8, end: 11, speaker: 0 }], speakers: 2 }))
+    })
+    await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
+    await new Promise<void>((r) => diarizer.listen(DIARIZE_PORT, '127.0.0.1', () => r()))
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    try {
+      for (const a of app.ai.agents.chain('audio')) app.ai.agents.remove(a.id)
+      app.ai.agents.save({ name: 'Whisper', kind: 'openai', baseUrl: `http://127.0.0.1:${(whisper.address() as AddressInfo).port}/v1`, model: 'whisper-turbo', vision: false })
+      app.store.putAttachment({ id: 'speakersaudio001', mime: 'audio/mp4', name: 'Recording.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notespeakers0001', title: 'Meeting' }))
+      await app.sync.change(noteDocName('notespeakers0001'), (doc) => {
+        const p = new Y.XmlElement('paragraph')
+        p.insert(0, [new Y.XmlText('Attendees: Seth, Jesse and Charlie')])
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'speakersaudio001')
+        getContent(doc).insert(0, [p, rec])
+      })
+      prompts.length = 0
+      const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notespeakers0001', input: { attachmentId: 'speakersaudio001' } })).job
+      const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+      expect(done.error ?? done.status).toBe('done')
+      // the attendees: Whisper's hint, and at most three voices
+      expect(hint.startsWith('Seth, Jesse, Charlie')).toBe(true)
+      expect(asked).toBe('/diarize?speakers=3')
+      expect(done.result.voices).toBe(2)
+      // the model read it as turns
+      expect(prompts[0]).toContain('Speaker 1: Jesse, is the sample testing a code requirement?\nSpeaker 2: I think so, every twenty years. Then Charlie\nSpeaker 1: looks into it.')
+      expect(prompts[0]).toContain('The people at the meeting: Seth, Jesse, Charlie')
+      // the turns are in the note, for every device to show
+      await new Promise((r) => setTimeout(r, 50))
+      const { getTranscripts, parseSpeakers } = await import('@reconnotes/core')
+      const tr = getTranscripts(app.sync.getDoc(noteDocName('notespeakers0001'))!)
+      expect(parseSpeakers(tr.get('speakers:att:speakersaudio001'))?.length).toBe(3)
+
+      // you name the voices; the redo uses the names (and the turns kept – no new reading)
+      await app.sync.change(noteDocName('notespeakers0001'), (d) => getTranscripts(d).set('names:att:speakersaudio001', JSON.stringify({ 0: 'Seth', 1: 'Jesse' })))
+      asked = ''
+      prompts.length = 0
+      const again = (await fetch(`${base}/api/jobs/${job.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${again.id}/wait`)).job.status).toBe('done')
+      expect(asked).toBe('')
+      expect(prompts[0]).toContain('Seth: Jesse, is the sample testing a code requirement?\nJesse: I think so')
+    } finally {
+      whisper.close()
+      diarizer.close()
+    }
   })
 })

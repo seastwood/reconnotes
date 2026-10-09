@@ -201,3 +201,16 @@ export function normalizeMeetingNotes(text: string): string {
   flush()
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
+
+/** The people listed on the note's "Attendees:" line ("Seth, Jesse and Paul"). */
+export function attendeeNames(notes: string): string[] {
+  const line = notes.match(/^\s*(?:[-*]\s*)?(?:\*\*)?attendees(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/im)?.[1] ?? ''
+  return [
+    ...new Set(
+      line
+        .split(/\s*(?:,|;|\band\b|&|\/)\s*/i)
+        .map((n) => n.replace(/[*_[\]()]/g, '').trim())
+        .filter((n) => n && n.length <= 40 && /\p{L}/u.test(n)),
+    ),
+  ].slice(0, 30)
+}

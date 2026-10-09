@@ -19,13 +19,19 @@ import {
   speechToParagraphs,
   updateNote,
   parseWordTimes,
+  labelledTranscript,
+  parseSpeakerNames,
+  speakerNamesKey,
+  speakerTurns,
+  voiceCount,
 } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment, APPLE_SPEECH, sentWordTimes, setTranscribedBy, setWordTimes, transcribedBy, wordTimes } from './attachments'
+import { processAttachment, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, transcribedBy, wordTimes } from './attachments'
+import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
@@ -36,7 +42,7 @@ import { scopeFromInput } from './access'
 import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
-import { meetingNotesText } from './meetingNotes'
+import { attendeeNames, meetingNotesText } from './meetingNotes'
 import { askRefs, saveTurn, setAskRefs } from './askHistory'
 import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
 
@@ -224,6 +230,28 @@ let versionStore: Store | null = null
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
   versionStore = store
+
+  /**
+   * A recording's turns by voice: kept from before, or asked of the speaker-label service
+   * (deploy/diarize.py) – for a new reading of it always, since its words have new times.
+   * None when there's no service: the transcript is then just without speakers.
+   */
+  const speakerTurnsFor = async (att: { id: string; mime: string }, words: { word: string; start: number; end: number }[], newReading: boolean, most: number) => {
+    let segments = newReading ? null : speakerSegments(store, att.id)
+    if (!segments) {
+      const speech = ai.agents.chain('audio').find((a) => a.kind === 'openai' && a.enabled)
+      if (speech && store.hasBlob(att.id) && (await diarizeAvailable(speech.baseUrl))) {
+        reportProgress('Telling the voices apart…')
+        segments = await diarize(speech.baseUrl, fs.readFileSync(store.blobPath(att.id)), most)
+      }
+      if (segments || newReading) {
+        setSpeakers(store, att.id, segments)
+        sync.reindexNotesFor(att.id)
+      }
+    }
+    return segments?.length ? speakerTurns(words, segments) : null
+  }
+
   const modelOf = (task: AiTask | null) => {
     const a = task ? ai.agents.chain(task)[0] : undefined
     return a ? `${a.kind}|${a.baseUrl}|${a.model}` : null
@@ -321,6 +349,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     setTranscribedBy(store, att.id, by)
     setWordTimes(store, att.id, times)
     store.setAttachmentText(att.id, text, 'done')
+    // who spoke when, for the new words (any recording – a meeting or not)
+    if (times?.length) await speakerTurnsFor(att, times, true, attendeeNames(noteToMarkdown(noteDoc(noteId))).length)
+    else setSpeakers(store, att.id, null)
     sync.reindexNotesFor(att.id)
     return { result: { noteId, text: preview(text), heardBy: by }, agent: by }
   })
@@ -533,6 +564,10 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     // asked to read the recording again: not the saved transcript, nor the phone's
     const fresh = job.input.retranscribe === true
     const onDevice = fresh ? '' : String(job.input.transcript ?? '').trim()
+    // what you wrote – not notes an AI wrote before (a redo would copy them back, ▶ links and all) –
+    // and the people you said were there: Whisper spells their names right, and they cap the voices
+    const notes = meetingNotesText(noteToMarkdown(withoutAiResults(doc)))
+    const attendees = attendeeNames(notes)
     let transcript = ''
     let agent: string | null = null
     let times: { word: string; start: number; end: number }[] | undefined
@@ -546,7 +581,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     else if (serverHears && att && store.hasBlob(att.id)) {
       reportProgress('Transcribing the recording…')
       try {
-        const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
+        const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees)
         transcript = r.text
         agent = r.agent
         times = r.words
@@ -564,7 +599,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     }
     if (!transcript) {
       if (!att || !store.hasBlob(att.id)) throw new Error("The recording hasn't reached the server yet – try again once it has synced.")
-      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
+      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees)
       transcript = r.text
       agent = r.agent
       times = r.words
@@ -580,10 +615,15 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       sync.reindexNotesFor(att.id)
     }
     const tzOffset = Number(job.input.tzOffset) || 0
-    // what you wrote – not notes an AI wrote before (a redo would copy them back, ▶ links and all)
-    const notes = meetingNotesText(noteToMarkdown(withoutAiResults(doc)))
     if (!transcript.trim() && !notes.replace(/\W/g, '')) throw new Error('No speech was recognised in this recording, and nothing was written.')
-    const r = await ai.meetingNotes(notes, transcript, todayLabel(Date.now(), tzOffset))
+    // who said what: the transcript as turns by voice, named where you've named them
+    const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
+    const newReading = Boolean(times) || fresh
+    const turns = att && said.length ? await speakerTurnsFor(att, said, newReading, attendees.length) : null
+    const names = att ? parseSpeakerNames(getTranscripts(doc).get(speakerNamesKey(att.id)) ?? null) : {}
+    const voices = turns ? voiceCount(turns) : 0
+    const heard = turns && voices >= 2 ? labelledTranscript(turns, names) : transcript
+    const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, voices, named: Object.values(names) })
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
     const md = r.text
       .split('\n')
@@ -595,10 +635,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       })
       .join('\n')
     // each point with a ▶ link to where it was said in the recording (where words have times)
-    const said = att ? (times ?? parseWordTimes(wordTimes(store, att.id)) ?? []) : []
     const withLinks = att && said.length ? addListenLinks(md, said, att.id).markdown : md
     await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
-    return { result: { noteId, text: preview(md), heardBy, ...(speechError ? { speechError } : {}), ...(r.draft ? { draft: r.draft } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
+    return { result: { noteId, text: preview(md), heardBy, ...(voices >= 2 ? { voices } : {}), ...(speechError ? { speechError } : {}), ...(r.draft ? { draft: r.draft } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
   jobs.register('extract-text', async (job) => {

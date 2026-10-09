@@ -246,10 +246,16 @@ export class Ai {
    * Meeting notes from a recording's transcript and what was written during
    * the meeting: a summary, decisions, and the action items as a checklist.
    */
-  async meetingNotes(notes: string, transcript: string, today: string): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string } }> {
-    const said = transcript.replace(/\s+/g, ' ').trim()
+  async meetingNotes(
+    notes: string,
+    transcript: string,
+    today: string,
+    who: { attendees?: string[]; voices?: number; named?: string[] } = {},
+  ): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string } }> {
+    // a line per speaker's turn ("Jesse: …") when the voices were told apart: kept as lines
+    const said = transcript.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
     // how long it was, from how much was said (people speak ~140 words a minute)
-    const minutes = Math.round(said.split(' ').filter(Boolean).length / 140)
+    const minutes = Math.round(said.split(/\s+/).filter(Boolean).length / 140)
     const parts = meetingParts(said, PART_CHARS)
     const layout = `Use exactly this Markdown layout:
 
@@ -277,10 +283,20 @@ If no task was said, write "- [ ] No action items" under that heading.`
 - A task taken back later ("load the crate… actually, no, don't load it up") is not a task.
 - Small talk is not part of the meeting: lunch, food, jokes, banter, who's coming in late. Leave it out of every section.
 - When something wasn't settled, or someone is to find something out, it's an open question (with who looks into it, if said).`
+    const attendees = (who.attendees ?? []).filter(Boolean)
+    const speakers =
+      (who.voices ?? 0) >= 2
+        ? `
+- The transcript is a line per turn, starting with who spoke: a name, or "Speaker N" for a voice that hasn't been named (${who.voices} voices). The voices were told apart by the sound of them, which is occasionally wrong. Use the names to say who said, suggested, agreed or took on what; for "Speaker N", say "Speaker N" only where who matters (a task's owner), never guess a name for it.`
+        : ''
+    const people = attendees.length ? `\n- The people at the meeting: ${attendees.join(', ')}. Spell their names like that.` : ''
+    const agenda = /^#{1,6}\s*agenda\b/im.test(notes)
+      ? `\n- The notes have an agenda: give the Summary its topics in that order (then anything else that came up), and list an agenda item nobody got to under Open questions.`
+      : ''
     const rules = `Rules:
 - Use ONLY what is in the transcript and the notes. Never invent names, people, projects, dates, numbers or tasks.
 - The transcript is from speech recognition: words can be misheard. Write what was clearly meant; leave out what makes no sense, rather than guessing.
-- Never write placeholders like [TBD], "unspecified" or "N/A": what wasn't said is left out.
+- Never write placeholders like [TBD], "unspecified" or "N/A": what wasn't said is left out.${people}${speakers}${agenda}
 - ${length}
 - Stop after the Action items section.
 
@@ -313,7 +329,7 @@ ${said || '(no speech recognised)'}
           const raw = await backend.generate(
             [
               {
-                text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.
+                text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.${people}${speakers}
 
 Write notes on this part, topic by topic, in the order they came up:
 
@@ -321,6 +337,7 @@ Write notes on this part, topic by topic, in the order they came up:
   - Said: the details (numbers, names, dates, places, reasons)
   - Ideas: suggestions made along the way, in order (who, if said)
   - Outcome: how it was left by the end of this part – "Agreed: …" if people agreed; "Changed: … (instead of …)" if a later idea replaced an earlier one; "Open: …" if it wasn't settled
+  - Who: who said or suggested what, where the transcript says (names, or "Speaker N")
   - Tasks: who took on or was given what (and when, only if said); leave out a task that was taken back
 
 Leave out a line that has nothing (no "Ideas" if there were none). Read the whole part before writing an outcome: what's said later can change it.
@@ -384,11 +401,12 @@ ${partNotes.join('\n\n')}
   }
 
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
-  async transcribeAudio(data: Buffer, mime: string, filename: string): Promise<{ text: string; agent: string; words?: { word: string; start: number; end: number }[] }> {
+  /** `names`: people who'll be heard (a meeting's attendees) – spelled right */
+  async transcribeAudio(data: Buffer, mime: string, filename: string, names: string[] = []): Promise<{ text: string; agent: string; words?: { word: string; start: number; end: number }[] }> {
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
       if (!backend.transcribe)
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
-      const prompt = this.vocabulary?.speechPrompt() || undefined
+      const prompt = (this.vocabulary ? this.vocabulary.speechPrompt(names) : names.length ? `${names.join(', ')}.` : '') || undefined
       // with each word's time, where the server gives it (to follow along as it plays)
       const once = async () => (backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt) : { text: await backend.transcribe!(data, mime, filename, prompt) })
       // Whisper on the same GPU as Ollama: room made first if it's needed it before
@@ -814,7 +832,8 @@ const PART_CHARS = 7000
 
 /** A transcript in parts of about `size` characters, cut between sentences. */
 export function meetingParts(text: string, size: number): string[] {
-  const t = text.replace(/\s+/g, ' ').trim()
+  // line breaks stay: a transcript in speaker turns has one per turn
+  const t = text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
   if (t.length <= size * 1.4) return [t]
   const n = Math.ceil(t.length / size)
   const each = t.length / n
@@ -823,7 +842,9 @@ export function meetingParts(text: string, size: number): string[] {
   for (let i = 1; i < n; i++) {
     const aim = Math.round(each * i)
     // the nearest sentence end to where it should be cut
-    const after = t.slice(aim).search(/[.!?]\s/)
+    // between turns, else between sentences
+    const turnAfter = t.slice(aim).indexOf('\n')
+    const after = turnAfter >= 0 && turnAfter < 600 ? turnAfter : t.slice(aim).search(/[.!?]\s/)
     const before = t.slice(0, aim).search(/[.!?]\s[^.!?]*$/)
     const cut = after >= 0 && after < 400 ? aim + after + 1 : before >= 0 && aim - before < 400 ? before + 1 : aim
     out.push(t.slice(from, cut).trim())

@@ -146,12 +146,17 @@ export class SyncEngine {
     const times = Object.keys(attTexts)
       .map((id) => [id, this.store.getSetting<string | null>(`wordTimes:${id}`) ?? null] as const)
       .filter(([id, t]) => (transcripts.get(`timing:att:${id}`) ?? null) !== t)
-    if (missing.length || by.length || times.length) {
+    // …and who spoke when (the speaker-label service)
+    const voices = Object.keys(attTexts)
+      .map((id) => [id, this.store.getSetting<string | null>(`speakers:${id}`) ?? null] as const)
+      .filter(([id, v]) => (transcripts.get(`speakers:att:${id}`) ?? null) !== v)
+    if (missing.length || by.length || times.length || voices.length) {
       void this.change(noteDocName(noteId), (d) => {
         const tr = getTranscripts(d)
         for (const [id, t] of missing) tr.set(`att:${id}`, t)
         for (const id of by) tr.set(`by:att:${id}`, byAll[id])
         for (const [id, t] of times) t ? tr.set(`timing:att:${id}`, t) : tr.delete(`timing:att:${id}`)
+        for (const [id, v] of voices) v ? tr.set(`speakers:att:${id}`, v) : tr.delete(`speakers:att:${id}`)
       }).catch((err) => log.error('could not write attachment text', err))
     }
 

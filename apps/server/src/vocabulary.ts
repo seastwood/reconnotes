@@ -66,9 +66,10 @@ export class Vocabulary {
    * For speech-to-text (Whisper's "prompt"): your names and terms, as text it has "already heard" –
    * it then spells them like that. Short: Whisper only reads the last ~220 tokens of it.
    */
-  speechPrompt(): string {
+  /** `extra`: names for this one recording (a meeting's attendees) – first, so they're never cut off */
+  speechPrompt(extra: string[] = []): string {
     const s = this.load()
-    const words = [...new Set([...s.learned.map((l) => l.to), ...s.words])].filter((w) => w.length <= 30)
+    const words = [...new Set([...extra.map((w) => w.trim()).filter(Boolean), ...s.learned.map((l) => l.to), ...s.words])].filter((w) => w.length <= 30)
     let out = ''
     for (const w of words) {
       if (out.length + w.length + 2 > 600) break

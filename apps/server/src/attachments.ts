@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { encodeWordTimes } from '@reconnotes/core'
+import { encodeWordTimes, encodeSpeakers, parseSpeakers, type SpeakerSegment } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
@@ -109,4 +109,16 @@ export function sentWordTimes(input: unknown): { word: string; start: number; en
 
 export function wordTimes(store: Store, attachmentId: string): string | null {
   return store.getSetting<string | null>(`wordTimes:${attachmentId}`) ?? null
+}
+
+/**
+ * A recording's turns by voice (from the speaker-label service), kept with it and copied into
+ * the note so every device can show who spoke. A new reading of the recording (other word
+ * times) clears them – they're made again with it.
+ */
+export function setSpeakers(store: Store, attachmentId: string, segments: SpeakerSegment[] | null) {
+  store.setSetting(`speakers:${attachmentId}`, segments?.length ? encodeSpeakers(segments) : null)
+}
+export function speakerSegments(store: Store, attachmentId: string): SpeakerSegment[] | null {
+  return parseSpeakers(store.getSetting<string | null>(`speakers:${attachmentId}`) ?? null)
 }
