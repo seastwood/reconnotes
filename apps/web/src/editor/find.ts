@@ -220,7 +220,7 @@ export const FindInNote = Extension.create<FindOptions>({
 })
 
 /** Scroll the current match into the middle of the note, without moving the cursor. */
-export function revealCurrentMatch(view: EditorView) {
+export function revealCurrentMatch(view: EditorView, behavior: ScrollBehavior = 'smooth') {
   const s = findKey.getState(view.state)
   const m = s?.matches[s.current]
   if (!m) return
@@ -243,5 +243,5 @@ export function revealCurrentMatch(view: EditorView) {
   const box = scroller.getBoundingClientRect()
   // already comfortably visible: don't move
   if (top >= box.top + 60 && bottom <= box.bottom - 80) return
-  scroller.scrollTo({ top: scroller.scrollTop + (top - box.top) - box.height / 3, behavior: 'smooth' })
+  scroller.scrollTo({ top: scroller.scrollTop + (top - box.top) - box.height / 3, behavior })
 }

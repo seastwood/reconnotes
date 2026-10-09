@@ -32,11 +32,31 @@ function NoteLinkView({ node, extension }: ReactNodeViewProps) {
   const title = note?.title || (node.attrs.title as string) || 'Untitled'
   // its own words (an imported page's "see G206", "installing it"), else the note's title
   const label = (node.attrs.label as string) || title
+  // opened on the tap itself: on iPhone / iPad the first tap in a note can go to the note (the cursor,
+  // the keyboard) and the click never come – then the link took two taps
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const openedAt = useRef(0)
+  const open = () => {
+    if (gone || Date.now() - openedAt.current < 700) return
+    openedAt.current = Date.now()
+    ;(extension.options as NoteLinkOptions).onOpen(id, (node.attrs.find as string) || undefined)
+  }
   return (
     <NodeViewWrapper as="span" className={`note-link${gone ? ' gone' : ''}`} contentEditable={false}>
       <button
         type="button"
-        onClick={() => !gone && (extension.options as NoteLinkOptions).onOpen(id, (node.attrs.find as string) || undefined)}
+        onPointerDown={(e) => {
+          start.current = { x: e.clientX, y: e.clientY }
+          // a finger: don't let the note take the tap (focus, keyboard)
+          if (e.pointerType !== 'mouse') e.preventDefault()
+        }}
+        onPointerUp={(e) => {
+          const s0 = start.current
+          start.current = null
+          if (e.pointerType !== 'mouse' && s0 && Math.hypot(e.clientX - s0.x, e.clientY - s0.y) < 10) open()
+        }}
+        onPointerCancel={() => (start.current = null)}
+        onClick={open}
         title={gone ? 'This note was deleted' : `Open “${title}”`}
       >
         <FileText size={13} />

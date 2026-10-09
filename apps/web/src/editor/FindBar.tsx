@@ -44,6 +44,41 @@ export function FindBar({ editor, initial, focus = true, onClose }: { editor: Ed
     if (state.current >= 0) revealCurrentMatch(editor.view)
   }, [editor, state.current, state.count, state.query])
 
+  // just opened (a link, a citation): the note may still be laying out – pictures loading above the
+  // match push it down – so keep it in view for a few seconds, until you scroll yourself
+  const settled = useRef(false)
+  useEffect(() => {
+    if (settled.current || state.current < 0) return
+    settled.current = true
+    const dom = editor.view.dom as HTMLElement
+    const scroller = dom.closest('.editor-scroll')
+    let frame = 0
+    const again = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => revealCurrentMatch(editor.view, 'auto'))
+    }
+    const onLoad = (e: Event) => {
+      if ((e.target as Element).tagName === 'IMG') again()
+    }
+    const ro = new ResizeObserver(again)
+    ro.observe(dom)
+    dom.addEventListener('load', onLoad, true)
+    const stop = () => {
+      clearTimeout(timer)
+      cancelAnimationFrame(frame)
+      ro.disconnect()
+      dom.removeEventListener('load', onLoad, true)
+      scroller?.removeEventListener('touchstart', stop)
+      scroller?.removeEventListener('wheel', stop)
+    }
+    scroller?.addEventListener('touchstart', stop, { passive: true })
+    scroller?.addEventListener('wheel', stop, { passive: true })
+    const timer = setTimeout(stop, 3000)
+    return stop
+    // once, when the first match is found
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.current])
+
   // (with one match the current one doesn't change: still scroll to it – it may be out of view)
   const next = () => (editor.commands.findNext(), requestAnimationFrame(() => revealCurrentMatch(editor.view)))
   const prev = () => (editor.commands.findPrevious(), requestAnimationFrame(() => revealCurrentMatch(editor.view)))
