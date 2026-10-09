@@ -264,16 +264,16 @@ export class Ai {
     const layout = `Use exactly this Markdown layout:
 
 ## Summary
-- one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as)
+- **A short name for the topic**: one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as). Plain sentences: no "Topic:", "Outcome:" or "Who:" labels.
 
 ## Decisions
 - each thing that was actually settled: the final outcome only (leave this section out if nothing was settled)
 
 ## Open questions
-- each thing raised but left unsettled or to be found out (leave this section out if none)
+- each thing raised but left unsettled or to be found out – what's still to be decided or answered (leave this section out if none). Not a note that nothing was assigned or decided: "no task assigned" isn't a question.
 
 ## Action items
-- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said
+- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning".
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
@@ -346,7 +346,7 @@ Write notes on this part, topic by topic, in the order they came up:
   - Ideas: suggestions made along the way, in order (who, if said)
   - Outcome: how it was left by the end of this part – "Agreed: …" if people agreed; "Changed: … (instead of …)" if a later idea replaced an earlier one; "Open: …" if it wasn't settled
   - Who: who said or suggested what, where the transcript says (names, or "Speaker N")
-  - Tasks: who took on or was given what (and when, only if said); leave out a task that was taken back
+  - Tasks: who took on or was given what (and when, only if said) – including what someone said they or "we" will do ("I'll look it up", "let's make space for the dumpster Tuesday", "we'll pull them today"); leave out a task that was taken back
 
 Leave out a line that has nothing (no "Ideas" if there were none). Read the whole part before writing an outcome: what's said later can change it.
 

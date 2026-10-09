@@ -39,6 +39,10 @@ const PLACEHOLDER =
  * `fallback`: Summary bullets to use if none of the model's own survive (each part's topics);
  * `dropped`: collects the lines left out, so the job can show what was taken away and why.
  */
+/** an "open question" that only says nothing was assigned or decided */
+const FILLER =
+  /^(?:no (?:formal |explicit |specific |clear )?(?:action items?|tasks?|owners?)\b[^.;]*?(?:assigned|given|set)\b|no (?:task|action item) assigned|no actionable|no decisions?(?: made)?\s*(?:[.;]|$)|[^.]*small talk (?:omitted|excluded))/i
+
 export function groundMeetingNotes(
   text: string,
   transcript: string,
@@ -97,7 +101,13 @@ export function groundMeetingNotes(
   }
   const out: string[] = []
   for (const s of sections) {
+    const isOpen = /open questions?/i.test(s.heading)
     const kept = s.lines.filter((l) => {
+      // "No task assigned", "no decisions" under Open questions: a note about the meeting, not a question
+      if (isOpen && FILLER.test(l.replace(/^\s*[-*]\s+/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, ''))) {
+        opts.dropped?.push(`${s.heading.replace(/^#+\s*/, '')}: ${l.trim()}`)
+        return false
+      }
       const keep = l.trim() && (!/^\s*[-*]\s/.test(l) || /no action items/i.test(l) || grounded(l))
       if (!keep && l.trim()) opts.dropped?.push(`${s.heading.replace(/^#+\s*/, '')}: ${l.trim()}`)
       return keep
@@ -127,13 +137,14 @@ export function partTopics(partNotes: string[]): { topic: string; said: string }
   for (const part of partNotes) {
     let cur: { topic: string; said: string } | null = null
     for (const line of part.split('\n')) {
-      const t = line.match(/^\s*[-*]\s*(?:\*\*)?Topic(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$/i)
+      // "- Topic: …" as asked – or a heading for it ("#### **Topic: …**"), as models also write it
+      const t = line.match(/^\s*(?:[-*]|#{1,6})\s*(?:\*\*)?Topic(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$/i)
       if (t) {
         cur = { topic: t[1].replace(/\*\*/g, '').replace(/\s*\((?:cont(?:inued|'d)?\.?)\)/i, '').trim(), said: '' }
         out.push(cur)
         continue
       }
-      const said = line.match(/^\s*[-*]\s*(?:\*\*)?Said(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/i)
+      const said = line.match(/^\s*[-*]\s*(?:\*\*)?(?:Said|Details)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/i)
       if (said && cur && !cur.said) cur.said = said[1].replace(/\*\*/g, '').trim()
     }
   }
@@ -222,8 +233,14 @@ export function normalizeMeetingNotes(text: string): string {
       if (!topic) out.push('')
       continue
     }
-    // "**Topic (Continued)**:" – a part's carry-over, not something to show
-    const tidy = line.replace(/\s*\((?:cont(?:inued|'d)?\.?)\)(?=\s*\**\s*:)/i, '')
+    // "**Topic (Continued)**:" – a part's carry-over, not something to show; and the parts' own labels
+    // copied into the notes ("**Topic: Crate loading**", "… Outcome: Open.")
+    const tidy = line
+      .replace(/\s*\((?:cont(?:inued|'d)?\.?)\)(?=\s*\**\s*:)/i, '')
+      .replace(/^(\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?\*\*)Topic:\s*/i, '$1')
+      .replace(/\s*\bOutcome:\s*Open\.?\s*$/i, '')
+      .replace(/\bOutcome:\s*/gi, '')
+      .replace(/(\*\*[^*]{1,80}\*\*)\s+[–—-]\s+/, '$1: ')
     // a numbered item, or a plain line, is a bullet
     let item = tidy.replace(/^(\s*)\d+[.)]\s+/, '$1- ')
     if (!/^\s*[-*]\s/.test(item) && section) item = `- ${item.trim()}`

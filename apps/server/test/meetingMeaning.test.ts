@@ -65,3 +65,38 @@ describe('a meeting read by meaning', () => {
     expect(out).not.toContain('Margaret')
   })
 })
+
+describe('notes in the shape asked for, from what a model actually wrote', async () => {
+  const { normalizeMeetingNotes, partTopics } = await import('../src/meetingNotes')
+  it('drops the parts’ labels from the Summary, and filler from Open questions', () => {
+    const transcript =
+      'Let’s get that crate loaded up. Actually, no, don’t load it up. Leave it where it is. Let’s make a space across the road for the dumpster that’s coming up Tuesday. The water meter contractor is getting his box on Tuesday. Maybe put it in the middle of the lot like a dumpster.'
+    const made = `## Summary
+- **Topic: Crate Loading and Dumpster Space** – Initial plan to load a crate was changed; the crate stays where it is, with space made for a dumpster coming Tuesday. Outcome: Changed (crate not loaded).
+- **Topic: Water Meter Box** – The contractor's box comes Tuesday; the middle of the lot was suggested. Outcome: Open.
+
+## Open Questions
+- **Water Meter Box**: Where the box goes – the middle of the lot was suggested.
+- **Crate Loading**: No action item assigned.
+- **Miscellaneous Tasks**: No actionable decisions; small talk omitted.
+- **Waste**: No formal task assigned, but informal agreement to handle it.`
+    const dropped: string[] = []
+    const out = groundMeetingNotes(made, transcript, '', { dropped })
+    expect(out).toContain('- **Crate Loading and Dumpster Space**: Initial plan to load a crate was changed')
+    expect(out).toContain('Changed (crate not loaded).')
+    expect(out).toContain('- **Water Meter Box**: The contractor\'s box comes Tuesday; the middle of the lot was suggested.\n')
+    expect(out).not.toMatch(/Topic:|Outcome:/)
+    expect(out).toContain('- **Water Meter Box**: Where the box goes')
+    expect(out).not.toMatch(/No action item assigned|small talk|No formal task/)
+    expect(dropped).toHaveLength(3)
+    expect(normalizeMeetingNotes('## Summary\n- **Topic: Gate** – starts Monday')).toBe('## Summary\n- **Gate**: starts Monday')
+  })
+
+  it('reads the parts’ topics written as headings with "Details"', () => {
+    const part = '#### **Topic: 20-Year Sample Testing of Sprinklers**\n- **Details**: Mentioned as a requirement for quick response sprinklers.\n- **Outcome**: Open.\n\n#### **Topic: Crate Loading**\n- **Details**: The crate stays where it is.'
+    expect(partTopics([part])).toEqual([
+      { topic: '20-Year Sample Testing of Sprinklers', said: 'Mentioned as a requirement for quick response sprinklers.' },
+      { topic: 'Crate Loading', said: 'The crate stays where it is.' },
+    ])
+  })
+})
