@@ -139,10 +139,14 @@ export class SyncEngine {
     // device and offline search can find it too.
     const transcripts = getTranscripts(doc)
     const missing = Object.entries(attTexts).filter(([id, t]) => transcripts.get(`att:${id}`) !== t)
-    if (missing.length) {
+    // and who transcribed a recording (Whisper, or Apple on the phone): shown with its transcript
+    const byAll = this.store.getSetting<Record<string, string>>('transcribedBy') ?? {}
+    const by = Object.keys(attTexts).filter((id) => byAll[id] && transcripts.get(`by:att:${id}`) !== byAll[id])
+    if (missing.length || by.length) {
       void this.change(noteDocName(noteId), (d) => {
         const tr = getTranscripts(d)
         for (const [id, t] of missing) tr.set(`att:${id}`, t)
+        for (const id of by) tr.set(`by:att:${id}`, byAll[id])
       }).catch((err) => log.error('could not write attachment text', err))
     }
 

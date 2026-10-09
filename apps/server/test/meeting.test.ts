@@ -161,7 +161,9 @@ describe('a long meeting, heard by the server', () => {
       await app.sync.change(noteDocName('notemeeting00002'), (doc) => {
         const p = new Y.XmlElement('paragraph')
         p.insert(0, [new Y.XmlText('Attendees: Doug')])
-        getContent(doc).insert(0, [p])
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'meetingaudio0001')
+        getContent(doc).insert(0, [p, rec])
       })
       prompts.length = 0
       const api = (m: string, p: string, b?: unknown) =>
@@ -182,6 +184,22 @@ describe('a long meeting, heard by the server', () => {
       // the job says who heard it
       expect(done.agent).toMatch(/^Whisper \+ /)
       // the recording is searchable by Whisper's reading
+      expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
+      // and the note knows who transcribed it (shown under the recording)
+      const { getTranscripts } = await import('@reconnotes/core')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(getTranscripts(app.sync.getDoc(noteDocName('notemeeting00002'))!).get('by:att:meetingaudio0001')).toBe('Whisper')
+
+      // redone later, without the phone's reading – but the saved transcript is the phone's: Whisper hears it again
+      const { APPLE_SPEECH, setTranscribedBy } = await import('../src/attachments')
+      app.store.setAttachmentText('meetingaudio0001', 'Locates try to keep up with the gas.', 'done')
+      setTranscribedBy(app.store, 'meetingaudio0001', APPLE_SPEECH)
+      hint = ''
+      const redo = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'meetingaudio0001' } })).job
+      const again = (await api('GET', `/api/jobs/${redo.id}/wait`)).job
+      expect(again.error ?? again.status).toBe('done')
+      expect(again.agent).toMatch(/^Whisper \+ /)
+      expect(hint).toBe('Doug, MinneTrials.')
       expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
     } finally {
       whisper.close()

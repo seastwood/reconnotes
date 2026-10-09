@@ -20,7 +20,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment } from './attachments'
+import { processAttachment, APPLE_SPEECH, setTranscribedBy, transcribedBy } from './attachments'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
@@ -451,8 +451,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     // the server's speech-to-text (Whisper) reads a meeting far better: it comes first when there is one
     const serverHears = ai.agents.available('audio')
     const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
-    // already read by the server (in the background): that; the phone's reading saved earlier doesn't count
-    if (serverHears && saved && saved !== onDevice) transcript = saved
+    const savedBy = att ? transcribedBy(store, att.id) : null
+    // already read by the server's speech-to-text: that – not the phone's reading, nor one nobody knows the source of
+    if (serverHears && saved && savedBy && savedBy !== APPLE_SPEECH) (transcript = saved), (agent = savedBy)
     else if (serverHears && att && store.hasBlob(att.id)) {
       reportProgress('Transcribing the recording…')
       try {
@@ -470,8 +471,11 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       transcript = r.text
       agent = r.agent
     }
+    // who heard it: the server's speech-to-text, or the phone (Apple)
+    const heardBy = agent ?? (transcript === onDevice ? APPLE_SPEECH : savedBy)
     // the recording becomes searchable by what was said – the better reading replacing the phone's
-    if (att && transcript && transcript !== att.text) {
+    if (att && transcript && (transcript !== att.text || (heardBy && heardBy !== savedBy))) {
+      if (heardBy) setTranscribedBy(store, att.id, heardBy)
       store.setAttachmentText(att.id, transcript, 'done')
       sync.reindexNotesFor(att.id)
     }
@@ -490,8 +494,6 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       })
       .join('\n')
     await writeResult(sync, noteId, job.id, md, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
-    // who heard it: the server's speech-to-text, or the phone (Apple) – shown on the job
-    const heardBy = agent ?? (transcript === onDevice ? 'Apple speech recognition (on the phone)' : saved && transcript === saved ? 'the recording’s saved transcript' : null)
     return { result: { noteId, text: preview(md), heardBy }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 

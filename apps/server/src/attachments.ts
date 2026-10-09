@@ -29,7 +29,11 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
     else if (isOfficeFile(att.mime, att.name)) text = officeText(data, att.name)
     else if (isAiImage(att.mime)) text = await ai.imageText(data, att.mime)
     else if (att.mime === 'application/pdf') text = await ai.pdfText(data)
-    else text = (await ai.transcribeAudio(data, att.mime, att.name)).text
+    else {
+      const r = await ai.transcribeAudio(data, att.mime, att.name)
+      text = r.text
+      setTranscribedBy(store, att.id, r.agent)
+    }
   } catch (err) {
     log.error(`text extraction failed for ${att.id} (${att.mime})`, err)
     store.setAttachmentText(att.id, null, 'error')
@@ -63,3 +67,19 @@ export function retryAttachments(config: Config, store: Store, ai: Ai, sync: Syn
     queueAttachment(config, store, ai, sync, att.id)
   }
 }
+
+/**
+ * Who turned a recording into text – a speech-to-text agent ("faster-whisper-large-v3-turbo"), or
+ * Apple's recognition on the phone: kept, and shown with the transcript, so it's clear which reading
+ * it is (and a better one can replace the phone's).
+ */
+export function transcribedBy(store: Store, attachmentId: string): string | null {
+  return store.getSetting<Record<string, string>>('transcribedBy')?.[attachmentId] ?? null
+}
+
+export function setTranscribedBy(store: Store, attachmentId: string, by: string) {
+  store.setSetting('transcribedBy', { ...(store.getSetting<Record<string, string>>('transcribedBy') ?? {}), [attachmentId]: by })
+}
+
+/** Apple's on-device reading (made for dictation): a server's speech-to-text should replace it. */
+export const APPLE_SPEECH = 'Apple speech recognition (on the phone)'

@@ -48,17 +48,17 @@ function useAttachmentUrl(id: string | null) {
 }
 
 /** Text the server extracted from an attachment (OCR / transcript), synced in the note. */
-function useAttachmentText(id: string) {
+function useAttachmentText(id: string, key = `att:${id}`) {
   const ctx = useContext(NoteContext)
   const [text, setText] = useState<string | null>(null)
   useEffect(() => {
     if (!ctx) return
     const tr = getTranscripts(ctx.doc)
-    const update = () => setText(tr.get(`att:${id}`) ?? null)
+    const update = () => setText(tr.get(key) ?? null)
     update()
     tr.observe(update)
     return () => tr.unobserve(update)
-  }, [ctx, id])
+  }, [ctx, id, key])
   return text
 }
 
@@ -397,6 +397,8 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     if (replay.get().attachmentId === node.attrs.attachmentId) stopReplay()
   }, [node.attrs.attachmentId])
   const transcript = useAttachmentText(node.attrs.attachmentId)
+  // who transcribed it: the server's speech-to-text (Whisper…) or Apple's on the phone
+  const heardBy = useAttachmentText(node.attrs.attachmentId, `by:att:${node.attrs.attachmentId}`)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
@@ -489,6 +491,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       )}
       {open && transcript && (
         <>
+          {heardBy && <div className="audio-transcript-by">Transcribed by {heardBy}</div>}
           <div className="audio-transcript">{highlight(transcript, findQuery)}</div>
           <div className="audio-transcript-actions">
             <button {...tap(() => void copyText(transcript).then(() => flash('Copied')))}>
