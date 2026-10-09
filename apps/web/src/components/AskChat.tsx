@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, BookOpen, ChevronLeft, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
-import { getNotes, readNote } from '@reconnotes/core'
+import { ArrowUp, BookOpen, Check, ChevronLeft, ChevronRight, CornerLeftUp, FileText, Folder, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
+import { getNotes, listFolders, readNote } from '@reconnotes/core'
 import { api } from '../lib/api'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { useFolderAccess } from '../lib/folderLock'
@@ -445,7 +445,6 @@ function ChatInput({
 function RefNotes({ noteId }: { noteId: string }) {
   const [refs, setRefs] = useState<string[] | null>(null)
   const [picking, setPicking] = useState(false)
-  const [q, setQ] = useState('')
   useWorkspace()
   useEffect(() => {
     let alive = true
@@ -467,13 +466,6 @@ function RefNotes({ noteId }: { noteId: string }) {
   }
   if (refs === null) return null
   const shown = refs.filter((id) => title(id) !== null)
-  const matches = picking
-    ? [...notes.entries()]
-        .map(([id, m]) => ({ id, n: readNote(m) }))
-        .filter(({ id, n }) => id !== noteId && !n.trashedAt && !n.template && !refs.includes(id) && (n.title || 'Untitled').toLowerCase().includes(q.trim().toLowerCase()))
-        .sort((a, b) => b.n.updatedAt - a.n.updatedAt)
-        .slice(0, 8)
-    : []
   return (
     <div className="ask-refs">
       <div className="ask-refs-row">
@@ -489,19 +481,95 @@ function RefNotes({ noteId }: { noteId: string }) {
           </span>
         ))}
         {!shown.length && !picking && <span className="ask-refs-none">only this note</span>}
-        <button className="text ask-refs-add" onClick={() => (setPicking(!picking), setQ(''))}>
-          <Plus size={13} /> {picking ? 'Done' : 'Add a note'}
+        <button className="text ask-refs-add" onClick={() => setPicking(!picking)}>
+          {picking ? <Check size={13} /> : <Plus size={13} />} {picking ? 'Done' : 'Add a note'}
         </button>
       </div>
-      {picking && (
-        <div className="ask-refs-pick">
-          <input autoFocus value={q} placeholder="A note it refers to (e.g. its manual)…" onChange={(e) => setQ(e.target.value)} />
-          {matches.map(({ id, n }) => (
-            <button key={id} className="ask-refs-option" onClick={() => (save([...refs, id]), setPicking(false))}>
-              {n.title || 'Untitled'}
-            </button>
-          ))}
+      {picking && <RefPicker noteId={noteId} chosen={refs} onToggle={(id) => save(refs.includes(id) ? refs.filter((x) => x !== id) : [...refs, id])} />}
+    </div>
+  )
+}
+
+/**
+ * Picking the notes Ask also reads: the folders, starting in the one the note
+ * is in (a manual is usually next to it) – into a folder, up, or anywhere by
+ * the path – and a search of every note.
+ */
+function RefPicker({ noteId, chosen, onToggle }: { noteId: string; chosen: string[]; onToggle: (id: string) => void }) {
+  useWorkspace()
+  const notes = [...getNotes(workspaceDoc).entries()].map(([id, m]) => ({ id, n: readNote(m) })).filter(({ id, n }) => id !== noteId && !n.trashedAt && !n.template)
+  const folders = listFolders(workspaceDoc).filter((f) => !f.trashedAt)
+  const live = new Map(folders.map((f) => [f.id, f]))
+  const folderOf = (folderId: string | null) => (folderId && live.has(folderId) ? folderId : null)
+  const own = getNotes(workspaceDoc).get(noteId)
+  const [at, setAt] = useState<string | null>(() => folderOf(own ? readNote(own).folderId : null))
+  const [q, setQ] = useState('')
+  const path = (id: string | null) => {
+    const out: { id: string; name: string }[] = []
+    for (let f = id ? live.get(id) : undefined; f; f = f.parentId ? live.get(f.parentId) : undefined) out.unshift({ id: f.id, name: f.name })
+    return out
+  }
+  const byTitle = (a: { n: { title: string } }, b: { n: { title: string } }) => (a.n.title || 'Untitled').localeCompare(b.n.title || 'Untitled', undefined, { numeric: true })
+  const row = ({ id, n }: { id: string; n: { title: string; folderId: string | null } }, where?: string) => (
+    <button key={id} className={`ask-refs-option${chosen.includes(id) ? ' chosen' : ''}`} onClick={() => onToggle(id)}>
+      <FileText size={15} />
+      <span className="ask-refs-option-text">
+        {n.title || 'Untitled'}
+        {where !== undefined && <span className="ask-refs-where">{where || 'Not in a folder'}</span>}
+      </span>
+      {chosen.includes(id) && <Check size={16} className="ask-refs-check" />}
+    </button>
+  )
+  const search = q.trim().toLowerCase()
+  const crumbs = path(at)
+  return (
+    <div className="ask-refs-pick">
+      <input value={q} placeholder="Search every note…" onChange={(e) => setQ(e.target.value)} />
+      {search ? (
+        <div className="ask-refs-list">
+          {notes
+            .filter(({ n }) => (n.title || 'Untitled').toLowerCase().includes(search))
+            .sort(byTitle)
+            .slice(0, 30)
+            .map((x) => row(x, path(folderOf(x.n.folderId)).map((f) => f.name).join(' › ')))}
         </div>
+      ) : (
+        <>
+          <div className="ask-refs-crumbs">
+            {at !== null && (
+              <button className="icon" aria-label="Up a folder" onClick={() => setAt(crumbs.length > 1 ? crumbs[crumbs.length - 2].id : null)}>
+                <CornerLeftUp size={15} />
+              </button>
+            )}
+            <button className="text" onClick={() => setAt(null)}>
+              All folders
+            </button>
+            {crumbs.map((c) => (
+              <span key={c.id} className="ask-refs-crumb">
+                <ChevronRight size={12} />
+                <button className="text" onClick={() => setAt(c.id)}>
+                  {c.name}
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="ask-refs-list">
+            {folders
+              .filter((f) => (f.parentId && live.has(f.parentId) ? f.parentId : null) === at)
+              .sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : a.name.localeCompare(b.name)))
+              .map((f) => (
+                <button key={f.id} className="ask-refs-option folder" onClick={() => setAt(f.id)}>
+                  <Folder size={15} />
+                  <span className="ask-refs-option-text">{f.name}</span>
+                  <ChevronRight size={15} className="ask-refs-check" />
+                </button>
+              ))}
+            {notes
+              .filter(({ n }) => folderOf(n.folderId) === at)
+              .sort(byTitle)
+              .map((x) => row(x))}
+          </div>
+        </>
       )}
     </div>
   )

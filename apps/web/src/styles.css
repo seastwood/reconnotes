@@ -4536,8 +4536,8 @@ a.button {
 .ask-refs-pick {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 8px;
 }
 .ask-refs-pick input {
   font: inherit;
@@ -4548,11 +4548,68 @@ a.button {
   background: var(--paper);
   color: var(--text);
 }
+.ask-refs-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+}
+.ask-refs-crumbs .icon {
+  width: 28px;
+  height: 28px;
+}
+.ask-refs-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+}
+.ask-refs-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(46vh, 380px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
 .ask-refs-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 10px 10px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+.ask-refs-option:last-child {
+  border-bottom: 0;
 }
 .ask-refs-option:hover {
-  background: rgba(127, 127, 127, 0.12);
+  background: rgba(127, 127, 127, 0.1);
+}
+.ask-refs-option.chosen {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ask-refs-option.folder svg:first-child {
+  color: var(--accent);
+}
+.ask-refs-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-refs-where {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ask-refs-check {
+  flex: none;
+  color: var(--accent);
 }
