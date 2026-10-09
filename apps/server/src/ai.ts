@@ -5,12 +5,12 @@ import { Vocabulary } from './vocabulary'
 import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, NoTextError, describeError, freeOllamaGpu, readingMode, rememberSpeechNeedsRoom, speechNeedsRoom, speechUsed, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, describeError, freeOllamaGpu, readingMode, rememberSpeechNeedsRoom, speechNeedsRoom, speechUsed, streaming, tracing, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
-import { coverTopics, groundMeetingNotes, normalizeMeetingNotes, partTopics } from './meetingNotes'
+import { coverTopics, groundMeetingNotes, normalizeMeetingNotes, partTopics, topicBullet } from './meetingNotes'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -251,7 +251,7 @@ export class Ai {
     transcript: string,
     today: string,
     who: { attendees?: string[]; voices?: number; named?: string[] } = {},
-  ): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string } }> {
+  ): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string; how: string[]; dropped: string[] } }> {
     // a line per speaker's turn ("Jesse: …") when the voices were told apart: kept as lines
     const said = transcript.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
     // how long it was, from how much was said (people speak ~140 words a minute)
@@ -303,6 +303,13 @@ If no task was said, write "- [ ] No action items" under that heading.`
 ${reasoning}`
     const { result, agent } = await this.agents.run('compile', async (backend) => {
       const partNotesAll: string[] = []
+      // how each step was answered (thinking or not, reloads, the CPU): kept with the job
+      const how: string[] = []
+      const ask = async (step: string, ...args: Parameters<typeof backend.generate>) => {
+        const r = await tracing(() => backend.generate(...args))
+        how.push(`${step}: ${r.how.join('; ') || 'answered'}`)
+        return r.value
+      }
       let body: string
       if (parts.length === 1) {
         body = `Write meeting notes from a recording's transcript and the notes taken during it. Today is ${today}.
@@ -326,7 +333,8 @@ ${said || '(no speech recognised)'}
           reportProgress(`Reading part ${i + 1} of ${parts.length} of the meeting…`)
           const from = Math.round((minutes * i) / parts.length)
           const to = Math.round((minutes * (i + 1)) / parts.length)
-          const raw = await backend.generate(
+          const raw = await ask(
+            `Part ${i + 1}`,
             [
               {
                 text: withExtra(`This is part ${i + 1} of ${parts.length} of a meeting's transcript (about minutes ${from}–${to}), from speech recognition – words can be misheard.${people}${speakers}
@@ -376,13 +384,19 @@ ${notes.slice(0, 8000) || '(none)'}
 ${partNotes.join('\n\n')}
 </parts>`
       }
-      const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true })
+      // putting a long meeting together takes thinking: room for it, so it isn't cut off and asked
+      // again without (a much weaker answer)
+      const raw = await ask('Final notes', [{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true, thinkRoom: parts.length > 1 ? 6144 : undefined })
       const rawOut = raw
       // every topic the parts found is in the Summary, even if putting them together dropped it –
       // then all of it checked against what was said
       const written = coverTopics(normalizeMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim()), partTopics(partNotesAll))
       // the model's own writing kept with the job: when the notes come out poorly, it shows why
-      return { text: groundMeetingNotes(written, transcript, notes), draft: { parts: partNotesAll, raw: rawOut.slice(0, 20000) } }
+      const dropped: string[] = []
+      const fallback = partTopics(partNotesAll).map(topicBullet)
+      const text = groundMeetingNotes(written, transcript, notes, { fallback, dropped })
+      if (dropped.length) log.info(`meeting notes: left out ${dropped.length} line(s) not found in what was said`)
+      return { text, draft: { parts: partNotesAll, raw: rawOut.slice(0, 20000), how, dropped } }
     })
     log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.text.length})`)
     return { text: result.text, agent: agent.name, draft: result.draft }

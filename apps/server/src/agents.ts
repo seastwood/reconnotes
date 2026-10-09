@@ -136,6 +136,18 @@ export function streaming<T>(onText: (soFar: string) => void, run: () => Promise
   return streamTo.run(onText, run)
 }
 
+/**
+ * Set while a caller wants to know how the model answered (the meeting notes keep it with the
+ * job): which way of asking worked – with thinking, or without after it ran out of room – the
+ * context it was loaded with, and how many tokens it took.
+ */
+const howTo = new AsyncLocalStorage<string[]>()
+export async function tracing<T>(run: () => Promise<T>): Promise<{ value: T; how: string[] }> {
+  const how: string[] = []
+  const value = await howTo.run(how, run)
+  return { value, how }
+}
+
 export type Part = { text: string } | { image: Buffer; mime: string } | { pdf: Buffer }
 
 /** A transcript with each word's time in the recording (seconds), for following along as it plays. */
@@ -146,7 +158,8 @@ export interface TimedTranscript {
 
 export interface Backend {
   /** `think`: reason before answering, where the model can (overrides the agent's "Let it think" for this request) */
-  generate(parts: Part[], maxTokens: number, opts?: { think?: boolean }): Promise<string>
+  /** `thinkRoom`: tokens to reason in, on top of the answer's (when thinking) */
+  generate(parts: Part[], maxTokens: number, opts?: { think?: boolean; thinkRoom?: number }): Promise<string>
   /** Speech to text (only OpenAI-compatible agents, e.g. a Whisper server). */
   /** `prompt`: words to expect (names, terms) – a hint, where the server takes one */
   transcribe?(audio: Buffer, mime: string, filename: string, prompt?: string): Promise<string>
@@ -555,6 +568,7 @@ export async function ensureFits(agent: AgentConfig, ctx: number) {
   reportProgress(`Loading ${agent.model}…`)
   if (!(await loadOllama(base, agent.model, ctx))) return
   loadedCtx.set(key, ctx)
+  howTo.getStore()?.push(`${self ? 'reloaded' : 'loaded'} ${agent.model} with context ${ctx}`)
   const now = await loadedModels(base)
   const me = now?.find((m) => sameModel(m.name, agent.model))
   if (!me || !spilled(me)) return
@@ -567,7 +581,10 @@ export async function ensureFits(agent: AgentConfig, ctx: number) {
   }
   await unloadOllama(base, [...others, me.name])
   if (others.length) log.info(`made room on the GPU for ${agent.model} (${ctx} context): unloaded ${others.join(', ')}`)
+  howTo.getStore()?.push(`it didn't fit beside ${[...others, ...whisper].join(', ')}: unloaded them and loaded it again`)
   if (await loadOllama(base, agent.model, ctx)) loadedCtx.set(key, ctx)
+  const after = (await loadedModels(base))?.find((m) => sameModel(m.name, agent.model))
+  if (after && spilled(after)) howTo.getStore()?.push(`${agent.model} runs partly on the CPU even on its own at context ${ctx} (slower, same answers)`)
 }
 
 async function makeRoom(agent: AgentConfig): Promise<string[]> {
@@ -643,8 +660,9 @@ class OllamaBackend implements Backend {
     return info
   }
 
-  async generate(parts: Part[], maxTokens: number, opts?: { think?: boolean }): Promise<string> {
+  async generate(parts: Part[], maxTokens: number, opts?: { think?: boolean; thinkRoom?: number }): Promise<string> {
     const think = opts?.think ?? this.agent.think
+    const askedRoom = opts?.thinkRoom ?? THINK_ROOM_ASKED
     if (parts.some((p) => 'pdf' in p)) throw new Error('Ollama models cannot read PDFs')
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
@@ -669,18 +687,23 @@ class OllamaBackend implements Backend {
       return ctx
     }
     // room on the GPU – sized for the first request (the context it'll be loaded with)
-    await makeRoomOnGpu(this.agent, ctxFor(info.thinking && think ? limit + THINK_ROOM_ASKED : limit))
+    await makeRoomOnGpu(this.agent, ctxFor(info.thinking && think ? limit + askedRoom : limit))
     const tried: string[] = []
     let thoughtTooLong = 0
 
     const attempt = async (label: string, run: () => Promise<OllamaReply>): Promise<string | null> => {
       const r = await run()
       const answer = answerOf(r.content)
-      if (answer) return answer
+      const ctx = lastCtx.get(`${trimSlash(this.agent.baseUrl)}|${this.agent.model}`)?.ctx
+      if (answer) {
+        howTo.getStore()?.push(`${label}: answered (${r.evalCount} tokens${r.thinking.trim() ? ', after thinking' : ''}; context ${ctx ?? '?'})`)
+        return answer
+      }
       if (ranOutThinking(r)) thoughtTooLong = Math.max(thoughtTooLong, r.evalCount)
       tried.push(
         `${label}: ${r.evalCount} tokens, done_reason=${r.doneReason || '?'}${r.thinking.trim() || /<think>/i.test(r.content) ? `, reasoning only: “${preview(r.thinking || r.content.replace(/<\/?think>/gi, ''), 80)}”` : ''}`,
       )
+      howTo.getStore()?.push(`${label}: no answer – ${ranOutThinking(r) ? `still thinking after ${r.evalCount} tokens` : `${r.evalCount} tokens, ${r.doneReason || 'stopped'}`} (context ${ctx ?? '?'})`)
       return null
     }
     // Qwen's "/no_think" switch, which some models honour instead of think:false
@@ -689,7 +712,7 @@ class OllamaBackend implements Backend {
     if (info.thinking && think) {
       // asked to think ("Let it think"): reason first, with room for it – a bounded amount, so a
       // small model that would think forever still gets to answer (below, without thinking)
-      const roomy = limit + THINK_ROOM_ASKED
+      const roomy = limit + askedRoom
       reportProgress(`${this.agent.name} is thinking it through…`)
       const thought = await attempt('chat with thinking', () => this.chat(text, images, roomy, ctxFor(roomy), true)).catch((e) => {
         tried.push(`chat with thinking: ${(e as Error).message}`)

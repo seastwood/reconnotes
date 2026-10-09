@@ -171,6 +171,28 @@ John, Jane, Mike`
     expect(out).toBe('## Action items\n- [ ] Finish the gate\n- [ ] Move the cottage box after the project\n- [ ] Charlie to look into Summit\n- [ ] Bring the projector')
   })
 
+  it('a sentence’s first word isn’t taken for a name nobody said ("Initially…", "Later…")', () => {
+    const transcript =
+      'Speaker 1: What about the lights in the shop? Speaker 2: We could keep the fluorescents. Speaker 1: No, put LEDs in, those are good. Speaker 2: Yep, LEDs then.'
+    const made = `## Summary
+- **Shop lighting**: Initially keeping the fluorescents came up. Later, LEDs were chosen instead; Speaker 2 agreed.`
+    expect(groundMeetingNotes(made, transcript, '')).toBe(made)
+    // a name in the middle of a sentence that nobody said is still left out
+    const dropped: string[] = []
+    const invented = groundMeetingNotes('## Summary\n- **Shop lighting**: LEDs chosen, as Margaret wanted', transcript, '', { dropped })
+    expect(invented).not.toContain('Margaret')
+    expect(dropped).toEqual(['Summary: - **Shop lighting**: LEDs chosen, as Margaret wanted'])
+  })
+
+  it('a Summary left empty falls back to the parts’ topics, then to what was said (without speaker labels)', () => {
+    const transcript = 'Speaker 1: Jesse, is the sample testing a requirement?\nSpeaker 2: Every twenty years.'
+    const made = '## Summary\n- Margaret approved the Zephyr budget\n\n## Decisions\n- Sample testing every twenty years'
+    const fromParts = groundMeetingNotes(made, transcript, '', { fallback: ['- **Sample testing**: a requirement every twenty years'] })
+    expect(fromParts).toContain('## Summary\n- **Sample testing**: a requirement every twenty years\n')
+    const quoted = groundMeetingNotes(made, transcript, '')
+    expect(quoted).toContain('## Summary\n- “Jesse, is the sample testing a requirement? Every twenty years.”')
+  })
+
   it('keeps what was said, in other words', () => {
     const transcript = 'Doug will order the motor controllers by Friday. Sophie said the gym booking is done, so we keep Thursday practice.'
     const made = `## Summary
@@ -506,6 +528,8 @@ describe('who said what', () => {
       expect(hint.startsWith('Seth, Jesse, Charlie')).toBe(true)
       expect(asked).toBe('/diarize?speakers=3&threshold=0.9')
       expect(done.result.voices).toBe(2)
+      // how the model answered each step, kept with the job
+      expect(done.result.draft.how.some((h: string) => h.startsWith('Final notes: '))).toBe(true)
       // the model read it as turns
       expect(prompts[0]).toContain('Speaker 1: Jesse, is the sample testing a code requirement?\nSpeaker 2: I think so, every twenty years. Then Charlie\nSpeaker 1: looks into it.')
       expect(prompts[0]).toContain('The people at the meeting: Seth, Jesse, Charlie')

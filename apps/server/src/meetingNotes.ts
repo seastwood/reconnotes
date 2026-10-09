@@ -35,7 +35,16 @@ export function meetingNotesText(markdown: string): string {
 const PLACEHOLDER =
   /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none|undisclosed(?: person)?|unnamed(?: person)?|unknown person|someone|person not (?:named|specified)|unassigned|no owner|owner unknown|anyone|no date|no deadline|date unknown)\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
 
-export function groundMeetingNotes(text: string, transcript: string, notes: string): string {
+/**
+ * `fallback`: Summary bullets to use if none of the model's own survive (each part's topics);
+ * `dropped`: collects the lines left out, so the job can show what was taken away and why.
+ */
+export function groundMeetingNotes(
+  text: string,
+  transcript: string,
+  notes: string,
+  opts: { fallback?: string[]; dropped?: string[] } = {},
+): string {
   const source = `${transcript}\n${notes}`
   const have = new Set(words(source))
   const found = (w: string) => have.has(w) || [...have].some((h) => h.length >= 4 && w.length >= 4 && h.slice(0, 5) === w.slice(0, 5))
@@ -43,13 +52,14 @@ export function groundMeetingNotes(text: string, transcript: string, notes: stri
     // a bullet's bold topic label ("**Tractor Purchase**:") names the topic in the notes' own words –
     // not names someone said: the rest of the line is what's checked
     const body = line.replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, '')
-    // names: capitalised words (not the first) that were never said or written
-    const names = body
-      .split(/\s+/)
-      .slice(1)
+    // names: capitalised words in the middle of a sentence that were never said or written – not
+    // a sentence's first word ("Initially, … Later, …"), which is capitalised whatever it is
+    const tokens = body.split(/\s+/)
+    const names = tokens
+      .filter((_, i) => i > 0 && !/[.!?;:"“”'‘’(\-–—]$/.test(tokens[i - 1]) && !/^["“'‘(]/.test(tokens[i]))
       .map((w) => w.replace(/[^\p{L}]/gu, ''))
-      .filter((w) => /^\p{Lu}\p{Ll}+$/u.test(w))
-    if (names.some((n) => !found(n.toLowerCase()) && !/^(I|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(n))) return false
+      .filter((w) => /^\p{Lu}\p{Ll}+$/u.test(w) && !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()))
+    if (names.some((n) => !found(n.toLowerCase()) && !/^(I|Speaker|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(n))) return false
     // numbers (dates, amounts) that weren't in it
     if ((body.match(/\d+/g) ?? []).some((n) => !source.includes(n))) return false
     const content = words(body).filter((w) => w.length >= 4 && !STOP.has(w) && !GENERIC.has(w) && !/^\d+$/.test(w))
@@ -74,12 +84,20 @@ export function groundMeetingNotes(text: string, transcript: string, notes: stri
   }
   const out: string[] = []
   for (const s of sections) {
-    const kept = s.lines.filter((l) => l.trim() && (!/^\s*[-*]\s/.test(l) || /no action items/i.test(l) || grounded(l)))
+    const kept = s.lines.filter((l) => {
+      const keep = l.trim() && (!/^\s*[-*]\s/.test(l) || /no action items/i.test(l) || grounded(l))
+      if (!keep && l.trim()) opts.dropped?.push(`${s.heading.replace(/^#+\s*/, '')}: ${l.trim()}`)
+      return keep
+    })
     const isActions = /action/i.test(s.heading)
     const isSummary = /summary/i.test(s.heading)
     const bullets = kept.filter((l) => /^\s*[-*]\s/.test(l) && !/no action items/i.test(l))
-    if (isSummary && !bullets.length) {
-      const said = transcript.replace(/\s+/g, ' ').trim()
+    if (isSummary && !bullets.length && opts.fallback?.length) {
+      // what each part of the meeting found – the model's own reading, just not put together
+      out.push(s.heading, ...opts.fallback, '')
+    } else if (isSummary && !bullets.length) {
+      // (without the "Speaker 1:" labels the transcript has per turn)
+      const said = transcript.replace(/^[^\n:]{1,40}:\s/gm, '').replace(/\s+/g, ' ').trim()
       if (!said) continue
       out.push(s.heading, `- “${said.length > 300 ? `${said.slice(0, 297).replace(/\s+\S*$/, '')}…` : said}”`, '')
     } else if (isActions && !bullets.length) out.push(s.heading, 'No action items.', '')
@@ -142,7 +160,7 @@ export function coverTopics(markdown: string, topics: { topic: string; said: str
       return (name.length && byName >= Math.min(2, name.length)) || byWhat >= Math.max(2, Math.ceil(what.length / 3))
     }
     if (said.some(has) || (has(rest) && name.length > 1 && name.every((w) => rest.has(w)))) continue
-    missing.push(`- **${t.topic.replace(/[.:]\s*$/, '')}**: ${t.said}`)
+    missing.push(topicBullet(t))
   }
   if (!missing.length) return markdown
   // after the last bullet of the Summary
@@ -151,6 +169,9 @@ export function coverTopics(markdown: string, topics: { topic: string; said: str
   lines.splice(at, 0, ...missing)
   return lines.join('\n')
 }
+
+/** A part's topic as a Summary bullet: "- **Gate project**: what was said". */
+export const topicBullet = (t: { topic: string; said: string }) => `- **${t.topic.replace(/[.:]\s*$/, '')}**: ${t.said}`
 
 /** the notes' own sections (a heading that's none of these is a topic inside one) */
 const SECTION = /^(summary|decisions?|open questions?|action items?|next steps|tasks|to-?dos?)\b/i

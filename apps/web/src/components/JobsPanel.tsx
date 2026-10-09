@@ -405,8 +405,15 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
             <details className="job-result job-draft">
               <summary className="muted">How the AI wrote it</summary>
               {(() => {
-                const d = j.result!.draft as { parts?: string[]; raw?: string }
-                const all = [...(d.parts ?? []), d.raw ? `Final:\n${d.raw}` : ''].filter(Boolean).join('\n\n')
+                const d = j.result!.draft as { parts?: string[]; raw?: string; how?: string[]; dropped?: string[] }
+                const all = [
+                  d.how?.length ? `How the model answered:\n${d.how.map((h) => `- ${h}`).join('\n')}` : '',
+                  ...(d.parts ?? []),
+                  d.raw ? `Final:\n${d.raw}` : '',
+                  d.dropped?.length ? `Left out (not found in what was said):\n${d.dropped.map((l) => `- ${l}`).join('\n')}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('\n\n')
                 return (
                   <>
                     <pre>{all}</pre>
