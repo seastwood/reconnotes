@@ -50,7 +50,8 @@ beforeAll(async () => {
     if (!have || have.ctx !== ctx) {
       loaded = loaded.filter((m) => m.name !== body.model)
       const used = loaded.reduce((a, m) => a + m.vram, 0) + whisperMb
-      const size = SIZES[body.model] ?? 1000
+      // a bigger context takes more memory (40 MB per 1K beyond 8K)
+      const size = (SIZES[body.model] ?? 1000) + (Math.max(0, ctx - 8192) / 1024) * 40
       loaded.push({ name: body.model, size, vram: Math.max(0, Math.min(size, GPU - used)), ctx })
       loads.push({ name: body.model, ctx })
     }
@@ -187,5 +188,40 @@ describe('Whisper (Speaches) on the same GPU', () => {
     expect(on('qwen3:8b')!.vram).toBe(6100)
     // and the squeeze didn't teach it that this GPU only holds 5.4 GB
     expect(store.getSetting<Record<string, { fitMb?: number }>>('ollama.gpu')?.[url]?.fitMb ?? 6100).toBeGreaterThanOrEqual(6100)
+  })
+})
+
+describe('a model that grows while it’s used', () => {
+  it('makes room before a bigger context would push it onto the CPU', async () => {
+    // qwen3 fits beside qwen2.5 at its usual size (8.3 of 8.4 GB)…
+    GPU = 8400
+    loaded = [
+      { name: 'qwen3:8b', size: 6100, vram: 6100, ctx: 8192 },
+      { name: 'qwen2.5:3b', size: 2200, vram: 2200, ctx: 8192 },
+    ]
+    served.length = 0
+    unloads.length = 0
+    // …but a long meeting needs a 32K context: 7 GB – not beside it
+    await run('qwen3:8b', 70_000)
+    expect(unloads).toContain('qwen2.5:3b')
+    const q = on('qwen3:8b')!
+    expect(q.ctx).toBe(32768)
+    expect(q.vram).toBe(q.size)
+    // and the request itself ran with all of it on the GPU
+    expect(served.at(-1)).toEqual({ name: 'qwen3:8b', vram: q.size })
+    GPU = 7000
+  })
+
+  it('leaves the others alone when the bigger model still fits', async () => {
+    GPU = 24000
+    loaded = [
+      { name: 'qwen3:8b', size: 6100, vram: 6100, ctx: 8192 },
+      { name: 'nomic-embed-text:latest', size: 300, vram: 300, ctx: 2048 },
+    ]
+    unloads.length = 0
+    await run('qwen3:8b', 70_000)
+    expect(unloads).toEqual([])
+    expect(on('nomic-embed-text:latest')).toBeTruthy()
+    GPU = 7000
   })
 })

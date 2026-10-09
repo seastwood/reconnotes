@@ -21,6 +21,8 @@ beforeAll(async () => {
     if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [] }))
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'thinking'], model_info: { 'qwen3.context_length': 40960 } }))
     const json = JSON.parse(body)
+    // loading the model (before a request): not a request
+    if (json.prompt === '' && !json.messages) return res.end('{}')
     chats.push(json)
     res.end(
       JSON.stringify(

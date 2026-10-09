@@ -473,46 +473,78 @@ export function rememberSpeechNeedsRoom(agent: AgentConfig) {
  */
 export async function makeRoomOnGpu(agent: AgentConfig, ctx?: number): Promise<string[]> {
   const out = await makeRoom(agent)
-  // Whisper still loaded: load the model now and look, before a long job runs squeezed
-  if (ctx && speechInUse.size) await probeBesideSpeech(agent, ctx)
+  // load it now, with the context the job asks for, and see that it fits
+  if (ctx) await ensureFits(agent, ctx)
   return out
 }
 
-/**
- * Load the model (with the context the job will ask for) and see whether it fits beside the
- * speech-to-text model. If it was squeezed partly onto the CPU: Whisper out, the model out
- * (it loads again fully with the job), and remembered for next time. Seeing it only after a
- * request would leave that request – a long meeting's first part – running slowly.
- */
-async function probeBesideSpeech(agent: AgentConfig, ctx: number) {
-  const base = trimSlash(agent.baseUrl)
-  if ((await loadedModels(base))?.some((m) => sameModel(m.name, agent.model))) return
-  if (needsSpeechOut(base, agent.model)) return
-  const speech = await speechHolding()
-  if (!speech.length) return
-  reportProgress(`Loading ${agent.model}…`)
-  const loaded = await fetch(`${base}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: agent.model, prompt: '', keep_alive: KEEP_ALIVE, options: { num_ctx: ctx } }),
-    signal: AbortSignal.timeout(120_000),
-  }).catch(() => null)
-  if (!loaded?.ok) return
-  const now = await loadedModels(base)
-  const self = now?.find((m) => sameModel(m.name, agent.model))
-  if (!self || !spilled(self)) return
-  rememberSpeechOut(base, agent.model)
-  await clearSpeech(speech, agent.model)
-  await fetch(`${base}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: self.name, keep_alive: 0 }),
-    signal: AbortSignal.timeout(15_000),
-  }).catch(() => undefined)
+/** the context each model was last loaded with here (Ollama loads it again for any other size) */
+const loadedCtx = new Map<string, number>()
+
+const unloadOllama = async (base: string, names: string[]) => {
+  await Promise.all(
+    names.map((name) =>
+      fetch(`${base}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: name, keep_alive: 0 }),
+        signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined),
+    ),
+  )
+  // Ollama unloads in the background: wait until they've really left the GPU
   for (let i = 0; i < 30; i++) {
-    if (!(await loadedModels(base))?.some((m) => m.name === self.name)) break
+    if (!(await loadedModels(base))?.some((m) => names.includes(m.name))) break
     await new Promise((r) => setTimeout(r, 500))
   }
+  for (const n of names) lastCtx.delete(`${base}|${n}`), loadedCtx.delete(`${base}|${n}`)
+}
+const loadOllama = (base: string, model: string, ctx: number) =>
+  fetch(`${base}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, prompt: '', keep_alive: KEEP_ALIVE, options: { num_ctx: ctx } }),
+    signal: AbortSignal.timeout(180_000),
+  })
+    .then((r) => r.ok)
+    .catch(() => false)
+
+/**
+ * Before each request: will Ollama (re)load the model for it – not loaded yet, or a bigger
+ * context than it has (a long meeting, room to think)? Then it's loaded now and looked at:
+ * squeezed partly onto the CPU, everything else goes – Ollama's other models, Whisper – and
+ * it's loaded again with the whole GPU. A model that grows mid-job never runs squeezed while
+ * there's something it could have had the room of. (Too big for the GPU on its own: nothing to do.)
+ */
+export async function ensureFits(agent: AgentConfig, ctx: number) {
+  if (agent.kind !== 'ollama') return
+  const base = trimSlash(agent.baseUrl)
+  const key = `${base}|${agent.model}`
+  const all = await loadedModels(base)
+  if (!all) return
+  const self = all.find((m) => sameModel(m.name, agent.model))
+  if (self && !spilled(self) && loadedCtx.get(key) === ctx) return
+  // nothing else in the GPU's memory: nothing to make room from (the request loads it as usual)
+  if (!all.some((m) => !sameModel(m.name, agent.model)) && !speechInUse.size) return
+  // Whisper's known not to leave room for it: out before it loads
+  const speech = speechInUse.size ? await speechHolding() : []
+  if (speech.length && needsSpeechOut(base, agent.model)) await clearSpeech(speech, agent.model)
+  reportProgress(`Loading ${agent.model}…`)
+  if (!(await loadOllama(base, agent.model, ctx))) return
+  loadedCtx.set(key, ctx)
+  const now = await loadedModels(base)
+  const me = now?.find((m) => sameModel(m.name, agent.model))
+  if (!me || !spilled(me)) return
+  const others = (now ?? []).filter((m) => m !== me).map((m) => m.name)
+  const whisper = speechInUse.size ? await speechHolding() : []
+  if (!others.length && !whisper.length) return
+  if (whisper.length) {
+    rememberSpeechOut(base, agent.model)
+    await clearSpeech(whisper, agent.model)
+  }
+  await unloadOllama(base, [...others, me.name])
+  if (others.length) log.info(`made room on the GPU for ${agent.model} (${ctx} context): unloaded ${others.join(', ')}`)
+  if (await loadOllama(base, agent.model, ctx)) loadedCtx.set(key, ctx)
 }
 
 async function makeRoom(agent: AgentConfig): Promise<string[]> {
@@ -701,6 +733,7 @@ class OllamaBackend implements Backend {
   }
 
   private async chat(text: string, images: string[], maxTokens: number, numCtx: number, think?: boolean): Promise<OllamaReply> {
+    await ensureFits(this.agent, numCtx)
     const req = {
       ...(think === undefined ? {} : { think }),
       options: { num_predict: maxTokens, num_ctx: numCtx, ...SAMPLING },
@@ -750,6 +783,7 @@ class OllamaBackend implements Backend {
   }
 
   private async plainGenerate(text: string, images: string[], maxTokens: number, numCtx: number): Promise<OllamaReply> {
+    await ensureFits(this.agent, numCtx)
     const body = await this.post('/api/generate', {
       prompt: text,
       ...(images.length ? { images } : {}),
