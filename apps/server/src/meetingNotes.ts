@@ -39,9 +39,16 @@ const PLACEHOLDER =
  * `fallback`: Summary bullets to use if none of the model's own survive (each part's topics);
  * `dropped`: collects the lines left out, so the job can show what was taken away and why.
  */
-/** an "open question" that only says nothing was assigned or decided */
-const FILLER =
-  /^(?:no (?:formal |explicit |specific |clear )?(?:action items?|tasks?|owners?)\b[^.;]*?(?:assigned|given|set)\b|no (?:task|action item) assigned|no actionable|no decisions?(?: made)?\s*(?:[.;]|$)|[^.]*small talk (?:omitted|excluded))/i
+/** an "open question" that only says nothing was assigned or decided, or that it's "unresolved" */
+const FILLER_PHRASES =
+  /\b(?:no (?:formal |explicit |specific |clear |further )?(?:action items?|actions?|tasks?|owners?|decisions?|consensus)\b(?: (?:was |were )?(?:assigned|given|set|made|specified|taken|reached|decided))?|no actionable \w+|(?:details?|timing|method|timing\/method|it|this|issue|task|plan)?\s*(?:remains? |is |are |still )?(?:unresolved|undecided|pending|unclear|unspecified|tbd)|small talk (?:omitted|excluded)|but|and)\b/gi
+const FILLER = {
+  test: (body: string) => {
+    // what's left once the "nothing was decided" talk is taken out: a real question has something to it
+    const rest = body.replace(FILLER_PHRASES, ' ').match(/[\p{L}\p{N}]{3,}/gu) ?? []
+    return rest.length < 3
+  },
+}
 
 export function groundMeetingNotes(
   text: string,
@@ -104,7 +111,8 @@ export function groundMeetingNotes(
     const isOpen = /open questions?/i.test(s.heading)
     const kept = s.lines.filter((l) => {
       // "No task assigned", "no decisions" under Open questions: a note about the meeting, not a question
-      if (isOpen && FILLER.test(l.replace(/^\s*[-*]\s+/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, ''))) {
+      // (what it's about – a "Label:", bold or not – doesn't count: what's said about it does)
+      if (isOpen && /^\s*[-*]\s/.test(l) && FILLER.test(l.replace(/^\s*[-*]\s+/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, '').replace(/^[^:]{1,70}:\s+/, ''))) {
         opts.dropped?.push(`${s.heading.replace(/^#+\s*/, '')}: ${l.trim()}`)
         return false
       }

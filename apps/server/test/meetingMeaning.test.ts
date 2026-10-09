@@ -89,6 +89,21 @@ describe('notes in the shape asked for, from what a model actually wrote', async
     expect(out).toContain('- **Water Meter Box**: Where the box goes')
     expect(out).not.toMatch(/No action item assigned|small talk|No formal task/)
     expect(dropped).toHaveLength(3)
+    // as a model wrote them another time: labels without bold, and "unresolved" for every topic
+    const t2 =
+      'The water meter contractor gets his box on Tuesday. Maybe the middle of the lot, or eight feet off the fence. The toilet piano clutter thing in the bathroom. We should look at the lights in the boiler room, LEDs.'
+    const more = groundMeetingNotes(
+      `## Open questions
+- Bathroom clutter and toilet piano issue: Unresolved.
+- Events and gas locates: No formal decision made.
+- Boiler room lighting: LED replacement suggested but timing/method unresolved.
+- Water meter contractor's box placement: No consensus on exact location; suggestions include the middle of the lot or eight feet from the fence.`,
+      t2,
+      '',
+    )
+    expect(more).not.toMatch(/Bathroom clutter|gas locates/)
+    expect(more).toContain('Water meter contractor')
+    expect(more).toContain('Boiler room lighting')
     expect(normalizeMeetingNotes('## Summary\n- **Topic: Gate** – starts Monday')).toBe('## Summary\n- **Gate**: starts Monday')
   })
 

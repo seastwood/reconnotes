@@ -270,10 +270,10 @@ export class Ai {
 - each thing that was actually settled: the final outcome only (leave this section out if nothing was settled)
 
 ## Open questions
-- each thing raised but left unsettled or to be found out – what's still to be decided or answered (leave this section out if none). Not a note that nothing was assigned or decided: "no task assigned" isn't a question.
+- each real question left open: what's still to be decided or found out, said as that ("Where does the water meter box go – the middle of the lot, or 8 ft off the fence?"). Most topics have none: a topic that was only talked about isn't an open question, and "unresolved", "no decision made" or "no task assigned" isn't one either. Leave this section out if there are none.
 
 ## Action items
-- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning".
+- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning". Not every topic is a task: something only talked about ("the toilet's acting up") isn't one unless someone said it would be done.
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
