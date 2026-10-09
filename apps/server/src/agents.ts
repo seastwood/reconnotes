@@ -201,7 +201,7 @@ class AnthropicBackend implements Backend {
     const model = this.agent.model
     const limit = this.agent.monthlyLimitUsd ?? 0
     if (limit > 0 && spentThisMonth(this.agent.id) >= limit)
-      throw new Error(`reached its monthly spending limit ($${limit.toFixed(2)}) – raise it in Settings › AI, or wait for next month`)
+      throw new Error(`reached its monthly spending limit ($${limit.toFixed(2)}) – raise it in Settings › AI agents, or wait for next month`)
     const stream = this.client.beta.messages.stream({
       model,
       max_tokens: maxTokens,

@@ -782,7 +782,7 @@ export function dropInvented(markdown: string, source: string): { markdown: stri
     else out.push(line)
   }
   if (total >= 20 && unknownTotal / total > 0.6)
-    throw new Error('The model wrote a document that is mostly not in your note, so it wasn’t saved. Try again, or use a bigger model for “Compile notes” in Settings › AI.')
+    throw new Error('The model wrote a document that is mostly not in your note, so it wasn’t saved. Try again, or use a bigger model for “Compile notes” in Settings › AI agents.')
   return { markdown: out.join('\n'), dropped }
 }
 

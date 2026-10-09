@@ -652,7 +652,7 @@ The **threshold** decides how alike two stretches of speech must be to count as 
 
 Listing the attendees when you start a meeting also stops one person being counted twice.
 
-**Option A – in ReconNotes (easiest).** **Settings → AI agents → Speaker labels**: move the slider toward **Fewer voices** (higher) or **More voices** (lower). This needs the current `diarize.py` – if you set it up before the slider existed, copy the new script over the old one (as above) and `systemctl restart diarize` once. Once the new script is in, the slider always wins over Option B.
+**Option A – in ReconNotes (easiest).** **Settings → Handwriting & speech → Speaker labels**: move the slider toward **Fewer voices** (higher) or **More voices** (lower). This needs the current `diarize.py` – if you set it up before the slider existed, copy the new script over the old one (as above) and `systemctl restart diarize` once. Once the new script is in, the slider always wins over Option B.
 
 **Option B – on the Speaches machine.** No need to find the service file – `systemctl edit` opens an empty override for it:
 

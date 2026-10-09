@@ -253,7 +253,7 @@ it ("Transcribed by …"). Ollama and Claude can't transcribe audio.
 
 **Meetings** are always transcribed by the server's Audio to text agent when there is one (Apple's
 recognition is made for dictation, not a room of people – it's only used when the server can't).
-The names and terms in *Settings › AI agents › Your words* are passed to Whisper as a hint, so it spells them
+The names and terms in *Settings › Handwriting & speech › Your words* are passed to Whisper as a hint, so it spells them
 right. A long meeting is read in parts of about eight minutes, each written up, then put together –
 so the end of a long meeting is covered as well as its start. Each point in the notes gets a **▶ time** link to where it was
 talked about in the recording (found by the words the point and the transcript share; it needs
