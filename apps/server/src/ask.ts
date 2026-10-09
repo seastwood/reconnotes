@@ -5,8 +5,9 @@ import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
+import { askRefs } from './askHistory'
 import { reportPartial, reportProgress } from './jobs'
-import { claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { RULE_ID, definesRule, claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -187,7 +188,11 @@ export async function askNotes(
     .slice(0, 25)
   // "Ask about this note": just those notes, as much of each as fits
   const pinned = (scope.notes ?? []).filter(usable).slice(0, 8)
-  if (pinned.length) ids = pinned
+  // asked about one note: the notes it refers to ("as described in R402 of the FRC manual"), chosen for it
+  const canRead = noteFilter(sync, { unlocked: scope.unlocked })
+  const refs = pinned.length === 1 ? askRefs(store, pinned[0]).filter((id) => id !== pinned[0] && meta.get(id) && !meta.get(id)!.trashedAt && canRead(id)) : []
+  const isRef = new Set(refs)
+  if (pinned.length) ids = [...pinned, ...refs]
   // a question about a time ("yesterday", "last week", "on 10/5"): the notes
   // written or edited then – those that also match its words first
   else if (range) {
@@ -250,7 +255,8 @@ export async function askNotes(
       else all.push(...splitSections(id, meta.get(id)!.title, md))
     }
     const rank = new Map(ids.map((id, i) => [id, i]))
-    const scored = scoreSections(all, words, rules, { noteRank: rank, passages })
+    // a note referred to counts for less than the one asked about: its own sections come first when both have one
+    const scored = scoreSections(all, words, rules, { noteRank: rank, passages }).map((x) => (isRef.has(x.noteId) ? { ...x, score: x.score * 0.75 } : x))
     const matched = scored.some((s) => s.score > 1)
     // nothing really matched (a vague question): each note's start, best notes first
     const order = matched ? [...scored].sort((a, b) => b.score - a.score) : [...scored].sort((a, b) => rank.get(a.noteId)! - rank.get(b.noteId)! || a.index - b.index)
@@ -274,6 +280,21 @@ export async function askNotes(
       read.add(sec)
       perNote.set(sec.noteId, already + 1)
       used++
+    }
+    // a rule the note mentions without saying it ("constructed as in R402 of the FRC manual"):
+    // its definition from a note it refers to
+    if (refs.length) {
+      const mine = all.filter((x) => !isRef.has(x.noteId))
+      const mentioned = [...new Set([...read].filter((x) => !isRef.has(x.noteId)).flatMap((x) => [...x.text.matchAll(RULE_ID)].map((m) => m[0])))]
+      let added = 0
+      for (const r of mentioned) {
+        if (added >= 4 || mine.some((x) => definesRule(x.text, r))) continue
+        const def = all.find((x) => isRef.has(x.noteId) && !read.has(x) && definesRule(x.text, r))
+        if (!def || context.length > TOTAL * 1.25) continue
+        add(def.noteId, def.text.length > PER_NOTE ? excerpt(def.text, [r.toLowerCase(), ...words], PER_NOTE) : def.text, def)
+        read.add(def)
+        added++
+      }
     }
     // not read yet, best first: where to look next if the answer isn't in these
     rest = (matched ? order : [...scored].sort((a, b) => b.score - a.score)).filter((x) => !read.has(x) && (pinned.length || x.score > 0))
@@ -387,7 +408,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     if (yesNo && key[0] && saysNo(text) && PERMITS.test(key[0].line))
       text += `\n\n**Check this:** the answer says no, but the note’s most relevant line allows some of it (“${clip(sentencesOf(key[0].line).find((x) => PERMITS.test(x)) ?? key[0].line, 200)}”) [${key[0].n}].`
     if (quote.length)
-      text += `\n\n${pinned.length === 1 ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
+      text += `\n\n${pinned.length === 1 && quote.every((l) => sources.find((x) => x.n === l.n)?.noteId === pinned[0]) ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
   }
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)

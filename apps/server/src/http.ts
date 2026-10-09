@@ -40,7 +40,7 @@ import { log } from './log'
 import { aiHealth } from './health'
 import { aiSkips, noteFilter, scopeFromQuery } from './access'
 import { definesRule, ruleIds } from './sections'
-import { deleteConversation, listConversations, scopeKey } from './askHistory'
+import { askRefs, deleteConversation, listConversations, scopeKey, setAskRefs } from './askHistory'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
@@ -316,6 +316,16 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('DELETE', `/api/ask/history/${ID}`, (_req, res, [id]) => {
     deleteConversation(store, id)
     json(res, 200, { ok: true })
+  })
+  // the notes "Ask about this note" also reads for a note (that it refers to)
+  route('GET', '/api/ask/refs', (_req, res, _p, url) => {
+    json(res, 200, { refs: askRefs(store, url.searchParams.get('noteId') ?? '') })
+  })
+  route('PUT', '/api/ask/refs', async (req, res) => {
+    const { noteId, refs } = await readJson<{ noteId?: string; refs?: unknown }>(req)
+    if (typeof noteId !== 'string' || !noteId) throw new HttpError(400, 'noteId is required')
+    setAskRefs(store, noteId, Array.isArray(refs) ? refs.map(String).filter((id) => /^[a-z0-9]{8,64}$/.test(id)) : [])
+    json(res, 200, { refs: askRefs(store, noteId) })
   })
 
   /** "Ask your notes": an answer from your notes, with the notes it used. */

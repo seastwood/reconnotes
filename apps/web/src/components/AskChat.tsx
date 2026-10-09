@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ChevronLeft, History, Loader2, MessageCircleQuestion, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, ChevronLeft, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
+import { getNotes, readNote } from '@reconnotes/core'
+import { api } from '../lib/api'
+import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { useStore } from '../lib/store'
@@ -224,6 +227,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           <SquarePen size={19} />
         </button>
       </header>
+      {target.noteId && <RefNotes noteId={target.noteId} />}
 
       <div
         className="ask-chat-body"
@@ -430,5 +434,75 @@ function ChatInput({
         </button>
       </div>
     </form>
+  )
+}
+
+/**
+ * "Also reads": the notes this note refers to (its game manual), which Ask
+ * reads too – the rules it mentions from them, and their sections when they
+ * answer the question better. Kept on the server for the note.
+ */
+function RefNotes({ noteId }: { noteId: string }) {
+  const [refs, setRefs] = useState<string[] | null>(null)
+  const [picking, setPicking] = useState(false)
+  const [q, setQ] = useState('')
+  useWorkspace()
+  useEffect(() => {
+    let alive = true
+    api<{ refs: string[] }>('GET', `/api/ask/refs?noteId=${noteId}`)
+      .then((r) => alive && setRefs(r.refs))
+      .catch(() => alive && setRefs([]))
+    return () => {
+      alive = false
+    }
+  }, [noteId])
+  const notes = getNotes(workspaceDoc)
+  const title = (id: string) => {
+    const m = notes.get(id)
+    return m ? readNote(m).title || 'Untitled' : null
+  }
+  const save = (next: string[]) => {
+    setRefs(next)
+    void api('PUT', '/api/ask/refs', { noteId, refs: next }).catch(() => {})
+  }
+  if (refs === null) return null
+  const shown = refs.filter((id) => title(id) !== null)
+  const matches = picking
+    ? [...notes.entries()]
+        .map(([id, m]) => ({ id, n: readNote(m) }))
+        .filter(({ id, n }) => id !== noteId && !n.trashedAt && !n.template && !refs.includes(id) && (n.title || 'Untitled').toLowerCase().includes(q.trim().toLowerCase()))
+        .sort((a, b) => b.n.updatedAt - a.n.updatedAt)
+        .slice(0, 8)
+    : []
+  return (
+    <div className="ask-refs">
+      <div className="ask-refs-row">
+        <span className="ask-refs-label" title="Ask also reads these notes – e.g. the manual this note refers to">
+          <BookOpen size={13} /> Also reads:
+        </span>
+        {shown.map((id) => (
+          <span key={id} className="ask-ref">
+            {title(id)}
+            <button className="icon" aria-label={`Stop reading ${title(id)}`} onClick={() => save(refs.filter((x) => x !== id))}>
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        {!shown.length && !picking && <span className="ask-refs-none">only this note</span>}
+        <button className="text ask-refs-add" onClick={() => (setPicking(!picking), setQ(''))}>
+          <Plus size={13} /> {picking ? 'Done' : 'Add a note'}
+        </button>
+      </div>
+      {picking && (
+        <div className="ask-refs-pick">
+          <input autoFocus value={q} placeholder="A note it refers to (e.g. its manual)…" onChange={(e) => setQ(e.target.value)} />
+          {matches.map(({ id, n }) => (
+            <button key={id} className="ask-refs-option" onClick={() => (save([...refs, id]), setPicking(false))}>
+              {n.title || 'Untitled'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

@@ -7,6 +7,7 @@ import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
+import { setAskRefs } from '../src/askHistory'
 import { askNotes, autoCite, citeByNumber, citeFinds, markInference, recite } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
@@ -626,5 +627,37 @@ describe('a "no" against a rule that allows it', () => {
     })
     const r = await askNotes(app.store, app.sync, app.ai, 'Can a robot have a cutout in its bumper?', null, {}, { notes: ['bumpernote0001'] })
     expect(r.answer).toMatch(/\*\*Check this:\*\* the answer says no, but the note’s most relevant line allows some of it \(“Gaps of less than 1 ¼ in\. \(31 mm\) between adjacent segments are permitted/)
+  })
+})
+
+describe('a note that refers to another (its manual)', () => {
+  it('reads the rules it mentions from the note it refers to', async () => {
+    const mk = async (id: string, lines: string[]) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title: lines[0] }))
+      await app.sync.change(noteDocName(id), (doc) => {
+        getContent(doc).insert(
+          0,
+          lines.map((t) => {
+            const p = new Y.XmlElement('paragraph')
+            p.insert(0, [new Y.XmlText(t)])
+            return p
+          }),
+        )
+      })
+    }
+    await mk('cookiemanual01', ['Cookie Chaos manual', 'R12. BUMPERS are required, and shall be constructed as described in the "A. Padding" section of R402 from the FRC 2025 Game Manual. Gaps in the bumpers are permissible.'])
+    const frc = ['FRC 2025 Game Manual', ...Array.from({ length: 40 }, (_, i) => `R${300 + i} Some other rule about wiring number ${i}. ` + 'Wires must be colored and labelled. '.repeat(8))]
+    frc.push('R402 BUMPER construction. A. Padding – A minimum of 2 1/4 in. depth of foam padding, at least 4 1/2 in. tall.')
+    await mk('frcmanual2025a', frc)
+    // without the reference: only its own note
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'How must bumpers be constructed?', null, {}, { notes: ['cookiemanual01'] })
+    expect(prompts.at(-1)).not.toContain('2 1/4 in. depth of foam')
+    // with it: R402's definition comes along
+    setAskRefs(app.store, 'cookiemanual01', ['frcmanual2025a'])
+    prompts.length = 0
+    const r = await askNotes(app.store, app.sync, app.ai, 'How must bumpers be constructed?', null, {}, { notes: ['cookiemanual01'] })
+    expect(prompts.at(-1)).toContain('R402 BUMPER construction. A. Padding – A minimum of 2 1/4 in. depth of foam')
+    expect(r.read).toContain('FRC 2025 Game Manual')
   })
 })

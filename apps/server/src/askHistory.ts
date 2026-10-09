@@ -86,3 +86,16 @@ export function deleteConversation(store: Store, id: string) {
   table(store)
   store.db.prepare('DELETE FROM ask_history WHERE id = ?').run(id)
 }
+
+/** The notes "Ask about this note" also reads for a note (that it refers to). */
+export function askRefs(store: Store, noteId: string): string[] {
+  return store.getSetting<Record<string, string[]>>('askRefs')?.[noteId] ?? []
+}
+
+export function setAskRefs(store: Store, noteId: string, refs: string[]) {
+  const all = { ...(store.getSetting<Record<string, string[]>>('askRefs') ?? {}) }
+  const list = [...new Set(refs.filter((id) => id !== noteId))].slice(0, 8)
+  if (list.length) all[noteId] = list
+  else delete all[noteId]
+  store.setSetting('askRefs', all)
+}
