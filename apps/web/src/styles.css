@@ -5371,11 +5371,7 @@ a.button {
 
 /* fixing a word the speech-to-text misheard, above a recording's transcript */
 .word-fix {
-  margin: 6px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--paper);
+  width: min(440px, 100%);
   font-size: 14px;
 }
 .word-fix-head {
