@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pdfSections } from '../src/pdf'
-import { manualPdf } from './pdfHelper'
+import { figurePdf, manualPdf } from './pdfHelper'
 
 describe('a PDF manual', () => {
   it('is split at its chapters, with its sections, lists and paragraphs – without running headers and page numbers', async () => {
@@ -20,5 +20,21 @@ describe('a PDF manual', () => {
       expect(s.html).not.toContain('GAME MANUAL')
       expect(s.html).not.toMatch(/Page \d/)
     }
+  })
+})
+
+describe('figures', () => {
+  it('a drawing under its caption becomes a picture there, its labels out of the text', async () => {
+    const { sections } = await pdfSections(figurePdf())
+    const html = sections.map((s) => s.html).join('')
+    const img = /<img src="data:image\/png;base64,([^"]+)" alt="Figure 8-3 BUMPER coverage requirements">/.exec(html)
+    expect(img).toBeTruthy()
+    const png = Buffer.from(img![1], 'base64')
+    expect(png.subarray(1, 4).toString()).toBe('PNG')
+    // between the caption and the next rule, in that order
+    expect(html.indexOf('Figure 8-3 BUMPER coverage')).toBeLessThan(html.indexOf('<img'))
+    expect(html.indexOf('<img')).toBeLessThan(html.indexOf('R402'))
+    // the drawing's label is in the picture, not the text
+    expect(html).not.toContain('ROBOT PERIMETER')
   })
 })

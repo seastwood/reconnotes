@@ -11,6 +11,11 @@ export function makePdf(pages: [number, string, boolean?][][]): Buffer {
     let y = 760
     const ops = lines
       .map(([size, text, b]) => {
+        // a drawing (lines and shapes, with a label in it), `size` points tall
+        if (text === '@drawing') {
+          y -= size + 10
+          return `0.3 0.5 0.9 rg 120 ${y} 300 ${size - 10} re f 0 0 0 RG 3 w 110 ${y - 5} 320 ${size} re S\nBT /F1 9 Tf 240 ${y + size / 2} Td (ROBOT PERIMETER) Tj ET`
+        }
         y -= size * 1.5 + (size > 13 ? 10 : 0)
         const t = text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
         return `BT /${b ? 'F2' : 'F1'} ${size} Tf 72 ${y} Td (${t}) Tj ET`
@@ -41,5 +46,18 @@ export function manualPdf(): Buffer {
     [...head, [24, '6 Game Rules'], [16, '6.1 Fouls'], [11, 'G301 Robots may not damage the field. Violation: major foul.'], [11, 'G302 Robots may not extend more than 48 cm beyond their frame peri-'], [11, 'meter. Violation: minor foul. This rule continues on the next'], [8, 'Page 2']],
     [...head, [11, 'page with more detail about extension.'], [16, '6.2 Scoring'], [11, 'A coral on level 4 is worth 5 points. See G302 for limits.'], [11, 'G303 Robots may not pin an opponent.'], [8, 'Page 3']],
     [...head, [24, '9 Robot Rules'], [11, 'R101 Robots must fit within a 120 cm frame perimeter.'], [8, 'Page 4']],
+  ])
+}
+
+/** A manual page with a drawn figure under its caption. */
+export function figurePdf(): Buffer {
+  return makePdf([
+    [
+      [24, '8 Robot Rules'],
+      [11, 'R401 BUMPERS all around. Gaps of less than 1 1/4 in. are permitted.'],
+      [9, 'Figure 8-3 BUMPER coverage requirements'],
+      [120, '@drawing'],
+      [11, 'R402 BUMPER construction. BUMPERS must consist of the following.'],
+    ],
   ])
 }
