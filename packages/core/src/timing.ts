@@ -40,6 +40,24 @@ export interface TimedSpan {
   end: number
 }
 
+/** Word times as they're kept (see `timingKey`); null when they don't look real. */
+export function encodeWordTimes(words: TimedWord[] | null | undefined): string | null {
+  const ok = plausibleWordTimes(words)
+  return ok ? JSON.stringify({ v: 1, w: ok.map((x) => [x.word, Math.round(x.start * 100), Math.round(x.end * 100)]) }) : null
+}
+
+/**
+ * Times that can be followed: words with times that mostly go forward and
+ * aren't all at the start (a recogniser that gives no real times reports 0s).
+ */
+export function plausibleWordTimes(words: TimedWord[] | null | undefined): TimedWord[] | null {
+  const ws = (words ?? []).filter((w) => w && typeof w.word === 'string' && w.word.trim() && Number.isFinite(w.start) && Number.isFinite(w.end)).map((w) => ({ word: w.word.trim(), start: Math.max(0, w.start), end: Math.max(w.start, w.end) }))
+  if (ws.length < 2) return null
+  const forward = ws.slice(1).filter((w, i) => w.start >= ws[i].start).length / (ws.length - 1)
+  const timed = ws.filter((w) => w.start > 0).length / ws.length
+  return forward >= 0.9 && timed >= 0.5 ? ws : null
+}
+
 const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 
 /**

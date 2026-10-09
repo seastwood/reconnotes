@@ -2,7 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { generateJSON } from '@tiptap/core'
 import { marked } from './markdown'
 import * as Y from 'yjs'
-import { getNotes, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
+import { encodeWordTimes, getNotes, readNote, getStrokes, getTranscripts, heardByKey, inkHash, noteDocName, timingKey, transcriptSourceKey } from '@reconnotes/core'
 import { preferServerOcr, recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from './settings'
 import { sync } from './sync'
@@ -307,17 +307,22 @@ export async function transcribeAudio(noteId: string, attachmentId: string, doc:
   const apple = async () => {
     const blob = await attachmentBlob(attachmentId)
     if (!blob || !deviceCanDecode(blob.type)) throw new Error('This recording can’t be read on this device.')
-    const text = await transcribeOnDevice(blob)
-    if (!text.trim()) throw new Error('No speech was recognised in this recording.')
-    return text
+    const heard = await transcribeOnDevice(blob)
+    if (!heard.text.trim()) throw new Error('No speech was recognised in this recording.')
+    return heard
   }
   if (!isSyncConfigured()) {
     if (!useDeviceSpeech()) throw new Error('Connect a ReconNotes server in Settings to transcribe audio.')
     // no server: kept in the note itself (it syncs once there is one)
-    const text = await apple()
+    const { text, words } = await apple()
+    const times = encodeWordTimes(words)
     doc.transact(() => {
-      getTranscripts(doc).set(`att:${attachmentId}`, text)
-      getTranscripts(doc).set(`by:att:${attachmentId}`, 'Apple speech recognition (on the phone)')
+      const tr = getTranscripts(doc)
+      tr.set(`att:${attachmentId}`, text)
+      tr.set(heardByKey(attachmentId), 'Apple speech recognition (on the phone)')
+      // when each word is said: the transcript follows along as it plays, no server needed
+      if (times) tr.set(timingKey(attachmentId), times)
+      else tr.delete(timingKey(attachmentId))
     })
     recordJob({ id: localJobId(), kind: 'transcribe', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: 'Apple speech recognition (on this device)', startedAt })
     return text
@@ -329,8 +334,8 @@ export async function transcribeAudio(noteId: string, attachmentId: string, doc:
   if (!job.result?.needsDevice) return String(job.result?.text ?? '')
   // none there: Apple's, here – kept on the server with the recording
   if (!useDeviceSpeech()) throw new Error('Add an “Audio to text” agent (e.g. a Whisper server) in Settings › AI agents to transcribe recordings.')
-  const text = await apple()
-  const sent = await runJob({ kind: 'transcribe', noteId, input: { attachmentId, transcript: text } })
+  const { text, words } = await apple()
+  const sent = await runJob({ kind: 'transcribe', noteId, input: { attachmentId, transcript: text, ...(words ? { words } : {}) } })
   return String(sent.result?.text ?? text)
 }
 

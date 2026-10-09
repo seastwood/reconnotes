@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alignWordTimes, parseWordTimes, spanAt } from '../src/timing'
+import { alignWordTimes, encodeWordTimes, parseWordTimes, spanAt } from '../src/timing'
 
 describe('following a transcript as it plays', () => {
   const words = parseWordTimes(
@@ -18,5 +18,14 @@ describe('following a transcript as it plays', () => {
     expect(spanAt(spans, 0)).toBe(0)
     expect(spanAt(spans, 0.6)).toBe(3)
     expect(spanAt(spans, 99)).toBe(5)
+  })
+})
+
+describe('word times worth keeping', () => {
+  it('keeps real ones, not a recogniser’s zeros', () => {
+    const real = [{ word: 'We', start: 0, end: 0.2 }, { word: 'need', start: 0.2, end: 0.4 }, { word: 'plans', start: 0.5, end: 0.9 }]
+    expect(parseWordTimes(encodeWordTimes(real))!.map((w) => w.start)).toEqual([0, 0.2, 0.5])
+    expect(encodeWordTimes(real.map((w) => ({ ...w, start: 0, end: 0 })))).toBeNull()
+    expect(encodeWordTimes([])).toBeNull()
   })
 })

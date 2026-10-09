@@ -258,12 +258,23 @@ describe('Transcribe on a recording', () => {
       const ask = await run({ attachmentId: 'transcribeaudio01' })
       expect(ask.result.needsDevice).toBe(true)
       const sent = await run({ attachmentId: 'transcribeaudio01', transcript: 'Testing meeting mode.' })
+      void sent
       expect(sent.agent).toBe(APPLE_SPEECH)
       for (let i = 0; i < 40 && tr().get('att:transcribeaudio01') !== 'Testing meeting mode.'; i++) await new Promise((r) => setTimeout(r, 50))
       expect(tr().get('att:transcribeaudio01')).toBe('Testing meeting mode.')
       expect(tr().get('by:att:transcribeaudio01')).toBe(APPLE_SPEECH)
       // Apple's reading has no word times: Whisper's are gone with its words
       expect(tr().get('timing:att:transcribeaudio01')).toBeUndefined()
+
+      // Apple's reading with its word times (from the phone): kept, to follow along – no server speech-to-text needed
+      const withTimes = await run({
+        attachmentId: 'transcribeaudio01',
+        transcript: 'Testing meeting mode.',
+        words: [{ word: 'Testing', start: 0.1, end: 0.6 }, { word: 'meeting', start: 0.7, end: 1.1 }, { word: 'mode.', start: 1.2, end: 1.5 }],
+      })
+      expect(withTimes.error ?? withTimes.status).toBe('done')
+      for (let i = 0; i < 40 && !tr().get('timing:att:transcribeaudio01'); i++) await new Promise((r) => setTimeout(r, 50))
+      expect(parseWordTimes(tr().get('timing:att:transcribeaudio01'))!.map((w) => w.start)).toEqual([0.1, 0.7, 1.2])
     } finally {
       whisper.close()
     }

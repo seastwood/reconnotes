@@ -1,5 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { settings } from './settings'
+import { plausibleWordTimes, type TimedWord } from '@reconnotes/core'
 
 /**
  * On-device speech recognition with Apple's Speech framework
@@ -11,7 +12,8 @@ import { settings } from './settings'
  */
 
 interface SpeechRecognitionPlugin {
-  transcribe(options: { audio: string; ext: string; locale?: string }): Promise<{ text: string; onDevice: boolean }>
+  /** `words`: each word and when it's said (seconds) – the transcript can then follow along as it plays */
+  transcribe(options: { audio: string; ext: string; locale?: string }): Promise<{ text: string; words?: TimedWord[]; onDevice: boolean }>
 }
 
 const SpeechRecognition = registerPlugin<SpeechRecognitionPlugin>('SpeechRecognition')
@@ -41,15 +43,16 @@ export function deviceCanDecode(mime: string): boolean {
   return !/webm|ogg|opus/.test(mime)
 }
 
-export async function transcribeOnDevice(blob: Blob): Promise<string> {
+/** Apple's reading of a recording: its text, and each word's time where Apple gives real ones. */
+export async function transcribeOnDevice(blob: Blob): Promise<{ text: string; words: TimedWord[] | null }> {
   const audio = await new Promise<string>((resolve, reject) => {
     const r = new FileReader()
     r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
     r.onerror = () => reject(r.error)
     r.readAsDataURL(blob)
   })
-  const { text } = await SpeechRecognition.transcribe({ audio, ext: extFor(blob.type) })
-  return text.trim()
+  const { text, words } = await SpeechRecognition.transcribe({ audio, ext: extFor(blob.type) })
+  return { text: text.trim(), words: plausibleWordTimes(words) }
 }
 
 /** Speech recognisers return one long block of text (split with speechToParagraphs from core). */

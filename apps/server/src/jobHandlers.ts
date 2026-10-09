@@ -20,7 +20,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { processAttachment, APPLE_SPEECH, setTranscribedBy, setWordTimes, transcribedBy } from './attachments'
+import { processAttachment, APPLE_SPEECH, sentWordTimes, setTranscribedBy, setWordTimes, transcribedBy } from './attachments'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
 import { runBench, type Samples } from './bench'
@@ -239,6 +239,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     } else if (onDevice) {
       text = onDevice
       by = APPLE_SPEECH
+      // Apple's word times, sent along (to follow along as it plays)
+      times = sentWordTimes(job.input.words) ?? undefined
     } else {
       // no speech-to-text here: the phone reads it (Apple) and sends it back – or there's nothing to read it with
       return { result: { noteId, needsDevice: true } }
@@ -477,7 +479,11 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         if (!onDevice && !saved) throw e
       }
     }
-    if (!transcript) transcript = onDevice || saved
+    if (!transcript) {
+      transcript = onDevice || saved
+      // the phone's reading, with the word times it sent
+      if (transcript === onDevice) times = sentWordTimes(job.input.words) ?? undefined
+    }
     if (!transcript) {
       if (!att || !store.hasBlob(att.id)) throw new Error("The recording hasn't reached the server yet – try again once it has synced.")
       const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { encodeWordTimes } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
@@ -93,8 +94,17 @@ export const timingKey = (attachmentId: string) => `timing:att:${attachmentId}`
  * transcript can follow along as it plays. Compact: [word, start, end] in hundredths of a second.
  * None (a reading without times, e.g. Apple's): cleared, so old times don't stay with new words.
  */
-export function setWordTimes(store: Store, attachmentId: string, words?: { word: string; start: number; end: number }[]) {
-  store.setSetting(`wordTimes:${attachmentId}`, words?.length ? JSON.stringify({ v: 1, w: words.map((x) => [x.word, Math.round(x.start * 100), Math.round(x.end * 100)]) }) : null)
+export function setWordTimes(store: Store, attachmentId: string, words?: { word: string; start: number; end: number }[] | null) {
+  store.setSetting(`wordTimes:${attachmentId}`, encodeWordTimes(words))
+}
+
+/** Word times sent by the phone (Apple's recognition gives them too): checked, since they come from outside. */
+export function sentWordTimes(input: unknown): { word: string; start: number; end: number }[] | null {
+  if (!Array.isArray(input)) return null
+  return input
+    .slice(0, 50_000)
+    .filter((w): w is { word: string; start: number; end: number } => Boolean(w) && typeof w.word === 'string' && typeof w.start === 'number' && typeof w.end === 'number')
+    .map((w) => ({ word: w.word.slice(0, 80), start: w.start, end: w.end }))
 }
 
 export function wordTimes(store: Store, attachmentId: string): string | null {

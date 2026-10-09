@@ -51,10 +51,11 @@ export async function writeMeetingNotes(noteId: string, attachmentId: string, bl
   try {
     // Apple's speech recognition on this device, when it can; otherwise the server transcribes
     let transcript = ''
-    if (useDeviceSpeech() && deviceCanDecode(blob.type)) transcript = await transcribeOnDevice(blob).catch(() => '')
+    let words: unknown = null
+    if (useDeviceSpeech() && deviceCanDecode(blob.type)) ({ text: transcript, words } = await transcribeOnDevice(blob).catch(() => ({ text: '', words: null })))
     await flushUploads()
     await flushNote(noteId)
-    await submitJob({ kind: 'meeting', noteId, input: { attachmentId, transcript, tzOffset: new Date().getTimezoneOffset() } })
+    await submitJob({ kind: 'meeting', noteId, input: { attachmentId, transcript, ...(words ? { words } : {}), tzOffset: new Date().getTimezoneOffset() } })
   } catch (e) {
     showToast(`Couldn’t write the meeting notes: ${(e as Error).message}`)
   }

@@ -371,7 +371,12 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                 var finished: [String] = [] // stretches recognition has moved on from
                 var current = ""
                 var currentStart: TimeInterval = -1
+                // each word and when it's said (seconds into the recording): the transcript can
+                // then follow along as it plays, like subtitles – on the device, no server needed
+                var finishedWords: [[String: Any]] = []
+                var currentWords: [[String: Any]] = []
                 let whole = { () -> String in (finished + [current]).filter { !$0.isEmpty }.joined(separator: " ") }
+                let allWords = { () -> [[String: Any]] in finishedWords + currentWords }
                 self.tasks[id] = recognizer.recognitionTask(with: request) { result, error in
                     if done { return }
                     if let result = result {
@@ -384,13 +389,17 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                         let movedOn = start > currentStart + 0.5 || (text.count < current.count && firstWord(text) != firstWord(current))
                         if !current.isEmpty && movedOn && !text.hasPrefix(current) {
                             finished.append(current)
+                            finishedWords.append(contentsOf: currentWords)
                         }
                         current = text
                         currentStart = start
+                        currentWords = result.bestTranscription.segments.map {
+                            ["word": $0.substring, "start": $0.timestamp, "end": $0.timestamp + $0.duration]
+                        }
                         if result.isFinal {
                             done = true
                             cleanup()
-                            call.resolve(["text": whole(), "onDevice": onDevice])
+                            call.resolve(["text": whole(), "words": allWords(), "onDevice": onDevice])
                             return
                         }
                     }
@@ -399,7 +408,7 @@ public class SpeechRecognitionPlugin: CAPPlugin, CAPBridgedPlugin {
                         cleanup()
                         let soFar = whole()
                         if !soFar.isEmpty {
-                            call.resolve(["text": soFar, "onDevice": onDevice]) // keep what was recognised
+                            call.resolve(["text": soFar, "words": allWords(), "onDevice": onDevice]) // keep what was recognised
                         } else if (error as NSError).code == 1110 {
                             call.resolve(["text": "", "onDevice": onDevice]) // no speech in the recording
                         } else {
