@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, PanelLeft, X } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
@@ -561,21 +562,26 @@ export function App() {
               )}
             </div>
           )}
-          {backTo.length > 0 && nav.noteId && (
-            <div className={`link-back${chatAside ? ' above-chat' : ''}`}>
-              <button className="link-back-go" onClick={goBackTo} title="Back to where the link was">
-                <ArrowLeft size={16} />
-                <span className="link-back-to">{backTo.at(-1)!.noteId !== nav.noteId ? `Back to ${noteTitle(backTo.at(-1)!.noteId)}` : 'Back'}</span>
-              </button>
-              <button className="icon" aria-label="Forget the way back" onClick={() => setBackTo([])}>
-                <X size={15} />
-              </button>
-            </div>
-          )}
         </main>
       </Panel>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
+      {/* the way back from a link: centred on the whole screen, where "Back to chat" sits (above it when both show) */}
+      {backTo.length > 0 &&
+        nav.noteId &&
+        editorVisible &&
+        createPortal(
+          <div className={`link-back${chatAside ? ' above-chat' : ''}`}>
+            <button className="link-back-go" onClick={goBackTo} title="Back to where the link was">
+              <ArrowLeft size={16} />
+              <span className="link-back-to">{backTo.at(-1)!.noteId !== nav.noteId ? `Back to ${noteTitle(backTo.at(-1)!.noteId)}` : 'Back'}</span>
+            </button>
+            <button className="icon" aria-label="Forget the way back" onClick={() => setBackTo([])}>
+              <X size={15} />
+            </button>
+          </div>,
+          document.body,
+        )}
       <Toaster />
       <HideKeyboardButton />
       <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />

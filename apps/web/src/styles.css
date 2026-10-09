@@ -4846,7 +4846,7 @@ a.button {
   position: relative;
 }
 .link-back {
-  position: absolute;
+  position: fixed;
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(env(safe-area-inset-bottom) + 70px);
@@ -4854,7 +4854,7 @@ a.button {
   display: flex;
   align-items: center;
   gap: 2px;
-  max-width: calc(100% - 32px);
+  max-width: calc(100vw - 32px);
   padding: 4px 4px 4px 6px;
   border-radius: 22px;
   background: var(--accent);
@@ -4863,7 +4863,7 @@ a.button {
 }
 /* "Back to chat" is showing too: just above it */
 .link-back.above-chat {
-  bottom: calc(env(safe-area-inset-bottom) + 126px);
+  bottom: calc(env(safe-area-inset-bottom) + 122px);
 }
 .link-back button {
   color: inherit;
