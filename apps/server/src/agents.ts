@@ -470,7 +470,51 @@ export function rememberSpeechNeedsRoom(agent: AgentConfig) {
  * embedding models are left alone), and a model already squeezed onto the CPU
  * is loaded again with the whole GPU.
  */
-export async function makeRoomOnGpu(agent: AgentConfig): Promise<string[]> {
+export async function makeRoomOnGpu(agent: AgentConfig, ctx?: number): Promise<string[]> {
+  const out = await makeRoom(agent)
+  // Whisper still loaded: load the model now and look, before a long job runs squeezed
+  if (ctx && speechInUse.size) await probeBesideSpeech(agent, ctx)
+  return out
+}
+
+/**
+ * Load the model (with the context the job will ask for) and see whether it fits beside the
+ * speech-to-text model. If it was squeezed partly onto the CPU: Whisper out, the model out
+ * (it loads again fully with the job), and remembered for next time. Seeing it only after a
+ * request would leave that request – a long meeting's first part – running slowly.
+ */
+async function probeBesideSpeech(agent: AgentConfig, ctx: number) {
+  const base = trimSlash(agent.baseUrl)
+  if ((await loadedModels(base))?.some((m) => sameModel(m.name, agent.model))) return
+  if (needsSpeechOut(base, agent.model)) return
+  const speech = await speechHolding()
+  if (!speech.length) return
+  reportProgress(`Loading ${agent.model}…`)
+  const loaded = await fetch(`${base}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: agent.model, prompt: '', keep_alive: KEEP_ALIVE, options: { num_ctx: ctx } }),
+    signal: AbortSignal.timeout(120_000),
+  }).catch(() => null)
+  if (!loaded?.ok) return
+  const now = await loadedModels(base)
+  const self = now?.find((m) => sameModel(m.name, agent.model))
+  if (!self || !spilled(self)) return
+  rememberSpeechOut(base, agent.model)
+  await clearSpeech(speech, agent.model)
+  await fetch(`${base}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: self.name, keep_alive: 0 }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => undefined)
+  for (let i = 0; i < 30; i++) {
+    if (!(await loadedModels(base))?.some((m) => m.name === self.name)) break
+    await new Promise((r) => setTimeout(r, 500))
+  }
+}
+
+async function makeRoom(agent: AgentConfig): Promise<string[]> {
   const base = trimSlash(agent.baseUrl)
   const all = await loadedModels(base)
   if (!all) return []
@@ -548,7 +592,6 @@ class OllamaBackend implements Backend {
     const text = parts.filter((p): p is { text: string } => 'text' in p).map((p) => p.text).join('\n\n')
     const images = parts.filter((p): p is { image: Buffer; mime: string } => 'image' in p).map((p) => p.image.toString('base64'))
     const info = await this.info()
-    await makeRoomOnGpu(this.agent)
     // room for the answer itself (callers size it to the job, e.g. small per handwritten line)
     const limit = Math.min(maxTokens, 8192)
     // Ollama's default context (often 4K) silently cuts long jobs short:
@@ -565,6 +608,8 @@ class OllamaBackend implements Backend {
       lastCtx.set(key, { ctx, at: Date.now() })
       return ctx
     }
+    // room on the GPU – sized for the first request (the context it'll be loaded with)
+    await makeRoomOnGpu(this.agent, ctxFor(info.thinking && this.agent.think ? limit + THINK_ROOM_ASKED : limit))
     const tried: string[] = []
     let thoughtTooLong = 0
 

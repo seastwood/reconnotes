@@ -17,6 +17,8 @@ const SIZES: Record<string, number> = { 'qwen3:8b': 6100, 'qwen2.5vl:7b': 5000, 
 let loaded: { name: string; size: number; vram: number; ctx: number }[] = []
 const loads: { name: string; ctx: number }[] = []
 const unloads: string[] = []
+/** each real request (not a bare load): how much of its model was on the GPU while it ran */
+const served: { name: string; vram: number }[] = []
 /** Whisper in Speaches, on the same GPU (MB it holds; 0 = not loaded) */
 let whisperMb = 0
 const speechUnloads: string[] = []
@@ -52,6 +54,7 @@ beforeAll(async () => {
       loaded.push({ name: body.model, size, vram: Math.max(0, Math.min(size, GPU - used)), ctx })
       loads.push({ name: body.model, ctx })
     }
+    if (body.messages || body.prompt) served.push({ name: body.model, vram: on(body.model)!.vram })
     res.end(JSON.stringify({ message: { role: 'assistant', content: 'ok' }, done_reason: 'stop', eval_count: 1 }))
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
@@ -166,11 +169,12 @@ describe('Whisper (Speaches) on the same GPU', () => {
   it('is unloaded when the notes model doesn’t fit beside it – and first, from then on', async () => {
     // what you saw: 7 GB usable, Whisper holding 1.6 GB – qwen3 (6.1 GB) only partly on the GPU
     loaded = []
+    served.length = 0
     transcribed()
     await run('qwen3:8b')
-    expect(on('qwen3:8b')!.vram).toBeLessThan(6100)
-    await run('qwen3:8b') // seen half on the CPU: Whisper out, loaded again fully
+    // seen squeezed as soon as it loaded – before the job ran: Whisper out, loaded again fully
     expect(speechUnloads).toEqual(['/api/ps/whisper-turbo'])
+    expect(served).toEqual([{ name: 'qwen3:8b', vram: 6100 }])
     expect(on('qwen3:8b')!.vram).toBe(6100)
     // next meeting: Whisper's unloaded before the model loads, so it's never squeezed
     speechUnloads.length = 0
