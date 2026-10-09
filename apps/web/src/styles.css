@@ -4491,8 +4491,10 @@ a.button {
 .ask-chat-pill {
   position: fixed;
   left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom) + 70px);
+  /* from the bottom of the visible area – above the keyboard when it's open */
+  --pill-gap: calc(env(safe-area-inset-bottom) + 70px);
+  top: calc(var(--app-top, 0px) + var(--app-height, 100dvh) - var(--pill-gap));
+  transform: translate(-50%, -100%);
   z-index: 90;
   display: flex;
   align-items: center;
@@ -4848,8 +4850,9 @@ a.button {
 .link-back {
   position: fixed;
   left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom) + 70px);
+  --pill-gap: calc(env(safe-area-inset-bottom) + 70px);
+  top: calc(var(--app-top, 0px) + var(--app-height, 100dvh) - var(--pill-gap));
+  transform: translate(-50%, -100%);
   z-index: 89;
   display: flex;
   align-items: center;
@@ -4861,9 +4864,17 @@ a.button {
   color: #1c1c1e;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
+/* the keyboard is open: just above it (it covers the home-indicator area) */
+.keyboard-open .ask-chat-pill,
+.keyboard-open .link-back {
+  --pill-gap: 14px;
+}
+.keyboard-open .link-back.above-chat {
+  --pill-gap: 66px;
+}
 /* "Back to chat" is showing too: just above it */
 .link-back.above-chat {
-  bottom: calc(env(safe-area-inset-bottom) + 122px);
+  --pill-gap: calc(env(safe-area-inset-bottom) + 122px);
 }
 .link-back button {
   color: inherit;
@@ -4880,4 +4891,9 @@ a.button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* the keyboard's hide button sits at the right just above it: leave it room */
+.keyboard-open .link-back,
+.keyboard-open .ask-chat-pill {
+  max-width: calc(100vw - 170px);
 }
