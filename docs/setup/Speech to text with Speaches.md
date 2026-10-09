@@ -281,6 +281,63 @@ It also happens the other way round: a language model still loaded from the last
 
 For language models, ReconNotes handles this by itself too: the first time a model is squeezed beside Whisper, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' small voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. It's tiny and stays loaded, and Whisper itself is what gets unloaded after 5 minutes (`STT_MODEL_TTL`) or when a model needs the room.
 
+## 12. See how full the GPU is (optional)
+
+Ollama says how much GPU memory each of its models takes, but neither Ollama nor Speaches says how big the GPU is or how full it is. Inside an LXC container, `nvidia-smi` can't say which program uses what either. A tiny monitor that comes with ReconNotes fills the gap. Run it on the machine (or container) with the GPU, and the **In memory** line in **Jobs** gets a bar: each model's share in its own colour, the rest free, and Whisper's real size. Without it, Whisper's size is an estimate (shown with a `~`).
+
+It uses Python's standard library only. Copy `deploy/gpu-stats.py` from the ReconNotes folder to `/opt/gpu-stats.py` on the GPU machine. For example, from the ReconNotes machine:
+
+```bash
+scp deploy/gpu-stats.py root@<speaches address>:/opt/gpu-stats.py
+```
+
+(Or open `nano /opt/gpu-stats.py` on the GPU machine and paste the file's contents.) Then, on the GPU machine:
+
+```bash
+python3 /opt/gpu-stats.py
+```
+
+In another shell, check it answers:
+
+```bash
+curl -s http://localhost:9401/
+```
+
+It should print your card, e.g. `{"gpus": [{"index": 0, "name": "NVIDIA GeForce GTX 1070", "totalMb": 8192, "usedMb": 7540}]}`. Stop it with **Ctrl+C** and make it a service:
+
+```bash
+nano /etc/systemd/system/gpu-stats.service
+```
+
+```ini
+[Unit]
+Description=GPU memory for ReconNotes (port 9401)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/gpu-stats.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+```
+
+```bash
+systemctl enable --now gpu-stats
+```
+
+ReconNotes looks for it on port 9401 at the address of each Ollama and speech-to-text agent, so there's nothing to set up in the app. Open **Jobs**: the bar appears within a minute. If the GPU is in the ReconNotes server's own machine (Ollama at `localhost`), ReconNotes asks `nvidia-smi` itself and you don't need the monitor.
+
+Reading the bar:
+
+- **Each colour** is a model, matching the little square before its name. The grey at the end is free.
+- **"full"** in red, and a red outline: less than 5% left. The next model to load may not fit.
+- **"On the CPU: …"** in red: a model that didn't fit, so it runs slowly. ReconNotes reloads it fully on the next job.
+
 ## Updating Speaches
 
 ```bash
@@ -313,4 +370,5 @@ Then repeat the `patchelf` line from step 5 and the `uv pip install "nvidia-cudn
 | works by hand but not as a service | the service is missing the `LD_LIBRARY_PATH` line (step 9) |
 | Jobs says "Apple speech recognition" | ReconNotes can't reach Speaches: check the agent's address ends in `:8000/v1` (step 10) |
 | notes model "partly on the CPU" after a meeting | handled automatically after the first time (step 11) |
+| the bar in Jobs doesn't appear | the GPU monitor isn't running, or port 9401 is blocked: `curl -s http://<speaches address>:9401/` from the ReconNotes machine (step 12) |
 | a meeting job says "Done by Apple speech recognition" with a **Speech-to-text: Failed** line | the reason is on that line; `journalctl -u speaches -n 50` shows Speaches' side (step 11) |

@@ -3858,6 +3858,51 @@ a.button {
   margin-top: 2px;
   color: var(--muted);
 }
+.ai-loaded-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.ai-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: 1px;
+}
+/* how full the GPU is: a segment per model, the rest free */
+.gpu-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.gpu-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(127, 127, 127, 0.22);
+}
+.gpu-bar.full {
+  box-shadow: 0 0 0 1px var(--danger);
+}
+.gpu-bar > span {
+  height: 100%;
+  min-width: 2px;
+}
+.gpu-bar > span + span {
+  border-left: 1px solid rgba(0, 0, 0, 0.25);
+}
+.gpu-bar > .gpu-other {
+  background: rgba(127, 127, 127, 0.55);
+}
+.gpu-hint {
+  font-size: 12px;
+}
 
 /* a recording running while you're elsewhere in the app */
 .recording-pill {

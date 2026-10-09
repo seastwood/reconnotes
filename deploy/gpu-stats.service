@@ -1,0 +1,10 @@
+[Unit]
+Description=GPU memory for ReconNotes (port 9401)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/gpu-stats.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

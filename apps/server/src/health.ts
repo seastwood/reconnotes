@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentRegistry } from './agents'
 import { observeOllama, speechLoaded, spentThisMonth } from './agents'
 import { wyomingDescribe } from './wyoming'
+import { gpuAt, hostOf, speechEstimateMb } from './gpu'
 import type { Jobs } from './jobs'
 
 /**
@@ -31,6 +32,7 @@ export interface AgentHealth {
 
 export interface OllamaHealth {
   url: string
+  host: string
   ok: boolean
   version: string | null
   /** models in memory now, with their GPU memory (MB) */
@@ -42,11 +44,31 @@ export interface Health {
   agents: AgentHealth[]
   ollama: OllamaHealth[]
   /** speech-to-text models in memory (Speaches): they take GPU memory the language models then lack */
-  speech: { agent: string; model: string }[]
+  speech: SpeechLoaded[]
+  /** the GPUs, where something can say how big and how full they are (deploy/gpu-stats.py, or nvidia-smi here) */
+  gpus: GpuHealth[]
   queue: { running: number; queued: number; paused: number; waitingToRetry: number }
   /** one line for the app to show */
   summary: string
   status: 'ok' | 'degraded' | 'down' | 'none'
+}
+
+export interface SpeechLoaded {
+  agent: string
+  model: string
+  host: string
+  /** GPU memory it takes (MB): measured (the GPU's use less Ollama's), else estimated from its name */
+  mb: number
+  measured: boolean
+}
+
+export interface GpuHealth {
+  host: string
+  name: string
+  totalMb: number
+  usedMb: number
+  /** used by something other than Ollama's models and the speech models listed (other programs, the driver) */
+  otherMb: number
 }
 
 const trim = (u: string) => u.replace(/\/+$/, '')
@@ -73,17 +95,40 @@ export async function aiHealth(agents: AgentRegistry, jobs: Jobs, fresh = false)
   const ollama: OllamaHealth[] = await Promise.all(
     servers.map(async (url) => {
       const v = await timed(async () => ((await (await fetch(`${url}/api/version`, { signal: signal() })).json()) as { version?: string }).version ?? null)
-      if (v.error !== undefined) return { url, ok: false, version: null, loaded: [] }
+      if (v.error !== undefined) return { url, host: hostOf(url), ok: false, version: null, loaded: [] }
       const ps = await timed(async () => (await (await fetch(`${url}/api/ps`, { signal: signal() })).json()) as { models?: { name: string; size: number; size_vram: number; expires_at?: string }[] })
       if (ps.value?.models) observeOllama(url, ps.value.models)
       const loaded = (ps.value?.models ?? []).map((m) => ({ name: m.name, vramMb: Math.round((m.size_vram ?? 0) / 1048576), sizeMb: Math.round((m.size ?? 0) / 1048576), until: m.expires_at ?? null }))
-      return { url, ok: true, version: v.value ?? null, loaded }
+      return { url, host: hostOf(url), ok: true, version: v.value ?? null, loaded }
     }),
   )
   const byUrl = new Map(ollama.map((o) => [o.url, o]))
   // what the speech-to-text servers have in memory (Speaches says; others can't)
   const speechAgents = all.filter((a) => a.enabled && a.kind === 'openai' && agents.chain('audio').some((c) => c.id === a.id))
-  const speech = (await Promise.all(speechAgents.map(async (a) => ((await speechLoaded(a)) ?? []).map((model) => ({ agent: a.name, model }))))).flat()
+  const speech: SpeechLoaded[] = (
+    await Promise.all(speechAgents.map(async (a) => ((await speechLoaded(a)) ?? []).map((model) => ({ agent: a.name, model, host: hostOf(a.baseUrl), mb: speechEstimateMb(model), measured: false }))))
+  ).flat()
+
+  // each GPU's size and use, where its machine can say; what Ollama doesn't account for is the speech models' (and the rest)
+  const hosts = [...new Set([...ollama.filter((o) => o.ok).map((o) => o.host), ...speech.map((m) => m.host)].filter(Boolean))]
+  const gpus: GpuHealth[] = []
+  for (const host of hosts) {
+    const cards = await gpuAt(host)
+    if (!cards) continue
+    const totalMb = cards.reduce((a, c) => a + c.totalMb, 0)
+    const usedMb = cards.reduce((a, c) => a + c.usedMb, 0)
+    const ollamaMb = ollama.filter((o) => o.host === host).flatMap((o) => o.loaded).reduce((a, m) => a + m.vramMb, 0)
+    let rest = Math.max(0, usedMb - ollamaMb)
+    // the small ones (the voice detector) as estimated; the rest is Whisper's
+    const here = speech.filter((m) => m.host === host).sort((a, b) => a.mb - b.mb)
+    here.forEach((m, i) => {
+      const share = i === here.length - 1 ? rest : Math.min(m.mb, rest)
+      m.mb = share
+      m.measured = true
+      rest -= share
+    })
+    gpus.push({ host, name: cards.length > 1 ? cards.map((c) => c.name).join(' + ') : cards[0].name, totalMb, usedMb, otherMb: rest })
+  }
 
   const agentHealth: AgentHealth[] = await Promise.all(
     all.map(async (a): Promise<AgentHealth> => {
@@ -126,7 +171,7 @@ export async function aiHealth(agents: AgentRegistry, jobs: Jobs, fresh = false)
         : status === 'degraded'
           ? `${down.map((a) => a.name).join(', ')} unreachable – others working`
           : `AI ready${loadedNames.length ? ` · loaded: ${loadedNames.join(', ')}` : ''}`
-  const value: Health = { checkedAt: Date.now(), agents: agentHealth, ollama, speech, queue: { ...c, waitingToRetry }, summary, status }
+  const value: Health = { checkedAt: Date.now(), agents: agentHealth, ollama, speech, gpus, queue: { ...c, waitingToRetry }, summary, status }
   cache = { at: Date.now(), value }
   return value
 }

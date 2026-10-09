@@ -179,7 +179,7 @@ describe('a long meeting, heard by the server', () => {
       const api = (m: string, p: string, b?: unknown) =>
         fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
       // "In memory" counts the speech-to-text model too – it shares the GPU
-      expect((await api('GET', '/api/ai/health?fresh=1')).speech).toEqual([{ agent: 'Whisper', model: 'faster-whisper-large-v3-turbo' }])
+      expect((await api('GET', '/api/ai/health?fresh=1')).speech).toMatchObject([{ agent: 'Whisper', model: 'faster-whisper-large-v3-turbo' }])
       const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'meetingaudio0001', transcript: 'Locates try to keep up with the gas.' } })).job
       const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
       expect(done.error ?? done.status).toBe('done')

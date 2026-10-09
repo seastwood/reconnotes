@@ -128,9 +128,11 @@ export interface AiHealth {
   status: 'ok' | 'degraded' | 'down' | 'none'
   summary: string
   agents: { id: string; name: string; kind: AgentKind; model: string; enabled: boolean; ok: boolean | null; error: string | null; ms: number | null; loaded?: boolean; spentUsd?: number }[]
-  ollama: { url: string; ok: boolean; version: string | null; loaded: { name: string; vramMb: number; sizeMb: number; until: string | null }[] }[]
-  /** speech-to-text models in memory (Speaches), taking GPU memory too */
-  speech?: { agent: string; model: string }[]
+  ollama: { url: string; host?: string; ok: boolean; version: string | null; loaded: { name: string; vramMb: number; sizeMb: number; until: string | null }[] }[]
+  /** speech-to-text models in memory (Speaches), taking GPU memory too: measured, or estimated from the name */
+  speech?: { agent: string; model: string; host?: string; mb?: number; measured?: boolean }[]
+  /** each GPU's size and use, where its machine can say (the GPU monitor, deploy/gpu-stats.py) */
+  gpus?: { host: string; name: string; totalMb: number; usedMb: number; otherMb: number }[]
   queue: { running: number; queued: number; paused: number; waitingToRetry: number }
 }
 /** Can the AI agents be reached right now, and what's loaded? */
