@@ -512,10 +512,11 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   route('POST', `/api/jobs/${ID}/resume`, (_req, res, [id]) => json(res, 200, { job: jobs.resume(jobOr404(id).id) }))
   route('POST', `/api/jobs/${ID}/run-next`, (_req, res, [id]) => json(res, 200, { job: jobs.runNext(jobOr404(id).id) }))
   route('POST', `/api/jobs/${ID}/redo`, async (req, res, [id]) => {
-    const { prompt } = await readJson<{ prompt?: string }>(req)
+    const { prompt, fresh } = await readJson<{ prompt?: string; fresh?: boolean }>(req)
     jobOr404(id)
     try {
-      json(res, 201, { job: jobs.redo(id, prompt?.trim() ? prompt.trim().slice(0, 2000) : null, deviceName(req)) })
+      // fresh: read the recording again too (a meeting), rather than its saved transcript
+      json(res, 201, { job: jobs.redo(id, prompt?.trim() ? prompt.trim().slice(0, 2000) : null, deviceName(req), fresh ? { retranscribe: true } : {}) })
     } catch (e) {
       throw new HttpError(400, (e as Error).message)
     }

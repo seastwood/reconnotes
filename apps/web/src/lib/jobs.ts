@@ -253,8 +253,9 @@ export const runJobNext = (id: string) => act(`/api/jobs/${id}/run-next`)
 export const removeJobResult = (id: string) => act(`/api/jobs/${id}/remove-result`)
 export const clearFinishedJobs = () => act('/api/jobs/clear-finished')
 export const pauseAllJobs = (paused: boolean) => act('/api/jobs/pause-all', { paused })
-export async function redoJob(id: string, prompt?: string): Promise<Job | null> {
-  const job = await act(`/api/jobs/${id}/redo`, { prompt: prompt ?? '' })
+/** Do a job again (replacing its result). `fresh`: a meeting reads its recording again too. */
+export async function redoJob(id: string, prompt?: string, fresh = false): Promise<Job | null> {
+  const job = await act(`/api/jobs/${id}/redo`, { prompt: prompt ?? '', ...(fresh ? { fresh: true } : {}) })
   if (job) mine.add(job.id)
   return job
 }

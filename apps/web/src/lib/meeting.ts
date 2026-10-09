@@ -60,3 +60,15 @@ export async function writeMeetingNotes(noteId: string, attachmentId: string, bl
     showToast(`Couldn’t write the meeting notes: ${(e as Error).message}`)
   }
 }
+
+/**
+ * Meeting notes from a recording already in a note (its ⋯ menu): the server reads it (Whisper),
+ * or uses the transcript it already has.
+ */
+export async function meetingNotesFor(noteId: string, attachmentId: string) {
+  if (!isSyncConfigured()) return showToast('Connect your ReconNotes server in Settings to get meeting notes written for you.')
+  await flushUploads()
+  await flushNote(noteId)
+  await submitJob({ kind: 'meeting', noteId, input: { attachmentId, tzOffset: new Date().getTimezoneOffset() } })
+  showToast('Writing the meeting notes – they’ll appear at the end of the note (see Jobs)')
+}

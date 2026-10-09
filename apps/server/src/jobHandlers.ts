@@ -530,7 +530,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const doc = noteDoc(noteId)
     const att = store.getAttachment(String(attachmentId))
     // the phone's own reading (Apple's speech recognition: made for dictation, not a room of people)
-    const onDevice = String(job.input.transcript ?? '').trim()
+    // asked to read the recording again: not the saved transcript, nor the phone's
+    const fresh = job.input.retranscribe === true
+    const onDevice = fresh ? '' : String(job.input.transcript ?? '').trim()
     let transcript = ''
     let agent: string | null = null
     let times: { word: string; start: number; end: number }[] | undefined
@@ -540,7 +542,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
     const savedBy = att ? transcribedBy(store, att.id) : null
     // already read by the server's speech-to-text: that – not the phone's reading, nor one nobody knows the source of
-    if (serverHears && saved && savedBy && savedBy !== APPLE_SPEECH) (transcript = saved), (agent = savedBy)
+    if (!fresh && serverHears && saved && savedBy && savedBy !== APPLE_SPEECH) (transcript = saved), (agent = savedBy)
     else if (serverHears && att && store.hasBlob(att.id)) {
       reportProgress('Transcribing the recording…')
       try {

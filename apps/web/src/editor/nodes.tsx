@@ -1,8 +1,12 @@
-import { errorText } from '../lib/jobs'
+import { errorText, isFinished, redoJob, useJobs } from '../lib/jobs'
+import { meetingNotesFor } from '../lib/meeting'
+import { Popover } from '../components/Popover'
+import { showToast } from '../lib/toast'
+import { isSyncConfigured } from '../lib/settings'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, PenLine, ScanText, Scissors, Share, TextQuote } from 'lucide-react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, TextQuote, Trash2, Users } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { getNotes, getTranscripts, newId, readNote, wordsKey, type Stroke } from '@reconnotes/core'
@@ -69,8 +73,10 @@ function useAttachmentText(id: string, key = `att:${id}`) {
  * mouse: touch/pen act on pointerup (inside a note, iOS doesn't always
  * deliver the click), the mouse on click.
  */
+// when a touch last acted (kept outside: a button whose action re-renders gets new handlers,
+// and the click that follows the touch mustn't act a second time – a menu would open and shut)
+let touchActedAt = 0
 export function tap(action: () => void) {
-  let handledAt = 0
   return {
     onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
     onPointerUp: (e: React.PointerEvent) => {
@@ -78,12 +84,12 @@ export function tap(action: () => void) {
       const r = e.currentTarget.getBoundingClientRect()
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
       e.preventDefault()
-      handledAt = Date.now()
+      touchActedAt = Date.now()
       action()
     },
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (Date.now() - handledAt < 800) return // already handled on pointerup
+      if (Date.now() - touchActedAt < 800) return // already handled on pointerup
       action()
     },
   }
@@ -387,6 +393,156 @@ function followPlayhead(el: HTMLAudioElement) {
   step()
 }
 
+/**
+ * A recording's ⋯ menu: what can be done with it – meeting notes (written, redone, redone from a
+ * fresh transcript), its transcript, the file itself, and moving or removing it. Not every
+ * recording is a meeting: the meeting items are there for any, the rest work the same.
+ */
+function AudioMenu({
+  editor,
+  getPos,
+  doc,
+  noteId,
+  attachmentId,
+  name,
+  transcript,
+  onShowTranscript,
+  onTranscribe,
+  busy,
+}: {
+  editor: Editor
+  getPos: () => number | undefined
+  doc: Y.Doc
+  noteId: string
+  attachmentId: string
+  name: string
+  transcript: string | null
+  onShowTranscript: () => void
+  onTranscribe: () => void
+  busy: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const anchor = useRef<HTMLButtonElement>(null)
+  // the meeting notes last written from this recording (to redo in place)
+  const meeting = useJobs((s) =>
+    s.jobs
+      .filter((j) => j.kind === 'meeting' && j.noteId === noteId && j.input?.attachmentId === attachmentId && !j.replacedBy && j.status !== 'cancelled')
+      .sort((a, b) => b.createdAt - a.createdAt)[0],
+  )
+  const running = meeting && !isFinished(meeting)
+  const editable = editor.isEditable
+  const act = (f: () => unknown) => () => {
+    setOpen(false)
+    void Promise.resolve(f()).catch((e) => showToast(errorText(e) ?? 'Couldn’t do that.'))
+  }
+  const redo = (fresh: boolean) => async () => {
+    if (!meeting) return
+    await redoJob(meeting.id, undefined, fresh)
+    showToast(fresh ? 'Reading the recording again, then rewriting the meeting notes (see Jobs)' : 'Rewriting the meeting notes – what you changed in them stays (see Jobs)')
+  }
+  const rename = () => {
+    const next = window.prompt('Name this recording', name)?.trim()
+    const pos = getPos()
+    if (!next || next === name || typeof pos !== 'number') return
+    editor.chain().command(({ tr }) => (tr.setNodeAttribute(pos, 'name', next), true)).run()
+  }
+  const remove = () => {
+    const pos = getPos()
+    if (typeof pos !== 'number' || !window.confirm(`Remove “${name}” from this note?`)) return
+    const node = editor.state.doc.nodeAt(pos)
+    if (node) editor.chain().deleteRange({ from: pos, to: pos + node.nodeSize }).run()
+  }
+  const insert = () => {
+    const pos = getPos()
+    const node = typeof pos === 'number' ? editor.state.doc.nodeAt(pos) : null
+    if (!transcript || !node || typeof pos !== 'number') return
+    editor
+      .chain()
+      .insertContentAt(
+        pos + node.nodeSize,
+        transcript.split(/\n+/).filter(Boolean).map((t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })),
+      )
+      .run()
+  }
+  return (
+    <>
+      <button
+        ref={anchor}
+        className={`block-copy${open ? ' open' : ''}`}
+        {...tap(() => setOpen(!open))}
+        title="More for this recording"
+        aria-label="More for this recording"
+        aria-expanded={open}
+      >
+        <MoreHorizontal size={15} />
+      </button>
+      {open && (
+        <Popover anchorRef={anchor} align="right" onClose={() => setOpen(false)}>
+          <div className="menu-label">{name}</div>
+          {isSyncConfigured() &&
+            (running ? (
+              <button disabled>
+                <Loader2 size={16} className="spin" /> Writing meeting notes…
+              </button>
+            ) : meeting ? (
+              <>
+                <button onClick={act(redo(false))}>
+                  <RotateCcw size={16} /> Redo meeting notes
+                </button>
+                <button onClick={act(redo(true))}>
+                  <AudioLines size={16} /> Redo from a fresh transcript
+                </button>
+              </>
+            ) : (
+              <button onClick={act(() => meetingNotesFor(noteId, attachmentId))}>
+                <Users size={16} /> Write meeting notes
+              </button>
+            ))}
+          {editable && (
+            <button onClick={act(onTranscribe)} disabled={busy}>
+              <AudioLines size={16} /> Transcribe again
+            </button>
+          )}
+          {transcript && (
+            <>
+              <div className="menu-sep" />
+              <button onClick={act(onShowTranscript)}>
+                <Eye size={16} /> Show transcript
+              </button>
+              <button onClick={act(() => copyText(transcript).then(() => showToast('Transcript copied')))}>
+                <Copy size={16} /> Copy transcript
+              </button>
+              {editable && (
+                <button onClick={act(insert)}>
+                  <TextQuote size={16} /> Insert transcript into note
+                </button>
+              )}
+            </>
+          )}
+          <div className="menu-sep" />
+          <button onClick={act(() => shareFile(attachmentId, name.includes('.') ? name : `${name}.m4a`))}>
+            <Share size={16} /> Save or share the audio
+          </button>
+          {editable && (
+            <>
+              <button onClick={act(rename)}>
+                <Pencil size={16} /> Rename…
+              </button>
+              <button onClick={act(() => copyBlock(editor, getPos(), doc, true))}>
+                <Scissors size={16} /> Cut – to move to another note
+              </button>
+              <div className="menu-sep" />
+              <button className="danger" onClick={act(remove)}>
+                <Trash2 size={16} /> Remove from note
+              </button>
+            </>
+          )}
+        </Popover>
+      )}
+    </>
+  )
+}
+
 function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
   const ctx = useContext(NoteContext)
   const { url, missing } = useAttachmentUrl(node.attrs.attachmentId)
@@ -467,7 +623,25 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
             {busy ? <Loader2 size={15} className="spin" /> : <AudioLines size={15} />} {busy ? 'Transcribing…' : 'Transcribe'}
           </button>
         )}
-        {editor.isEditable && ctx && <BlockCopyButtons editor={editor} getPos={getPos} doc={ctx.doc} what="recording" />}
+        {editor.isEditable && ctx && (
+          <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), ctx.doc))} title="Copy this recording (paste it in any note)" aria-label="Copy recording">
+            <Copy size={15} />
+          </button>
+        )}
+        {ctx && (
+          <AudioMenu
+            editor={editor}
+            getPos={getPos}
+            doc={ctx.doc}
+            noteId={ctx.noteId}
+            attachmentId={attachmentId}
+            name={node.attrs.name || 'Recording'}
+            transcript={transcript}
+            onShowTranscript={() => setOpen(true)}
+            onTranscribe={() => void transcribe()}
+            busy={busy}
+          />
+        )}
       </div>
       {error && (
         <div className="drawing-error" role="alert">

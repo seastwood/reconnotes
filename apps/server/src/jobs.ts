@@ -430,7 +430,7 @@ export class Jobs {
   }
 
   /** Run a finished job again, optionally with extra instructions; its result is replaced. */
-  redo(id: string, prompt: string | null, device: string | null): Job {
+  redo(id: string, prompt: string | null, device: string | null, extra: Record<string, unknown> = {}): Job {
     const j = this.get(id)
     if (!j) throw new Error('job not found')
     if (!this.handlers.has(j.kind)) throw new Error('This kind of job can’t be redone.')
@@ -442,7 +442,8 @@ export class Jobs {
       kind: j.kind,
       title: j.title,
       noteId: j.noteId,
-      input: { ...j.input, replace },
+      // one-off asks (read the recording again) don't carry on to later redos
+      input: { ...Object.fromEntries(Object.entries(j.input).filter(([k]) => k !== 'retranscribe')), replace, ...extra },
       origin: 'user',
       device,
       prompt: prompt ?? j.prompt,

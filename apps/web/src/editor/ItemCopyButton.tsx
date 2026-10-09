@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { Copy } from 'lucide-react'
 import type * as Y from 'yjs'
@@ -28,10 +28,44 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
     },
     equalityFn: (a, b) => a?.item === b?.item && a?.end === b?.end,
   })
+  // the note losing focus hides it – but not under a tap already on its way (iOS can blur first)
+  const [shown, setShown] = useState(at)
+  useEffect(() => {
+    if (at) return setShown(at)
+    const t = setTimeout(() => setShown(null), 600)
+    return () => clearTimeout(t)
+  }, [at])
+  // a touch is the button's own: the note keeps its focus (and keyboard), the copy happens as the finger lifts
+  const button = useRef<HTMLButtonElement | null>(null)
+  const latest = useRef(shown)
+  latest.current = shown
+  useEffect(() => {
+    const b = button.current
+    if (!b) return
+    let down: { x: number; y: number } | null = null
+    const start = (e: TouchEvent) => {
+      e.preventDefault()
+      down = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    }
+    const end = (e: TouchEvent) => {
+      e.preventDefault()
+      const t = e.changedTouches[0]
+      const d = down
+      down = null
+      if (!d || !latest.current || Math.hypot(t.clientX - d.x, t.clientY - d.y) > 12) return
+      copyChecklistItem(editor.view, latest.current.item, doc)
+    }
+    b.addEventListener('touchstart', start, { passive: false })
+    b.addEventListener('touchend', end, { passive: false })
+    return () => {
+      b.removeEventListener('touchstart', start)
+      b.removeEventListener('touchend', end)
+    }
+  }, [Boolean(shown), editor, doc])
   // follow the text as the note scrolls or the keyboard moves things
   const [, redraw] = useState(0)
   useEffect(() => {
-    if (!at) return
+    if (!shown) return
     const r = () => redraw((n) => n + 1)
     window.addEventListener('scroll', r, { capture: true, passive: true })
     window.addEventListener('resize', r)
@@ -41,12 +75,12 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
       window.removeEventListener('resize', r)
       window.visualViewport?.removeEventListener('resize', r)
     }
-  }, [at])
-  if (!at) return null
+  }, [shown])
+  if (!shown) return null
   let pos: { left: number; top: number }
   try {
     const view = editor.view
-    const end = view.coordsAtPos(at.end)
+    const end = view.coordsAtPos(shown.end)
     const box = view.dom.getBoundingClientRect()
     const pad = parseFloat(getComputedStyle(view.dom).paddingRight) || 0
     const right = box.right - Math.max(0, pad - 30)
@@ -57,11 +91,12 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
   }
   return (
     <button
+      ref={button}
       className="item-copy"
       style={{ left: pos.left, top: pos.top }}
       // keep the cursor (and the keyboard) where they are
       onPointerDown={(e) => e.preventDefault()}
-      onClick={() => copyChecklistItem(editor.view, at.item, doc)}
+      onClick={() => copyChecklistItem(editor.view, shown.item, doc)}
       aria-label="Copy this item"
       title="Copy this item"
     >

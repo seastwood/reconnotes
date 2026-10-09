@@ -51,13 +51,15 @@ export function blocksToText(nodes: PMNode[], indent = ''): string[] {
 function inlineText(node: PMNode): string {
   let s = ''
   node.forEach((c) => {
+    // a meeting note's ▶ link into its recording means nothing outside the note
+    if (c.isText && c.marks.some((m) => m.type.name === 'link' && String(m.attrs.href ?? '').startsWith('listen:'))) return
     if (c.isText) s += c.text
     else if (c.type.name === 'hardBreak') s += '\n'
     else if (c.type.name === 'dueDate') s += `!${c.attrs.date}`
     else if (c.type.name === 'noteLink') s += `[[${c.attrs.title || 'note'}]]`
     else s += c.textContent
   })
-  return s
+  return s.replace(/ {2,}/g, ' ').replace(/ +$/, '')
 }
 
 function sliceToText(slice: Slice): string {

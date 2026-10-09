@@ -275,6 +275,20 @@ describe('a long meeting, heard by the server', () => {
       expect(again.agent).toMatch(/^Whisper \+ /)
       expect(hint).toBe('Doug, MinneTrials.')
       expect(app.store.getAttachment('meetingaudio0001')?.text).toContain('Topic 250')
+
+      // the recording's ⋯ menu: "Redo from a fresh transcript" – Whisper hears it again though its transcript is saved
+      hint = ''
+      const fresh = (await fetch(`${base}/api/jobs/${redo.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fresh: true }) }).then((r) => r.json())).job
+      expect(fresh.input.retranscribe).toBe(true)
+      expect(fresh.input.replace).toBe(redo.id)
+      expect((await api('GET', `/api/jobs/${fresh.id}/wait`)).job.status).toBe('done')
+      expect(hint).toBe('Doug, MinneTrials.')
+      // a plain redo of that one uses the saved transcript again (asking for a fresh one doesn't stick)
+      hint = ''
+      const plain = (await fetch(`${base}/api/jobs/${fresh.id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())).job
+      expect(plain.input.retranscribe).toBeUndefined()
+      expect((await api('GET', `/api/jobs/${plain.id}/wait`)).job.status).toBe('done')
+      expect(hint).toBe('')
     } finally {
       whisper.close()
     }
