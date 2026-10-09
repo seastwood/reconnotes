@@ -39,6 +39,10 @@ const PLACEHOLDER =
  * `fallback`: Summary bullets to use if none of the model's own survive (each part's topics);
  * `dropped`: collects the lines left out, so the job can show what was taken away and why.
  */
+/** what makes an open question one: something asked, a choice between things, something to find out */
+const ASKS =
+  /\?|\b(?:whether|which|where|when|who|whom|how|what|why|if|or|vs\.?|versus|between|either|find out|look into|check|confirm|figure out|depends?)\b/i
+
 /** an "open question" that only says nothing was assigned or decided, or that it's "unresolved" */
 const FILLER_PHRASES =
   /\b(?:no (?:formal |explicit |specific |clear |further )?(?:action items?|actions?|tasks?|owners?|decisions?|consensus)\b(?: (?:was |were )?(?:assigned|given|set|made|specified|taken|reached|decided))?|no actionable \w+|(?:details?|timing|method|timing\/method|it|this|issue|task|plan)?\s*(?:remains? |is |are |still )?(?:unresolved|undecided|pending|unclear|unspecified|tbd)|small talk (?:omitted|excluded)|but|and)\b/gi
@@ -49,6 +53,9 @@ const FILLER = {
     return rest.length < 3
   },
 }
+
+/** a to-do's owner that isn't anyone: "- [ ] Unspecified: make space…", "- [ ] **Unassigned** – …" */
+const NO_OWNER = /^(\s*[-*]\s+(?:\[[ xX]\]\s+)?)(?:\*\*)?(?:unspecified|unassigned|unknown|someone|anyone|tbd|n\/a|team|everyone)(?:\*\*)?\s*(?::|[–—-])\s*/i
 
 export function groundMeetingNotes(
   text: string,
@@ -96,7 +103,7 @@ export function groundMeetingNotes(
   // placeholders for what wasn't said ("by [TBD]", "(deadline: not specified)") – left out instead
   text = text
     .split('\n')
-    .map((l) => l.replace(PLACEHOLDER, '').replace(/\s+([.,;:])/g, '$1').replace(/\s+$/, ''))
+    .map((l) => l.replace(NO_OWNER, '$1').replace(PLACEHOLDER, '').replace(/\s+([.,;:])/g, '$1').replace(/\s+$/, ''))
     .join('\n')
   // a model that carries on past its answer repeats the prompt: cut it there
   const cut = text.search(/^\s*(Notes taken during the meeting|Transcript of the recording)\b/im)
@@ -112,7 +119,9 @@ export function groundMeetingNotes(
     const kept = s.lines.filter((l) => {
       // "No task assigned", "no decisions" under Open questions: a note about the meeting, not a question
       // (what it's about – a "Label:", bold or not – doesn't count: what's said about it does)
-      if (isOpen && /^\s*[-*]\s/.test(l) && FILLER.test(l.replace(/^\s*[-*]\s+/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, '').replace(/^[^:]{1,70}:\s+/, ''))) {
+      // …and one that only names a topic ("Air freshener purchase for press area."): no question in it –
+      // nothing asked, no choice between things, nothing to find out
+      if (isOpen && /^\s*[-*]\s/.test(l) && (FILLER.test(l.replace(/^\s*[-*]\s+/, '').replace(/^\*\*[^*]{1,80}\*\*\s*:?\s*/, '').replace(/^[^:]{1,70}:\s+/, '')) || !ASKS.test(l))) {
         opts.dropped?.push(`${s.heading.replace(/^#+\s*/, '')}: ${l.trim()}`)
         return false
       }

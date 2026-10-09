@@ -103,7 +103,29 @@ describe('notes in the shape asked for, from what a model actually wrote', async
     )
     expect(more).not.toMatch(/Bathroom clutter|gas locates/)
     expect(more).toContain('Water meter contractor')
-    expect(more).toContain('Boiler room lighting')
+    // a statement that something's undecided isn't a question either
+    expect(more).not.toContain('Boiler room lighting')
+
+    // this run's list: most of it only named a topic
+    const t3 =
+      'Johnson Controls or Summit for the maintenance. The water meter box, the middle of the lot or 8 feet off the fence. Air freshener for the press. The crate stays, make space for the dumpster Tuesday. Gas locates.'
+    const run = groundMeetingNotes(
+      `## Open questions
+- Maintenance/service agreement provider (Johnson Controls vs Summit).
+- Crate loading task canceled; dumpster space needed by Tuesday.
+- Air freshener purchase for press area.
+- Event prep and gas locates tasks pending.
+- Water meter box placement (middle of lot or 8 ft off fence).
+
+## Action items
+- [ ] Unspecified: Make space for the dumpster on Tuesday.`,
+      t3,
+      '',
+    )
+    expect(run).toContain('Johnson Controls vs Summit')
+    expect(run).toContain('Water meter box placement')
+    expect(run).not.toMatch(/Air freshener|gas locates|Crate loading/)
+    expect(run).toContain('- [ ] Make space for the dumpster on Tuesday.')
     expect(normalizeMeetingNotes('## Summary\n- **Topic: Gate** – starts Monday')).toBe('## Summary\n- **Gate**: starts Monday')
   })
 
