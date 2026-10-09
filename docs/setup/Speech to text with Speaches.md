@@ -495,7 +495,8 @@ def fetch_models():
         tar = os.path.join(MODELS, "segmentation.tar.bz2")
         urllib.request.urlretrieve(f"{RELEASES}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", tar)
         with tarfile.open(tar) as t:
-            t.extractall(MODELS)
+            # only plain files, inside the folder (and no warning on newer Pythons)
+            t.extractall(MODELS, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
         os.remove(tar)
     if not os.path.exists(EMBEDDING):
         print("downloading the voice model…", flush=True)
@@ -591,7 +592,13 @@ Try it (the first start downloads the models, then says `ready on port 9402`):
 /opt/diarize/.venv/bin/python /opt/diarize/diarize.py
 ```
 
-In another shell, give it the test recording from step 8:
+In another shell, get a short test recording (President Kennedy, 11 seconds):
+
+```bash
+curl -L -o /tmp/test.flac https://github.com/openai/whisper/raw/main/tests/jfk.flac
+```
+
+and give it to the service:
 
 ```bash
 curl -s -X POST --data-binary @/tmp/test.flac http://localhost:9402/diarize

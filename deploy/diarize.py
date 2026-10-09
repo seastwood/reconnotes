@@ -52,7 +52,8 @@ def fetch_models():
         tar = os.path.join(MODELS, "segmentation.tar.bz2")
         urllib.request.urlretrieve(f"{RELEASES}/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2", tar)
         with tarfile.open(tar) as t:
-            t.extractall(MODELS)
+            # only plain files, inside the folder (and no warning on newer Pythons)
+            t.extractall(MODELS, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
         os.remove(tar)
     if not os.path.exists(EMBEDDING):
         print("downloading the voice model…", flush=True)
