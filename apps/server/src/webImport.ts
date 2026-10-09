@@ -651,11 +651,35 @@ function titleOf(doc: Document, main: El, url: URL): string {
   return h1 || og || short || t || url.hostname + url.pathname
 }
 
+/**
+ * The address a wrapped link goes to: Google's "Redirect Notice"
+ * (google.com/url?q=…), Outlook's safe links, Facebook's l.php – a link
+ * copied out of a Google Doc or an email is often one of these.
+ */
+export function unwrapLink(href: string): string {
+  for (let i = 0; i < 3; i++) {
+    let u: URL
+    try {
+      u = new URL(href)
+    } catch {
+      return href
+    }
+    const host = u.hostname.replace(/^www\./, '')
+    const inner =
+      (/^google\.[a-z.]+$/.test(host) && u.pathname === '/url' && (u.searchParams.get('q') || u.searchParams.get('url'))) ||
+      (/safelinks\.protection\.outlook\.com$/.test(host) && u.searchParams.get('url')) ||
+      (/^l\.(facebook|instagram)\.com$/.test(host) && u.searchParams.get('u'))
+    if (!inner || !/^https?:\/\//i.test(inner)) return href
+    href = inner
+  }
+  return href
+}
+
 export async function importWebPages(config: Config, store: Store, ai: Ai, sync: SyncEngine, opts: WebImportOptions): Promise<WebImportResult> {
   let start: URL
   try {
     // a PDF from this device has no address of its own
-    start = opts.pdfAttachmentId ? new URL('https://pdf.reconnotes/upload') : new URL(opts.url.trim())
+    start = opts.pdfAttachmentId ? new URL('https://pdf.reconnotes/upload') : new URL(unwrapLink(opts.url.trim()))
   } catch {
     throw new Error('That isn’t a web address – it should start with https://')
   }

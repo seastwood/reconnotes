@@ -1,9 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, BookOpen, Check, Download, Sparkles, ChevronLeft, ChevronRight, CornerLeftUp, FileText, Folder, History, Loader2, MessageCircleQuestion, Plus, SquarePen, Trash2, X } from 'lucide-react'
-import { getNotes, listFolders, readNote } from '@reconnotes/core'
-import { api } from '../lib/api'
-import { useWorkspace, workspaceDoc } from '../lib/workspace'
+import { ArrowUp, ChevronLeft, History, Loader2, MessageCircleQuestion, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { useStore } from '../lib/store'
@@ -11,6 +8,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { askChat, chatKey, closeAskChat, hideAskChat, showAskChat, type AskChatTarget } from '../lib/askChat'
 import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
+import { ReferencesBar } from './References'
 
 /**
  * "Ask about this note" (and "Ask this folder"): a chat window of its own,
@@ -227,7 +225,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           <SquarePen size={19} />
         </button>
       </header>
-      {target.noteId && <RefNotes noteId={target.noteId} />}
+      {target.noteId && <ReferencesBar noteId={target.noteId} onOpen={(id) => go(id)} />}
 
       <div
         className="ask-chat-body"
@@ -435,227 +433,4 @@ function ChatInput({
       </div>
     </form>
   )
-}
-
-/**
- * "Also reads": the notes this note refers to (its game manual), which Ask
- * reads too – the rules it mentions from them, and their sections when they
- * answer the question better. Kept on the server for the note.
- */
-function RefNotes({ noteId }: { noteId: string }) {
-  const [refs, setRefs] = useState<string[] | null>(null)
-  const [picking, setPicking] = useState(false)
-  useWorkspace()
-  useEffect(() => {
-    let alive = true
-    api<{ refs: string[] }>('GET', `/api/ask/refs?noteId=${noteId}`)
-      .then((r) => alive && setRefs(r.refs))
-      .catch(() => alive && setRefs([]))
-    return () => {
-      alive = false
-    }
-  }, [noteId])
-  const notes = getNotes(workspaceDoc)
-  const title = (id: string) => {
-    const m = notes.get(id)
-    return m ? readNote(m).title || 'Untitled' : null
-  }
-  const save = (next: string[]) => {
-    setRefs(next)
-    void api('PUT', '/api/ask/refs', { noteId, refs: next })
-      .then(() => setRefsAt(Date.now()))
-      .catch(() => {})
-  }
-  // what the note refers to: notes to read with it, and what's missing – looked again when the refs change or an import finishes
-  const [refsAt, setRefsAt] = useState(0)
-  const [found, setFound] = useState<References | null>(null)
-  const [importing, setImporting] = useState<string[]>([])
-  const doneImports = useJobs((s) => s.jobs.filter((j) => j.kind === 'web-import' && j.input.askRefFor === noteId && isFinished(j)).length)
-  useEffect(() => {
-    let alive = true
-    api<References>('GET', `/api/ask/references?noteId=${noteId}`)
-      .then((r) => alive && setFound(r))
-      .catch(() => {})
-    if (doneImports)
-      api<{ refs: string[] }>('GET', `/api/ask/refs?noteId=${noteId}`)
-        .then((r) => alive && setRefs(r.refs))
-        .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [noteId, refsAt, doneImports])
-  const importDoc = async (url: string) => {
-    setImporting((x) => [...x, url])
-    const own = notes.get(noteId)
-    try {
-      await submitJob({ kind: 'web-import', title: url.replace(/^https?:\/\//, '').slice(0, 120), input: { url, follow: false, maxPages: 1, folderId: own ? readNote(own).folderId : null, askRefFor: noteId } })
-    } catch {
-      setImporting((x) => x.filter((u) => u !== url))
-    }
-  }
-  if (refs === null) return null
-  const shown = refs.filter((id) => title(id) !== null)
-  return (
-    <div className="ask-refs">
-      <div className="ask-refs-row">
-        <span className="ask-refs-label" title="Ask also reads these notes – e.g. the manual this note refers to">
-          <BookOpen size={13} /> Also reads:
-        </span>
-        {shown.map((id) => (
-          <span key={id} className="ask-ref">
-            {title(id)}
-            <button className="icon" aria-label={`Stop reading ${title(id)}`} onClick={() => save(refs.filter((x) => x !== id))}>
-              <X size={12} />
-            </button>
-          </span>
-        ))}
-        {!shown.length && !picking && <span className="ask-refs-none">only this note</span>}
-        <button className="text ask-refs-add" onClick={() => setPicking(!picking)}>
-          {picking ? <Check size={13} /> : <Plus size={13} />} {picking ? 'Done' : 'Add a note'}
-        </button>
-      </div>
-      {found && (found.suggestions.length > 0 || found.missing.length > 0 || found.missingRules.length > 0) && (
-        <div className="ask-refs-found">
-          {found.suggestions.length > 0 && (
-            <div className="ask-refs-group">
-              <span className="ask-refs-label">
-                <Sparkles size={13} /> It refers to:
-              </span>
-              {found.suggestions.map((sg) => (
-                <div key={sg.noteId} className="ask-refs-suggest">
-                  <span className="ask-refs-option-text">
-                    {sg.title}
-                    <span className="ask-refs-where">{sg.reasons.join(' · ')}</span>
-                  </span>
-                  <button className="text" onClick={() => save([...refs, sg.noteId])}>
-                    <Plus size={13} /> Add
-                  </button>
-                </div>
-              ))}
-              {found.suggestions.length > 1 && (
-                <button className="text ask-refs-all" onClick={() => save([...refs, ...found.suggestions.map((x) => x.noteId)])}>
-                  Add all
-                </button>
-              )}
-            </div>
-          )}
-          {found.missing.map((d) => (
-            <div key={d.url} className="ask-refs-suggest missing">
-              <span className="ask-refs-option-text">
-                {d.name}
-                <span className="ask-refs-where">Linked, but not in your notes · {d.url!.replace(/^https?:\/\//, '').slice(0, 60)}</span>
-              </span>
-              {importing.includes(d.url!) ? (
-                <span className="ask-refs-where">
-                  <Loader2 size={13} className="spin" /> Importing…
-                </span>
-              ) : (
-                <button className="text" onClick={() => void importDoc(d.url!)}>
-                  <Download size={13} /> Import
-                </button>
-              )}
-            </div>
-          ))}
-          {found.missingRules.length > 0 && (
-            <div className="ask-refs-where ask-refs-rules">
-              Rules it uses that none of your notes has: {found.missingRules.slice(0, 10).join(', ')}
-              {found.missingRules.length > 10 ? ` and ${found.missingRules.length - 10} more` : ''}
-            </div>
-          )}
-        </div>
-      )}
-      {picking && <RefPicker noteId={noteId} chosen={refs} onToggle={(id) => save(refs.includes(id) ? refs.filter((x) => x !== id) : [...refs, id])} />}
-    </div>
-  )
-}
-
-/**
- * Picking the notes Ask also reads: the folders, starting in the one the note
- * is in (a manual is usually next to it) – into a folder, up, or anywhere by
- * the path – and a search of every note.
- */
-function RefPicker({ noteId, chosen, onToggle }: { noteId: string; chosen: string[]; onToggle: (id: string) => void }) {
-  useWorkspace()
-  const notes = [...getNotes(workspaceDoc).entries()].map(([id, m]) => ({ id, n: readNote(m) })).filter(({ id, n }) => id !== noteId && !n.trashedAt && !n.template)
-  const folders = listFolders(workspaceDoc).filter((f) => !f.trashedAt)
-  const live = new Map(folders.map((f) => [f.id, f]))
-  const folderOf = (folderId: string | null) => (folderId && live.has(folderId) ? folderId : null)
-  const own = getNotes(workspaceDoc).get(noteId)
-  const [at, setAt] = useState<string | null>(() => folderOf(own ? readNote(own).folderId : null))
-  const [q, setQ] = useState('')
-  const path = (id: string | null) => {
-    const out: { id: string; name: string }[] = []
-    for (let f = id ? live.get(id) : undefined; f; f = f.parentId ? live.get(f.parentId) : undefined) out.unshift({ id: f.id, name: f.name })
-    return out
-  }
-  const byTitle = (a: { n: { title: string } }, b: { n: { title: string } }) => (a.n.title || 'Untitled').localeCompare(b.n.title || 'Untitled', undefined, { numeric: true })
-  const row = ({ id, n }: { id: string; n: { title: string; folderId: string | null } }, where?: string) => (
-    <button key={id} className={`ask-refs-option${chosen.includes(id) ? ' chosen' : ''}`} onClick={() => onToggle(id)}>
-      <FileText size={15} />
-      <span className="ask-refs-option-text">
-        {n.title || 'Untitled'}
-        {where !== undefined && <span className="ask-refs-where">{where || 'Not in a folder'}</span>}
-      </span>
-      {chosen.includes(id) && <Check size={16} className="ask-refs-check" />}
-    </button>
-  )
-  const search = q.trim().toLowerCase()
-  const crumbs = path(at)
-  return (
-    <div className="ask-refs-pick">
-      <input value={q} placeholder="Search every note…" onChange={(e) => setQ(e.target.value)} />
-      {search ? (
-        <div className="ask-refs-list">
-          {notes
-            .filter(({ n }) => (n.title || 'Untitled').toLowerCase().includes(search))
-            .sort(byTitle)
-            .slice(0, 30)
-            .map((x) => row(x, path(folderOf(x.n.folderId)).map((f) => f.name).join(' › ')))}
-        </div>
-      ) : (
-        <>
-          <div className="ask-refs-crumbs">
-            {at !== null && (
-              <button className="icon" aria-label="Up a folder" onClick={() => setAt(crumbs.length > 1 ? crumbs[crumbs.length - 2].id : null)}>
-                <CornerLeftUp size={15} />
-              </button>
-            )}
-            <button className="text" onClick={() => setAt(null)}>
-              All folders
-            </button>
-            {crumbs.map((c) => (
-              <span key={c.id} className="ask-refs-crumb">
-                <ChevronRight size={12} />
-                <button className="text" onClick={() => setAt(c.id)}>
-                  {c.name}
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="ask-refs-list">
-            {folders
-              .filter((f) => (f.parentId && live.has(f.parentId) ? f.parentId : null) === at)
-              .sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : a.name.localeCompare(b.name)))
-              .map((f) => (
-                <button key={f.id} className="ask-refs-option folder" onClick={() => setAt(f.id)}>
-                  <Folder size={15} />
-                  <span className="ask-refs-option-text">{f.name}</span>
-                  <ChevronRight size={15} className="ask-refs-check" />
-                </button>
-              ))}
-            {notes
-              .filter(({ n }) => folderOf(n.folderId) === at)
-              .sort(byTitle)
-              .map((x) => row(x))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-interface References {
-  suggestions: { noteId: string; title: string; reasons: string[] }[]
-  missing: { name: string; url?: string }[]
-  missingRules: string[]
 }

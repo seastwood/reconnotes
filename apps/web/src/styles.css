@@ -4498,12 +4498,6 @@ a.button {
   background: var(--panel);
   font-size: 13px;
 }
-.ask-refs-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
 .ask-refs-label,
 .ask-refs-none {
   display: inline-flex;
@@ -4511,21 +4505,122 @@ a.button {
   gap: 4px;
   color: var(--muted);
 }
-.ask-ref {
+.ask-refs-none {
+  padding: 10px;
+}
+/* folded up in the chat: "References · 2" */
+.ask-refs-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: left;
+}
+.ask-refs-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+.ask-refs-todo {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  max-width: 100%;
-  padding: 2px 4px 2px 9px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  gap: 3px;
+  margin-left: auto;
+  color: var(--accent-text);
+  font-size: 12px;
+}
+.ask-refs > .ask-refs-panel {
+  max-height: 55vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 6px;
+}
+.ask-refs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ask-refs-panel .ask-refs-add {
+  align-self: flex-start;
+}
+.ask-refs-ref {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.ask-refs-ref:last-child {
+  border-bottom: 0;
+}
+.ask-refs-ref-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+  font-size: 15px;
+  border-radius: 0;
+}
+.ask-refs-ref-open .ask-refs-option-text {
+  white-space: nowrap;
+  display: block;
+}
+.ask-refs-ref-open svg {
+  flex: none;
+  color: var(--accent);
+}
+.ask-refs-ref .icon {
+  flex: none;
+  margin-right: 4px;
+}
+.ask-refs-suggest .ask-refs-where {
+  overflow-wrap: anywhere;
+}
+/* the References window */
+.refs-dialog h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.refs-dialog h2 svg {
+  flex: none;
+  align-self: center;
+}
+.refs-dialog-note {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ask-ref .icon {
-  width: 22px;
-  height: 22px;
+.refs-dialog-hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* in the note list: how many references a note has */
+.ref-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  vertical-align: 1px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 500;
 }
 .ask-refs-add {
   display: inline-flex;

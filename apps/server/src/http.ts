@@ -319,8 +319,11 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     json(res, 200, { ok: true })
   })
   // the notes "Ask about this note" also reads for a note (that it refers to)
+  // a note's references – or, without a note, every note's (for the counts in the list)
   route('GET', '/api/ask/refs', (_req, res, _p, url) => {
-    json(res, 200, { refs: askRefs(store, url.searchParams.get('noteId') ?? '') })
+    const noteId = url.searchParams.get('noteId')
+    if (!noteId) return json(res, 200, { all: store.getSetting<Record<string, string[]>>('askRefs') ?? {} })
+    json(res, 200, { refs: askRefs(store, noteId) })
   })
   // what a note refers to, found among your notes or missing (see references.ts)
   route('GET', '/api/ask/references', (_req, res, _p, url) => {

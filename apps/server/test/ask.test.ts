@@ -9,6 +9,7 @@ import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocN
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { setAskRefs } from '../src/askHistory'
 import { findReferences } from '../src/references'
+import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
 import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, recite } from '../src/ask'
@@ -698,5 +699,27 @@ describe('what a note refers to', () => {
     // chosen: no longer suggested
     setAskRefs(app.store, 'refsmain000001', ['refsfrc0000001'])
     expect(findReferences(app.store, app.sync, 'refsmain000001').suggestions).toEqual([])
+  })
+
+  it('looks through a Google redirect, and does not suggest the note itself', async () => {
+    expect(unwrapLink('https://www.google.com/url?q=https://www.chiefdelphi.com/uploads/short-url/abc.pdf&sa=D&ust=1')).toBe('https://www.chiefdelphi.com/uploads/short-url/abc.pdf')
+    expect(unwrapLink('https://example.com/url?q=https://x.org')).toBe('https://example.com/url?q=https://x.org')
+    const mk = async (id: string, title: string, md: string, source?: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title, ...(source ? { source } : {}) }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk(
+      'redirmain00001',
+      'Cookie Manual 10-6-26',
+      'MinneTrials\n\nCookie Chaos 2026 GAME MANUAL\n\nSee the [PARCEL PANIC Rules](https://www.google.com/url?q=https://www.chiefdelphi.com/uploads/short-url/g2T.pdf&sa=D) and the 2026 MinneTrials Game Manual.',
+      'https://docs.google.com/document/d/e/XYZ/pub',
+    )
+    // a copy of the same document, and a note named like its own cover
+    await mk('redircopy00001', 'MinneTrials 2026 Manual - Cookie Chaos', 'same', 'https://docs.google.com/document/d/e/XYZ/pub?pli=1')
+    await mk('redirnamed0001', '2026 MinneTrials Game Manual', 'other')
+    const r = findReferences(app.store, app.sync, 'redirmain00001')
+    expect(r.missing.map((d) => d.url)).toEqual(['https://www.chiefdelphi.com/uploads/short-url/g2T.pdf'])
+    expect(r.suggestions.map((s) => s.noteId)).not.toContain('redircopy00001')
+    expect(r.suggestions.map((s) => s.noteId)).not.toContain('redirnamed0001')
   })
 })

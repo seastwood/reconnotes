@@ -3,14 +3,16 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
   effectiveFolderId,
   emptyTrash,
+  getNotes,
   getSettings,
   moveNote,
+  readNote,
   restoreFolder,
   sortNotes,
   updateFolder,
@@ -30,6 +32,8 @@ import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 import { duplicateNote } from '../lib/templates'
 import { WebImportDialog } from './WebImportDialog'
+import { useStore } from '../lib/store'
+import { loadRefs, openRefs, refsStore } from '../lib/refs'
 
 interface Props {
   view: View
@@ -56,6 +60,13 @@ function formatDate(ts: number) {
 }
 
 export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expanded, onToggleExpand, onMoveNote, onMoveNotes }: Props) {
+  // how many references each note has (the notes Ask reads with it)
+  const allRefs = useStore(refsStore, (s) => s.all)
+  useEffect(() => void loadRefs(), [])
+  const liveRef = (id: string) => {
+    const m = getNotes(workspaceDoc).get(id)
+    return Boolean(m && !readNote(m).trashedAt)
+  }
   const ws = useWorkspace()
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
@@ -353,7 +364,18 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             }}
           >
             <div className="note-title">
-              {n.pinned && <Pin size={12} className="pin" />} {n.file && <FileText size={14} className="file-mark" />} {n.title || 'New Note'}
+              {n.pinned && <Pin size={12} className="pin" />} {n.file && <FileText size={14} className="file-mark" />}
+              {view.kind !== 'trash' && (allRefs[n.id]?.filter(liveRef).length ?? 0) > 0 && (
+                <button
+                  className="ref-badge"
+                  title="References – the notes Ask reads with this one"
+                  aria-label={`${allRefs[n.id].filter(liveRef).length} references`}
+                  onClick={(e) => (e.stopPropagation(), openRefs(n.id))}
+                >
+                  <BookOpen size={12} /> {allRefs[n.id].filter(liveRef).length}
+                </button>
+              )}
+              {n.title || 'New Note'}
             </div>
             <div className="note-meta">
               <span className="note-date">{formatDate(n.updatedAt)}</span>{' '}

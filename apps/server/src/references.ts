@@ -3,6 +3,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { RULE_ID, definesRule } from './sections'
 import { askRefs } from './askHistory'
+import { listImports, unwrapLink } from './webImport'
 
 /**
  * What a note refers to, and where it is
@@ -85,13 +86,19 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   const meta = sync.noteMeta()
   const doc = sync.getDoc(noteDocName(noteId))
   const md = doc ? noteToMarkdown(doc) : ''
-  const others = [...meta.values()].filter((m) => m.id !== noteId && !m.trashedAt && !m.template)
+  const own = meta.get(noteId)
+  // not this note, nor a copy of it (imported from the same place)
+  const others = [...meta.values()].filter((m) => m.id !== noteId && !m.trashedAt && !m.template && !(own?.source && m.source && sameAddress(m.source) === sameAddress(own.source)))
+  const live = new Set(others.map((o) => o.id))
+  const imports = listImports(store)
   const titleOf = (id: string) => meta.get(id)?.title || 'Untitled'
 
   // 1. documents it links to (a PDF, or a link named like a manual)
   const documents = new Map<string, DocumentRef>()
   for (const m of md.matchAll(/\[([^\]]+)\]\(<?(https?:\/\/[^)\s>]+)>?\)/g)) {
-    const [, text, url] = m
+    const text = m[1]
+    // a link copied out of a Google Doc or an email goes through a redirect first
+    const url = unwrapLink(m[2])
     if (!/\.pdf$/i.test(new URL(url).pathname) && !DOC_WORD.test(text)) continue
     const key = sameAddress(url)
     if (documents.has(key)) continue
@@ -103,6 +110,11 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
         return sameAddress(o.source) === key || (file.endsWith('.pdf') && fileName(o.source) === file)
       })
       .map((o) => ({ noteId: o.id, title: o.title || 'Untitled' }))
+    // imported from it, and the page it led to has another address (a short link, a redirect)
+    for (const r of imports)
+      if (sameAddress(unwrapLink(r.url)) === key)
+        for (const id of [...Object.values(r.pages).map((p) => p.noteId), ...(r.contentsNoteId ? [r.contentsNoteId] : [])])
+          if (live.has(id) && !found.some((f) => f.noteId === id)) found.push({ noteId: id, title: titleOf(id) })
     // not imported from it: a note with its name
     if (!found.length)
       for (const o of others) if (nameMatch(text, o.title) >= 0.75) found.push({ noteId: o.id, title: o.title || 'Untitled' })
@@ -110,11 +122,18 @@ export function findReferences(store: Store, sync: SyncEngine, noteId: string): 
   }
   // 2. documents named without a link ("the 2025 FRC Game Manual")
   const linked = [...documents.values()].map((d) => d.name.toLowerCase())
+  // its own cover ("MinneTrials … 2026 GAME MANUAL"): a name there is the note itself
+  const cover = md
+    .split('\n')
+    .filter((l) => !/^\W*From\b/.test(l))
+    .join('\n')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .slice(0, 400)
   for (const m of md.replace(/\[[^\]]*\]\([^)]*\)/g, ' ').matchAll(/\b((?:[A-Z0-9][\w&'’-]*\s+){1,5}(?:Game\s+)?(?:Manual|Guide|Handbook|Rulebook|Specification|Datasheet))\b/g)) {
     const name = m[1].replace(/\s+/g, ' ').trim()
     if (linked.some((l) => l.includes(name.toLowerCase()) || name.toLowerCase().includes(l))) continue
     // the note's own title ("Minnetrials Manual") is the note itself
-    if (nameMatch(name, titleOf(noteId)) >= 0.75) continue
+    if (nameMatch(name, titleOf(noteId)) >= 0.75 || nameMatch(name, cover) === 1) continue
     const key = `name:${name.toLowerCase()}`
     if (documents.has(key)) continue
     const found = others.filter((o) => nameMatch(name, o.title) >= 0.75).map((o) => ({ noteId: o.id, title: o.title || 'Untitled' }))

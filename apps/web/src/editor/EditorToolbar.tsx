@@ -5,6 +5,7 @@ import { useEditorState, type Editor } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import {
+  BookOpen,
   Bold,
   Camera,
   ChevronDown,
@@ -65,6 +66,7 @@ import { trashNotes } from '../lib/noteActions'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { takeQuickAction } from '../lib/appLinks'
 import { openAskChat } from '../lib/askChat'
+import { openRefs, useRefs } from '../lib/refs'
 import { Capacitor } from '@capacitor/core'
 
 const isNativeApp = Capacitor.isNativePlatform()
@@ -223,6 +225,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
 
   const meta = getNotes(workspaceDoc).get(noteId)
   const pinned = meta ? readNote(meta).pinned : false
+  const refCount = useRefs(noteId).length
   const isTemplate = meta ? readNote(meta).template : false
   /** the web page it was imported from */
   const source = meta ? readNote(meta).source : null
@@ -489,6 +492,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             </button>
             <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor, noteId)))} title="Fix spelling, grammar and clarity of the selected text">
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
+            </button>
+            <button onClick={() => (setMenu(null), openRefs(noteId))} title="The notes Ask reads with this one (the documents it refers to) – add, import, remove">
+              <BookOpen size={16} /> References…{refCount > 0 && <span className="menu-shortcut">{refCount}</span>}
             </button>
             <div className="menu-sep" />
             {onLinkNote && (
