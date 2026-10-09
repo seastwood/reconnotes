@@ -343,7 +343,8 @@ export async function pdfSections(data: Buffer): Promise<{ title: string; sectio
       continue
     }
     const bullet = BULLET.exec(l.text)
-    if (bullet && (/^[•◦▪●○■□–\-*]$/.test(bullet[1]) || l.gap > 1.2)) {
+    // a rule's number ("R12.", "G301.") isn't a list marker: it's what the rule is called
+    if (bullet && !/^[a-z]{1,3}\d{1,4}[.)]$/i.test(bullet[1]) && (/^[•◦▪●○■□–\-*]$/.test(bullet[1]) || l.gap > 1.2)) {
       blocks.push({ kind: 'li', text: l.text.slice(bullet[0].length), page: l.page })
       continue
     }

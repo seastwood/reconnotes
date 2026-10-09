@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, recite } from '../src/ask'
+import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -665,7 +665,9 @@ describe('a note that refers to another (its manual)', () => {
     expect(r.read).toContain('FRC 2025 Game Manual')
     // the AI is told which is the main document, and the referenced one's sections say so
     expect(prompts.at(-1)).toContain('"Cookie Chaos manual" is the main document')
-    expect(prompts.at(-1)).toMatch(/REFERENCED DOCUMENT \(applies only where "Cookie Chaos manual" points to it\) – "FRC 2025 Game Manual"/)
+    expect(prompts.at(-1)).toMatch(/REFERENCED DOCUMENT \(applies only where "Cookie Chaos manual" points to it – it uses only “A. Padding” of R402 from it\) – "FRC 2025 Game Manual"/)
+    // and only that: none of its other rules
+    expect(prompts.at(-1)).not.toContain('Some other rule about wiring')
   })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
@@ -748,5 +750,56 @@ describe('what a note refers to', () => {
       void getContent(doc).insert(0, markdownToNodes('*From [example.org/rules/manual.pdf](https://example.org/rules/manual.pdf) · imported 2026-10-09*\n\nR1. Be kind.', { attach: () => null, noteFor: () => null })),
     )
     expect(findReferences(app.store, app.sync, 'selfsrc0000001').missing).toEqual([])
+  })
+})
+
+describe('a manual that takes part of another one', () => {
+  const R12 =
+    'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual. The padding may be attached via tape, zip ties, fabric or other durable, flexible material. The lower edge of the bumpers should be no more than 2.5” above the ground. BUMPERS are considered to be part of the robot volume. The BUMPERS are intended to cover as much of the outer extremities of your robot as possible to limit damage; gaps in the bumpers and frame perimeter are permissible.'
+  const FRC = [
+    'R401 *Use BUMPERS to protect all outside corners. Gaps between BUMPER segments must be less than 1¼ in.',
+    '',
+    'R402 *BUMPER construction. BUMPERS must be constructed as follows:',
+    '',
+    'A. Padding: a stacked pair of pool noodles, each at least 2½ in. (~64 mm) in diameter.',
+    '',
+    'B. Backing: ¾ in. thick plywood.',
+    '',
+    'D. Fastening: hook-and-loop tape and cable ties may not be used.',
+    '',
+    'R403 *BUMPERS must be removable.',
+  ].join('\n')
+
+  it('reads only the part it points to', () => {
+    const pointed = pointedRules(R12, [FRC])
+    expect([...pointed]).toEqual([['R402', 'A. Padding']])
+    const only = onlyRules(FRC, pointed)
+    expect(only).toContain('R402 *BUMPER construction.')
+    expect(only).toContain('A. Padding: a stacked pair of pool noodles')
+    for (const t of ['R401', 'Backing', 'cable ties', 'R403']) expect(only).not.toContain(t)
+    expect(only).toContain('Only “A. Padding” of R402 applies here')
+  })
+
+  it('the rule about the thing asked is the key line, whole – with its exceptions', () => {
+    const texts = new Map([
+      [1, `${R12}\n\nR01. The ROBOT must start a MATCH inside the STARTING VOLUME of 36” long x 36” wide x 40” tall. BUMPERS are included as part of this volume.`],
+      [2, 'G15. Be careful around the COUNTER. ROBOTS may not touch any part of the COUNTER, excluding the BUMPER KICK.\n\nG19. A ROBOT may not use a COMPONENT outside its ROBOT PERIMETER (except its BUMPERS) to initiate contact.'],
+    ])
+    const key = keyLines(texts, ['kind', 'bumpers', 'robot', 'need'], [], 4, 0.9)
+    expect(key[0]).toEqual({ n: 1, line: R12 })
+    // its sentences aren't repeated on their own
+    expect(key.filter((k) => k.line.startsWith('The lower edge'))).toEqual([])
+  })
+
+  it('leaves out bits of a sentence as "also in your notes"', () => {
+    const md = [
+      'G19. A ROBOT may not use a COMPONENT outside its ROBOT PERIMETER (except its BUMPERS) to initiate contact.',
+      '',
+      '- This isn’t combat robotics. ROBOT may not damage an opponent ROBOT in either of the following ways:',
+      '- deliberately.',
+      '- regardless of intent, by initiating contact inside an opponent’s ROBOT PERIMETER.',
+    ].join('\n')
+    const items = sectionItems(new Map([[1, md]]), ['bumpers', 'robot'])
+    expect(items.map((i) => i.text)).toEqual(['This isn’t combat robotics. ROBOT may not damage an opponent ROBOT in either of the following ways:'])
   })
 })

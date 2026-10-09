@@ -21,6 +21,20 @@ import { initialTextStatus, queueAttachment } from './attachments'
 import { readZip } from './zip'
 
 /**
+ * Strikethrough only between double tildes (~~gone~~): a single one is "about"
+ * – "(~58 mm) and height 4½ in (~114 mm)" isn't crossed out.
+ */
+marked.use({
+  tokenizer: {
+    del(src: string) {
+      const m = /^~~(?=[^\s~])([\s\S]*?[^\s~])~~(?!~)/.exec(src)
+      if (!m) return undefined
+      return { type: 'del', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) }
+    },
+  },
+})
+
+/**
  * Import notes
  * ============
  *
@@ -408,7 +422,7 @@ function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
 }
 
 export function markdownToNodes(md: string, ctx: Ctx): Y.XmlElement[] {
-  return blocks(marked.lexer(md, { gfm: true }), ctx)
+  return blocks(marked.lexer(md, { ...marked.defaults, gfm: true }), ctx)
 }
 
 function decode(s: string): string {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowUp, CornerDownRight, FileText, Loader2, Sparkles, XCircle } from 'lucide-react'
-import { marked } from 'marked'
+import { marked } from '../lib/markdown'
 import { isSyncConfigured } from '../lib/settings'
 import { cancelJob, isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { duration } from './JobsPanel'

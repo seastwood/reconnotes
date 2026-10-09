@@ -318,26 +318,37 @@ export function keyLines(
   weightOf: (n: number) => number = () => 1,
 ): { n: number; line: string }[] {
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
-  const all: { n: number; raw: string; line: string; low: string; label?: string }[] = []
+  const all: { n: number; raw: string; line: string; low: string; label?: string; para: string }[] = []
   for (const [n, text] of texts)
     for (const { raw, label } of labelledLines(text)) {
       const plain = plainLine(raw)
       if (plain.length < 20 || /^#{1,6}\s/.test(raw.trim())) continue
       // a long paragraph by its sentences: the one that says it, not the paragraph that has the words somewhere
       for (const line of plain.length > 300 ? plain.split(/(?<=[\p{Ll})”"'][.!?])\s+(?=[\p{Lu}\d])/u) : [plain])
-        if (line.length >= 20) all.push({ n, raw: line === plain ? raw : line, line, low: line.toLowerCase(), label })
+        if (line.length >= 20) all.push({ n, raw: line === plain ? raw : line, line, low: line.toLowerCase(), label, para: plain })
     }
+  const count = (low: string, t: string) => low.split(/[^\p{L}\p{N}]+/u).filter((w) => holdsAny(w, t)).length
   // a word in every line ("robot" in a robot manual) says little; a rare one ("tall") a lot
   const weight = new Map(terms.map((t) => [t, Math.log(1 + all.length / (1 + all.filter((x) => holdsAny(x.low, t)).length))]))
   const found: { n: number; line: string; score: number }[] = []
   const hits = all.map((x) => terms.filter((t) => holdsAny(x.low, t)))
-  all.forEach(({ n, raw, line }, i) => {
+  all.forEach(({ n, raw, line, para }, i) => {
     const hit = hits[i]
     const rule = rules.some((r) => definesRule(raw, r)) ? 3 : rules.some((r) => new RegExp(`\\b${r}\\b`).test(line)) ? 1 : 0
-    if (hit.length < 2 && !rule) return
+    // what the paragraph is about: its subject ("R12. BUMPERS are required…" is about bumpers)
+    const subject = /^(?:[A-Z]{1,3}\d{1,4}\b[.:)]?\s*\*?\s*)?(?:(?:the|a|an|all|each|every)\s+)?([\p{L}-]+)/iu.exec(para)?.[1]?.toLowerCase() ?? ''
+    const paraLow = para.toLowerCase()
+    // …and keeps coming back to it (BUMPERS four times): it's about that
+    const about = terms.filter((t) => holdsAny(subject, t) && count(paraLow, t) >= 2)
+    if (hit.length + about.length < 2 && !rule) return
+    // a paragraph that keeps coming back to it is about it – for each of its sentences
+    const again = para === line ? 0 : terms.reduce((sum, t) => sum + weight.get(t)! * Math.min(3, Math.max(0, count(paraLow, t) - count(line.toLowerCase(), t))), 0)
     // a line with figures in it is usually the one that says it
-    const score = (hit.reduce((sum, t) => sum + weight.get(t)!, 0) + rule * 2 + (/\d/.test(line) ? 0.3 : 0)) * weightOf(n)
-    found.push({ n, line: line.length > 500 ? `${line.slice(0, 500)}…` : line, score })
+    const score =
+      (hit.reduce((sum, t) => sum + weight.get(t)!, 0) + about.reduce((sum, t) => sum + weight.get(t)!, 0) + 0.25 * again + rule * 2 + (/\d/.test(line) ? 0.3 : 0)) * weightOf(n)
+    // a rule's sentence: the whole rule (its exceptions are in its other sentences – "gaps … are permissible"), when it isn't long
+    const whole = para !== line && RULE_START.test(para) && para.length <= 900 ? para : line
+    found.push({ n, line: whole.length > 900 ? `${whole.slice(0, 900)}…` : whole, score })
   })
   const seen = new Set<string>()
   const best = Math.max(0, ...found.map((x) => x.score))
@@ -345,6 +356,8 @@ export function keyLines(
     .sort((a, b) => b.score - a.score)
     // only lines nearly as much about it as the best: the rest is noise to a small model
     .filter((x) => x.score >= best * ratio && !seen.has(x.line) && seen.add(x.line))
+    // a sentence of a rule already given whole: once is enough
+    .filter((x, i, kept) => !kept.some((k, j) => j < i && k.line !== x.line && k.line.includes(x.line.replace(/…$/, ''))))
     .slice(0, limit)
   // lines that give the same measurement as one of those, about the same thing
   // ("Being taller than 60-inches" – the penalty for R01's 60” limit): they belong with it
@@ -352,7 +365,7 @@ export function keyLines(
   const related: { n: number; line: string }[] = []
   if (measures.size)
     all.forEach(({ n, line, label }, i) => {
-      if (!hits[i].length || seen.has(line) || line.length > 500) return
+      if (!hits[i].length || seen.has(line) || line.length > 500 || top.some((k) => k.line.includes(line))) return
       if ([...line.matchAll(MEASURE)].some((m) => measures.has(`${m[1]} ${unitOf(m[2])}`))) {
         seen.add(line)
         // a table cell, with what its row is ("+10 Pts – Being taller than 60-inches")
@@ -361,6 +374,9 @@ export function keyLines(
     })
   return [...top.map(({ n, line }) => ({ n, line })), ...related.slice(0, 2)].slice(0, limit + 2)
 }
+
+/** A paragraph that is a rule ("R12. …", "G301 …"). */
+const RULE_START = /^[A-Z]{1,3}\d{1,4}\b/
 
 /** A figure with its unit: 60”, 60-inches, 125 lbs, 10.5 feet per second. */
 const MEASURE = /(\d+(?:\.\d+)?)\s*-?\s*(”|"|''|in\b\.?|inch(?:es)?|ft\b|feet|foot|lbs?\b|pounds?|kg|seconds?|sec\b|s\b|%|pts?\b|points?)/gi

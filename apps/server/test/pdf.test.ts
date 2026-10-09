@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { pdfSections } from '../src/pdf'
-import { figurePdf, manualPdf } from './pdfHelper'
+import { figurePdf, makePdf, manualPdf } from './pdfHelper'
 
 describe('a PDF manual', () => {
+  it('keeps a rule’s number ("R12.") – it isn’t a list marker', async () => {
+    const pdf = makePdf([[[24, '7 Robot Rules'], [11, 'R11. Lubricants may be used only to reduce friction.'], [11, 'R12. BUMPERS are required.'], [11, 'a) a lettered item'], [11, 'b) another one']]])
+    const html = (await pdfSections(pdf)).sections[0].html
+    expect(html).toContain('R11. Lubricants may be used only to reduce friction.')
+    expect(html).toContain('R12. BUMPERS are required.')
+    expect(html).toContain('<li>a lettered item</li>')
+  })
+
   it('is split at its chapters, with its sections, lists and paragraphs – without running headers and page numbers', async () => {
     const r = await pdfSections(manualPdf())
     expect(r.pages).toBe(4)

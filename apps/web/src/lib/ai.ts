@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { generateJSON } from '@tiptap/core'
-import { marked } from 'marked'
+import { marked } from './markdown'
 import * as Y from 'yjs'
 import { getNotes, readNote, getStrokes, getTranscripts, inkHash, noteDocName, transcriptSourceKey } from '@reconnotes/core'
 import { preferServerOcr, recognizeDrawingOnDevice, recognizeImageOnDevice, renderStrokesForRecognition, useDeviceOcr } from './deviceOcr'

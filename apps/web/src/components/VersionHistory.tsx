@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Copy, History, Loader2, RotateCcw, X } from 'lucide-react'
-import { marked } from 'marked'
+import { marked } from '../lib/markdown'
 import { apiUrl, authHeaders, isSyncConfigured, settings } from '../lib/settings'
 
 interface Version {

@@ -433,3 +433,14 @@ describe('a PDF manual from a link', () => {
     }
   })
 })
+
+describe('Markdown from pages and PDFs', () => {
+  it('a single ~ is "about", not strikethrough', async () => {
+    const { markdownToNodes } = await import('../src/importNotes')
+    const doc = new (await import('yjs')).Doc()
+    getContent(doc).insert(0, markdownToNodes('Foam (~58 mm) and 4½ in (~114 mm) tall, ~~gone~~.', { attach: () => null, noteFor: () => null }))
+    const xml = getContent(doc).toString()
+    expect(xml).toContain('Foam (~58 mm) and 4½ in (~114 mm) tall, ')
+    expect(xml).toMatch(/<strike>gone<\/strike>/)
+  })
+})

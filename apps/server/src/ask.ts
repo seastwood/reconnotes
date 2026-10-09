@@ -215,12 +215,17 @@ export async function askNotes(
   let rest: Section[] = []
   /** every section of the notes asked about (a whole manual, for "Ask about this note") */
   let everySection: Section[] = []
+  /** the rules (and their parts) the main note takes from the notes it refers to */
+  let onlyPointed: Map<string, string | null> | null = null
   let context = ''
   const header = (id: string, section: string) => {
     const m = meta.get(id)!
     const path = paths.get(folderOf(id) ?? '')
     // a note referred to: said so, so the AI doesn't take its rules for the main note's
-    const ref = isRef.has(id) ? `REFERENCED DOCUMENT (applies only where "${meta.get(pinned[0])?.title || 'the main note'}" points to it) – ` : ''
+    const only = onlyPointed && [...onlyPointed].map(([r, part]) => (part ? `“${part}” of ${r}` : r)).join(', ')
+    const ref = isRef.has(id)
+      ? `REFERENCED DOCUMENT (applies only where "${meta.get(pinned[0])?.title || 'the main note'}" points to it${only ? ` – it uses only ${only} from it` : ''}) – `
+      : ''
     return `${ref}"${m.title || 'Untitled'}"${section ? ` › ${section}` : ''} (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)})`
   }
   const add = (id: string, md: string, sec?: Section) => {
@@ -255,6 +260,24 @@ export async function askNotes(
       if (!md.trim()) continue
       if (md.length <= SMALL_NOTE) all.push({ noteId: id, path: [], text: md.trim(), index: 0 })
       else all.push(...splitSections(id, meta.get(id)!.title, md))
+    }
+    // the main note names what it takes from a referenced one ("as described in the “A. Padding” section of R402"):
+    // only that is read from it – the rest of R402, and the referenced document's other rules, don't apply
+    if (refs.length) {
+      const mainText = all.filter((x) => !isRef.has(x.noteId)).map((x) => x.text).join('\n')
+      const pointed = pointedRules(mainText, all.filter((x) => isRef.has(x.noteId)).map((x) => x.text))
+      if (pointed.size) {
+        const narrowed: Section[] = []
+        for (const sec of all) {
+          if (!isRef.has(sec.noteId)) narrowed.push(sec)
+          else {
+            const text = onlyRules(sec.text, pointed)
+            if (text) narrowed.push({ ...sec, text })
+          }
+        }
+        all.splice(0, all.length, ...narrowed)
+        onlyPointed = pointed
+      }
     }
     const rank = new Map(ids.map((id, i) => [id, i]))
     // a note referred to counts for much less than the one asked about: it fills in, it doesn't compete
@@ -383,6 +406,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   }
   // the AI's own list of citations at the end ("Citations: 1 R401…"): the sources are listed under the answer already
   let text = listify(raw).replace(/\n+\s*(?:\*\*)?(?:citations|sources|references)(?:\*\*)?:?(?:\*\*)?\s*\n(?:\s*(?:[-*]\s*)?\[?\d+\]?[.):]?\s[^\n]*\n?)+\s*$/i, '')
+    // …or on one line ("Citations: [1][5][9]")
+    .replace(/\n+\s*(?:\*\*)?(?:citations|sources|references)(?:\*\*)?:?(?:\*\*)?[ \t]*(?:\[\d+\][\s,]*)+$/i, '')
   // the list items of the note sections the question is about, that the answer left out
   // (a yes/no question isn't asking for a list)
   const yesNo = /^\s*(?:can|could|is|are|was|were|does|do|did|should|may|must|will|would|has|have)\b/i.test(question)
@@ -405,7 +430,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   // a sentence whose facts come only from a note referred to: labelled with it, so it isn't taken for the main note's rule
   if (refs.length) text = labelRefs(text, (n) => sources.find((x) => x.n === n)?.noteId, (id) => (isRef.has(id) ? shortTitle(meta.get(id)?.title ?? '') : null))
   // "in [8] and [8]": in [8]
-  text = text.replace(/\[(\d+)\](\s*(?:,|and|&)\s*\[\1\])+/g, '[$1]')
+  text = text.replace(/\[(\d+)\](\s*(?:,\s*and|,|and|&)\s*\[\1\])+/g, '[$1]')
   // what the answer left out of the lines most about the question (a small model
   // often answers from one passage): added, each linked to where it is
   if (!range) {
@@ -417,7 +442,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     if (yesNo && key[0] && saysNo(text) && PERMITS.test(key[0].line))
       text += `\n\n**Check this:** the answer says no, but the note’s most relevant line allows some of it (“${clip(sentencesOf(key[0].line).find((x) => PERMITS.test(x)) ?? key[0].line, 200)}”) [${key[0].n}].`
     if (quote.length)
-      text += `\n\n${pinned.length === 1 && quote.every((l) => sources.find((x) => x.n === l.n)?.noteId === pinned[0]) ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, 320)} [${l.n}]`).join('\n')}`
+      text += `\n\n${pinned.length === 1 && quote.every((l) => sources.find((x) => x.n === l.n)?.noteId === pinned[0]) ? 'From the note' : 'From your notes'}:\n${quote.map((l) => `- ${clip(l.line, /^[A-Z]{1,3}\d{1,4}\b/.test(l.line) ? 900 : 320)} [${l.n}]`).join('\n')}`
   }
   // each citation: the line of its source the sentence before it came from
   const cites = citeFinds(text, texts)
@@ -435,6 +460,49 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 }
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+/**
+ * The rules a main document takes from the documents it refers to – those it
+ * names without defining them, that one of them defines – each with the part
+ * of it it names, if it names one ("the “A. Padding” section of R402").
+ */
+export function pointedRules(mainText: string, refTexts: string[]): Map<string, string | null> {
+  const out = new Map<string, string | null>()
+  for (const r of new Set([...mainText.matchAll(RULE_ID)].map((m) => m[0]))) {
+    if (definesRule(mainText, r) || !refTexts.some((t) => definesRule(t, r))) continue
+    const part = new RegExp(`["“]([^"”\\n]{2,60})["”]\\s+(?:section|part|portion|paragraph|subsection)s?\\s+(?:of|in|from)\\s+(?:the\\s+)?${r}\\b`, 'i').exec(mainText)?.[1]?.trim() ?? null
+    out.set(r, part)
+  }
+  return out
+}
+
+/** A referenced section cut to the rules taken from it (and their parts); '' when it has none of them. */
+export function onlyRules(text: string, pointed: Map<string, string | null>): string {
+  const lines = text.split('\n')
+  const ruleAt = (l: string) => /^\s*(?:#{1,6}\s*|[-*]\s+|\*\*|\*|>\s*)*([A-Z]{1,3}\d{1,4})\b/.exec(l)?.[1] ?? null
+  const out: string[] = []
+  for (const [r, part] of pointed) {
+    const start = lines.findIndex((l) => ruleAt(l) === r)
+    if (start < 0) continue
+    let end = start + 1
+    while (end < lines.length && !/^#{1,6}\s/.test(lines[end]) && !(ruleAt(lines[end]) && ruleAt(lines[end]) !== r)) end++
+    let block = lines.slice(start, end)
+    if (part) {
+      // the rule's opening, then only that part ("A. Padding: …" up to "B. …")
+      const label = part.replace(/[.:\s]+$/, '').toLowerCase()
+      const partAt = (l: string) => /^\s*(?:[-*]\s+|\*\*)?\(?[A-Z][.)]\s/.test(l)
+      const from = block.findIndex((l) => partAt(l) && l.toLowerCase().replace(/\*/g, '').includes(label))
+      if (from > 0) {
+        let to = from + 1
+        while (to < block.length && !partAt(block[to])) to++
+        const opening = block.slice(0, block.findIndex((l) => partAt(l)))
+        block = [...opening, ...block.slice(from, to), `(Only “${part}” of ${r} applies here – the main document points to that part alone.)`]
+      }
+    }
+    out.push(block.join('\n').trim())
+  }
+  return out.join('\n\n')
+}
 
 /** Citations written as a note's title or section instead of its number: the number. */
 export function citeByNumber(answer: string, sources: AskSource[]): string {
@@ -689,10 +757,18 @@ export function sectionItems(texts: Map<number, string>, words: string[]): { n: 
     lines.forEach((l, i) => {
       const low = l.toLowerCase()
       if (new Set(words.filter((w) => low.includes(w))).size < need || LIST_ITEM.test(l)) return
+      // the list this line leads into ("… in either of the following ways:") – else only items about the question themselves
+      // a heading, or a line leading into the list ("… in either of the following ways:"): its items are what it's about
+      const leadsIn = heading(l) || /:\s*$/.test(l.trim())
       for (const j of sectionAfter(lines, i)) {
         const item = lines[j].match(LIST_ITEM)?.[1]?.trim()
-        const key = item?.toLowerCase().replace(/\W+/g, ' ').trim()
-        if (item && key && !seen.has(key)) {
+        if (!item) continue
+        // part of a sentence ("deliberately.", "regardless of intent, …"): only with the line that starts it
+        if (/^\p{Ll}/u.test(item) && !leadsIn) continue
+        // after some other line (a rule that mentions the thing): only items that are about the question themselves
+        if (!leadsIn && !words.some((w) => item.toLowerCase().includes(w))) continue
+        const key = item.toLowerCase().replace(/\W+/g, ' ').trim()
+        if (key && !seen.has(key)) {
           seen.add(key)
           out.push({ n, text: item.replace(/\s*\[\d+\]$/, '') })
         }
