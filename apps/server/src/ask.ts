@@ -219,7 +219,9 @@ export async function askNotes(
   const header = (id: string, section: string) => {
     const m = meta.get(id)!
     const path = paths.get(folderOf(id) ?? '')
-    return `"${m.title || 'Untitled'}"${section ? ` › ${section}` : ''} (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)})`
+    // a note referred to: said so, so the AI doesn't take its rules for the main note's
+    const ref = isRef.has(id) ? `REFERENCED DOCUMENT (applies only where "${meta.get(pinned[0])?.title || 'the main note'}" points to it) – ` : ''
+    return `${ref}"${m.title || 'Untitled'}"${section ? ` › ${section}` : ''} (${path ? `in folder ${path.join(' › ')}, ` : ''}created ${shortDate(m.createdAt, tz)}, last edited ${shortDate(m.updatedAt, tz)})`
   }
   const add = (id: string, md: string, sec?: Section) => {
     const n = sources.length + 1
@@ -255,8 +257,8 @@ export async function askNotes(
       else all.push(...splitSections(id, meta.get(id)!.title, md))
     }
     const rank = new Map(ids.map((id, i) => [id, i]))
-    // a note referred to counts for less than the one asked about: its own sections come first when both have one
-    const scored = scoreSections(all, words, rules, { noteRank: rank, passages }).map((x) => (isRef.has(x.noteId) ? { ...x, score: x.score * 0.75 } : x))
+    // a note referred to counts for much less than the one asked about: it fills in, it doesn't compete
+    const scored = scoreSections(all, words, rules, { noteRank: rank, passages }).map((x) => (isRef.has(x.noteId) ? { ...x, score: x.score * 0.5 } : x))
     const matched = scored.some((s) => s.score > 1)
     // nothing really matched (a vague question): each note's start, best notes first
     const order = matched ? [...scored].sort((a, b) => b.score - a.score) : [...scored].sort((a, b) => rank.get(a.noteId)! - rank.get(b.noteId)! || a.index - b.index)
@@ -313,7 +315,8 @@ export async function askNotes(
       })
     }
     const added = new Map<Section, number>()
-    for (const l of keyLines(pool, words, rules, 4, 0.9)) {
+    const noteOfN = (n: number) => (n < 0 ? unread.get(n)?.noteId : sources.find((x) => x.n === n)?.noteId)
+    for (const l of keyLines(pool, words, rules, 4, 0.9, (n) => (isRef.has(noteOfN(n) ?? '') ? 0.5 : 1))) {
       const sec = unread.get(l.n)
       if (sec && !added.has(sec)) {
         add(sec.noteId, sec.text, sec)
@@ -335,7 +338,11 @@ export async function askNotes(
 - When the question asks what to do (tasks, to-dos, next steps), write a checklist instead: one task per line starting with "- [ ] ".
 - When asked which notes there are or what was worked on, list each note by its title with a short summary of what's in it.
 - After each fact or item, cite the note it came from like [1] or [2][3].
-- If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.
+- If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.${
+    refs.length
+      ? `\n- "${meta.get(pinned[0])?.title || 'The main note'}" is the main document; ${refs.map((id) => `"${meta.get(id)?.title || 'Untitled'}"`).join(', ')} ${refs.length === 1 ? 'is' : 'are'} referred to by it. The main document decides: a referenced document's rule applies only where the main document points to it (e.g. "as described in R402"). Where the main document says something itself, or the two differ, give the main document's rule – not the referenced one's. When a fact comes from a referenced document, say so ("in the FRC manual…").`
+      : ''
+  }
 - Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
 - Answer in the language of the question.
@@ -395,6 +402,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   text = autoCite(text, texts)
   // the AI's own reasoning ("it can be inferred that…"): marked as such, not cited to a note that doesn't say it
   text = markInference(text)
+  // a sentence whose facts come only from a note referred to: labelled with it, so it isn't taken for the main note's rule
+  if (refs.length) text = labelRefs(text, (n) => sources.find((x) => x.n === n)?.noteId, (id) => (isRef.has(id) ? shortTitle(meta.get(id)?.title ?? '') : null))
   // "in [8] and [8]": in [8]
   text = text.replace(/\[(\d+)\](\s*(?:,|and|&)\s*\[\1\])+/g, '[$1]')
   // what the answer left out of the lines most about the question (a small model
@@ -477,6 +486,26 @@ const saysNo = (answer: string) => {
   const first = answer.split(/(?<=[.!?])\s/)[0] ?? ''
   // "No, unless…" / "No, if it would…": a condition is given – not a flat no
   return /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(first) && !/\b(?:unless|except|only if|as long as|provided that|other than|if (?:it|the|they|you|this|that|a|an)|when (?:it|the|they))\b/i.test(first)
+}
+
+/** Sentences cited only to notes referred to: "*(2025 FRC Game Manual)*" in front. */
+export function labelRefs(answer: string, noteOf: (n: number) => string | undefined, refTitle: (noteId: string) => string | null): string {
+  const cuts = [0, ...sentenceEnds(answer), answer.length].filter((x, i, a) => i === 0 || x > a[i - 1])
+  let out = ''
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const sentence = answer.slice(cuts[k], cuts[k + 1])
+    const titles = [...sentence.matchAll(/\[(\d+)\]/g)].map((m) => {
+      const id = noteOf(Number(m[1]))
+      return id ? refTitle(id) : null
+    })
+    if (!titles.length || titles.some((t) => !t) || /^\s*\*\(/.test(sentence.replace(/^\s*(?:[-*]\s+|\d+[.)]\s+)/, ''))) {
+      out += sentence
+      continue
+    }
+    const lead = /^\s*(?:[-*]\s+|\d+[.)]\s+)?/.exec(sentence)![0]
+    out += `${lead}*(${[...new Set(titles)].join(', ')})* ${sentence.slice(lead.length).replace(/^\s+/, '')}`
+  }
+  return out
 }
 
 /** Words an answer uses when it reasons beyond what the notes say. */

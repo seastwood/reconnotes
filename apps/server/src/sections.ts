@@ -308,7 +308,15 @@ const CLAIM_STOP = new Set(
  * words, or words meaning the same; a rule asked about) – put first for the
  * AI, so a small model doesn't skim past the one line that answers it.
  */
-export function keyLines(texts: Map<number, string>, words: string[], rules: string[] = [], limit = 4, ratio = 0.75): { n: number; line: string }[] {
+export function keyLines(
+  texts: Map<number, string>,
+  words: string[],
+  rules: string[] = [],
+  limit = 4,
+  ratio = 0.75,
+  /** how much a text's lines count (a note referred to: less) */
+  weightOf: (n: number) => number = () => 1,
+): { n: number; line: string }[] {
   const terms = [...new Set(words.filter((w) => w.length >= 3))]
   const all: { n: number; raw: string; line: string; low: string; label?: string }[] = []
   for (const [n, text] of texts)
@@ -328,7 +336,7 @@ export function keyLines(texts: Map<number, string>, words: string[], rules: str
     const rule = rules.some((r) => definesRule(raw, r)) ? 3 : rules.some((r) => new RegExp(`\\b${r}\\b`).test(line)) ? 1 : 0
     if (hit.length < 2 && !rule) return
     // a line with figures in it is usually the one that says it
-    const score = hit.reduce((sum, t) => sum + weight.get(t)!, 0) + rule * 2 + (/\d/.test(line) ? 0.3 : 0)
+    const score = (hit.reduce((sum, t) => sum + weight.get(t)!, 0) + rule * 2 + (/\d/.test(line) ? 0.3 : 0)) * weightOf(n)
     found.push({ n, line: line.length > 500 ? `${line.slice(0, 500)}…` : line, score })
   })
   const seen = new Set<string>()

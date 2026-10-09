@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { setAskRefs } from '../src/askHistory'
-import { askNotes, autoCite, citeByNumber, citeFinds, markInference, recite } from '../src/ask'
+import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, recite } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -659,5 +659,15 @@ describe('a note that refers to another (its manual)', () => {
     const r = await askNotes(app.store, app.sync, app.ai, 'How must bumpers be constructed?', null, {}, { notes: ['cookiemanual01'] })
     expect(prompts.at(-1)).toContain('R402 BUMPER construction. A. Padding – A minimum of 2 1/4 in. depth of foam')
     expect(r.read).toContain('FRC 2025 Game Manual')
+    // the AI is told which is the main document, and the referenced one's sections say so
+    expect(prompts.at(-1)).toContain('"Cookie Chaos manual" is the main document')
+    expect(prompts.at(-1)).toMatch(/REFERENCED DOCUMENT \(applies only where "Cookie Chaos manual" points to it\) – "FRC 2025 Game Manual"/)
+  })
+  it('a sentence from the referenced note only is labelled with it', () => {
+    const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
+    const title = (id: string) => (id === 'frc' ? '2025 FRC Game Manual' : null)
+    expect(labelRefs('Gaps are permissible [1]. Gaps under 1¼ in. are allowed [3].', noteOf, title)).toBe(
+      'Gaps are permissible [1]. *(2025 FRC Game Manual)* Gaps under 1¼ in. are allowed [3].',
+    )
   })
 })
