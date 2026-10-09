@@ -190,8 +190,14 @@ const plainLine = (t: string) =>
  * in the note (text can't be found across them), so each cell is a line.
  */
 function findableLines(text: string): string[] {
-  return labelledLines(text).map((x) => x.raw)
+  // not Ask's own note on what applies ("(Only “A. Padding” of R402 applies here…)"): it isn't in the note to go to
+  return labelledLines(text)
+    .map((x) => x.raw)
+    .filter((l) => !ASKS_NOTE.test(l))
 }
+
+/** The line Ask adds to a referenced rule cut to its part – not the note's own words. */
+export const ASKS_NOTE = /^\(Only “[^”]*” of [A-Z]{1,3}\d{1,4} applies here/
 
 /** findableLines, each table cell with its row's first cell ("+10 Pts") – what it's in the table for. */
 function labelledLines(text: string): { raw: string; label?: string }[] {

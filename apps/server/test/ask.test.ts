@@ -799,6 +799,9 @@ describe('a manual that takes part of another one', () => {
     const only = onlyRules(frc, pointedRules(R12, [frc]))
     for (const t of ['Padding – A minimum of 2 ¼ in.', 'Pool noodles', 'Foam floor tiles', 'Multiple types of foam']) expect(only).toContain(t)
     for (const t of ['Backing', 'cable ties']) expect(only).not.toContain(t)
+    // a citation goes to the rule's own words – never to Ask's note on what applies (it isn't in the note)
+    const find = citeFinds('Padding must be foam of 2 ¼ in. depth, as only “A. Padding” of R402 applies here [1].', new Map([[1, only]]))[0].find
+    expect(find).toBe('Padding – A minimum of 2')
   })
 
   it('the rule about the thing asked is the key line, whole – with its exceptions', () => {

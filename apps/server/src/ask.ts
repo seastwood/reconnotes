@@ -576,6 +576,8 @@ function sentenceEnds(t: string): number[] {
     const i = m.index!
     if (m[0] !== '\n') {
       if (m[0] === '.' && /(?:^|[^\p{L}])(?:in|ft|lbs?|oz|mm|cm|kg|sec|min|max|approx|no|vs|etc|fig|e\.g|i\.e)$/iu.test(t.slice(Math.max(0, i - 8), i))) continue
+      // a lettered part or an initial ("“A. Padding”", "R. Smith"): not the end of a sentence
+      if (m[0] === '.' && /(?:^|[^\p{L}])\p{Lu}$/u.test(t.slice(Math.max(0, i - 3), i))) continue
       const next = /\S/.exec(t.slice(i + 1))?.[0]
       if (next && !/[\p{Lu}"“*\-#>]/u.test(next)) continue
     }
