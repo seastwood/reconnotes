@@ -228,7 +228,21 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const refCount = useRefs(noteId).length
   const isTemplate = meta ? readNote(meta).template : false
   /** the web page it was imported from */
-  const source = meta ? readNote(meta).source : null
+  const saved = meta ? readNote(meta).source : null
+  // imported before the address was kept with the note: its "From … · imported …" line has it
+  const fromLine = (): string | null => {
+    let href: string | null = null
+    let i = 0
+    editor.state.doc.forEach((node) => {
+      if (href || i++ > 8 || !/^From\b.*·\s*imported\s+\d{4}-\d\d-\d\d/.test(node.textContent.trim())) return
+      node.descendants((n) => {
+        const link = n.marks.find((mk) => mk.type.name === 'link')
+        if (!href && link?.attrs.href) href = String(link.attrs.href)
+      })
+    })
+    return href
+  }
+  const source = saved ?? (menu === 'more' ? fromLine() : null)
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label)

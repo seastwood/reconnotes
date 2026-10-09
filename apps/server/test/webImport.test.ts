@@ -4,10 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { WORKSPACE_DOC, getContent, listFolders, listNotes, noteDocName, noteToMarkdown, updateNote } from '@reconnotes/core'
+import { WORKSPACE_DOC, createNote, getContent, listFolders, listNotes, noteDocName, noteToMarkdown, updateNote } from '@reconnotes/core'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
-import { importWebPages, importsFor, refreshImport } from '../src/webImport'
+import { adoptImport, importWebPages, importsFor, refreshImport } from '../src/webImport'
+import { markdownToNodes } from '../src/importNotes'
 
 let app: App
 let dir: string
@@ -332,6 +333,26 @@ describe('importing a web page', () => {
     expect(xml).toContain(`<notelink find="3.2.1 CENTER LINE" label="3.2.1 CENTER LINE" noteId="${r.noteIds[0]}"`)
     // and a link in the text to a heading
     expect(xml).toContain(`<notelink find="3.2.2 BAKERY" label="the bakery" noteId="${r.noteIds[0]}"`)
+  })
+
+  it('a note imported before imports were remembered: checked for updates from its "From" line, your edits kept', async () => {
+    const url = `${base}/document/d/e/2PACX-x/pub`
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'oldimport00001', title: 'My manual' }))
+    await app.sync.change(noteDocName('oldimport00001'), (doc) =>
+      void getContent(doc).insert(0, markdownToNodes(`My manual\n\n# Revisions\n\n*From [${url.replace('http://', '')}](<${url}>) · imported 2026-10-08*\n\nOld text.`, { attach: () => null, noteFor: () => null })),
+    )
+    expect(importsFor(app.store, app.sync, { noteId: 'oldimport00001' })).toEqual([])
+    const record = await adoptImport(app.store, app.sync, 'oldimport00001')
+    expect(record?.url).toBe(url)
+    expect(app.sync.noteMeta().get('oldimport00001')?.source).toBe(url)
+    const r = await refreshImport(app.config, app.store, app.ai, app.sync, record!)
+    // yours is kept (with a note saying there's a new version); the new version is next to it
+    expect(md('oldimport00001')).toContain('Old text.')
+    expect(md('oldimport00001')).toContain('This page has changed on the site')
+    expect(r.notes[0]).toContain('you’d edited these')
+    const fresh = [...app.sync.noteMeta().values()].find((m) => /^Trials Manual - Cookie Chaos \(updated /.test(m.title) && m.source === url)!.id
+    expect(md(fresh)).toMatch(/^# Trials Manual - Cookie Chaos \(updated /)
+    expect(md(fresh)).toContain('  - [[1.1 PROGRAM HISTORY]]')
   })
 
   it('says what went wrong with a bad address', async () => {

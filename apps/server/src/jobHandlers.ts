@@ -33,7 +33,7 @@ import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { meetingNotesText } from './meetingNotes'
 import { askRefs, saveTurn, setAskRefs } from './askHistory'
-import { importWebPages, importsFor, refreshImport } from './webImport'
+import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
  * What each kind of job does. Results that belong in a note are written into
@@ -420,7 +420,13 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
   // imported pages: fetched again, the changed ones brought up to date (see webImport.ts)
   jobs.register('web-refresh', async (job) => {
     const i = job.input as { noteId?: string; folderId?: string }
-    const records = importsFor(store, sync, { noteId: i.noteId ?? (job.noteId || undefined), folderId: i.folderId })
+    const noteId = i.noteId ?? (job.noteId || undefined)
+    const records = importsFor(store, sync, { noteId, folderId: i.folderId })
+    // imported before imports were remembered: taken on from its "From …" line
+    if (!records.length && noteId) {
+      const adopted = await adoptImport(store, sync, noteId)
+      if (adopted) records.push(adopted)
+    }
     if (!records.length) throw new Error('This wasn’t imported from a web page (or was imported before update checks existed – import it again to get them).')
     const notes: string[] = []
     let changed = 0

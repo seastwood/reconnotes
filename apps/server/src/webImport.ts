@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseHTML } from 'linkedom'
 import * as Y from 'yjs'
-import { WORKSPACE_DOC, listFolders, videoInfo, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
+import { WORKSPACE_DOC, noteToMarkdown, listFolders, videoInfo, createFolder, createNote, extractNote, getContent, newId, noteDocName, updateFolder, updateNote } from '@reconnotes/core'
 import type { Ai } from './ai'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -1183,6 +1183,41 @@ export function importsFor(store: Store, sync: SyncEngine, where: { noteId?: str
     if (where.folderId) return r.folderId === where.folderId || Object.values(r.pages).some((p) => meta.get(p.noteId)?.folderId === where.folderId)
     return false
   })
+}
+
+/**
+ * A note imported before imports were remembered (it has no record, maybe no
+ * source): taken on from its "From <address> · imported <date>" line, so it
+ * can be checked for updates like any other.
+ */
+export async function adoptImport(store: Store, sync: SyncEngine, noteId: string): Promise<WebImportRecord | null> {
+  const m = sync.noteMeta().get(noteId)
+  const doc = sync.getDoc(noteDocName(noteId))
+  if (!m || !doc) return null
+  const md = noteToMarkdown(doc).slice(0, 3000)
+  const line = /From\W*\[[^\]]*\]\(<?(https?:\/\/[^)>\s]+)>?\)\W*·\s*imported\s+(\d{4}-\d\d-\d\d)/.exec(md)
+  const href = m.source ?? line?.[1]
+  if (!href) return null
+  let url: URL
+  try {
+    url = new URL(unwrapLink(href))
+  } catch {
+    return null
+  }
+  if (!/^https?:$/.test(url.protocol) || url.host === 'pdf.reconnotes') return null
+  const record: WebImportRecord = {
+    id: newId(),
+    url: url.href,
+    follow: false,
+    maxPages: 1,
+    folderId: m.folderId ?? null,
+    // when it was written isn't known: changed since, as far as updates go (so your edits are kept)
+    at: 0,
+    pages: { [pageKey(url)]: { noteId, hash: '', at: 0, importedOn: line?.[2] ?? '', title: m.title } },
+  }
+  saveImport(store, record)
+  if (!m.source) await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, noteId, { source: url.href }))
+  return record
 }
 
 /** Check an import for updates: fetch its pages again; write what changed. */
