@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import { log } from './log'
 import { snapshotNow } from './versions'
-import { addListenLinks } from './listen'
+import { addListenLinks, type ByMeaning } from './listen'
+import { likeness, pointText } from './meetingMeaning'
 import fs from 'node:fs'
 import * as Y from 'yjs'
 import {
@@ -307,6 +308,34 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       }
     }
     return segments?.length ? speakerTurns(words, segments) : null
+  }
+
+  /**
+   * Where each point of the notes was talked about, by meaning: the recording in stretches of
+   * about half a minute (70 words, every 35), and how like each stretch each point is. Undefined
+   * without an embedding model – the ▶ links are then placed by shared words alone.
+   */
+  const meaningOfPoints = async (md: string, words: { word: string; start: number; end: number }[]): Promise<ByMeaning | undefined> => {
+    const embed = ai.embedder()
+    if (!embed || words.length < 8) return undefined
+    try {
+      const wins: { start: number; text: string }[] = []
+      for (let from = 0; from < words.length; from += 35) {
+        const to = Math.min(words.length, from + 70)
+        wins.push({ start: words[from].start, text: words.slice(from, to).map((w) => w.word.trim()).join(' ') })
+        if (to === words.length) break
+      }
+      const vecs = await embed(wins.map((w) => w.text), 'document')
+      const lines = md.split('\n')
+      const at = lines.flatMap((l, i) => (/^\s*(?:[-*]|\d+[.)])\s/.test(l) && pointText(l) ? [i] : []))
+      const sims = await likeness(at.map((i) => pointText(lines[i])), vecs, embed)
+      const per: (number[] | null)[] = lines.map(() => null)
+      at.forEach((li, k) => (per[li] = sims[k]))
+      return { starts: wins.map((w) => w.start), sims: per }
+    } catch (e) {
+      log.warn(`placing the ▶ links by meaning failed (${(e as Error).message}) – by shared words`)
+      return undefined
+    }
   }
 
   const modelOf = (task: AiTask | null) => {
@@ -698,7 +727,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       })
       .join('\n')
     // each point with a ▶ link to where it was said in the recording (where words have times)
-    const withLinks = att && said.length ? addListenLinks(md, said, att.id).markdown : md
+    const withLinks = att && said.length ? addListenLinks(md, said, att.id, await meaningOfPoints(md, said)).markdown : md
     await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
     return { result: { noteId, text: preview(md), heardBy, ...(voices >= 2 ? { voices } : {}), ...(speechError ? { speechError } : {}), ...(r.draft ? { draft: r.draft } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })

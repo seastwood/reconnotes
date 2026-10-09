@@ -1,4 +1,5 @@
 import { Resvg } from '@resvg/resvg-js'
+import { cutAt, isMeant, likeness, pointText, stretches, topicCuts, type Embed, type Stretch } from './meetingMeaning'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
 import type { Store } from './store'
 import { fixHeard, Vocabulary } from './vocabulary'
@@ -256,7 +257,10 @@ export class Ai {
     const said = transcript.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
     // how long it was, from how much was said (people speak ~140 words a minute)
     const minutes = Math.round(said.split(/\s+/).filter(Boolean).length / 140)
-    const parts = meetingParts(said, PART_CHARS)
+    // the transcript read by meaning (an embedding model, where there is one): parts cut where the
+    // talk changes subject, and points worded differently from what was said still recognised
+    const meaning = await this.readByMeaning(said)
+    const parts = meetingPartsByTopic(said, PART_CHARS, meaning) ?? meetingParts(said, PART_CHARS)
     const layout = `Use exactly this Markdown layout:
 
 ## Summary
@@ -397,12 +401,50 @@ ${partNotes.join('\n\n')}
       // the model's own writing kept with the job: when the notes come out poorly, it shows why
       const dropped: string[] = []
       const fallback = partTopics(partNotesAll).map(topicBullet)
-      const text = groundMeetingNotes(written, transcript, notes, { fallback, dropped })
+      // points that say, in other words, what was said: kept, though they share few words with it
+      let meant: Set<string> | undefined
+      if (meaning) {
+        const points = written.split('\n').filter((l) => /^\s*[-*]\s/.test(l) && pointText(l))
+        const sims = await likeness(points.map(pointText), meaning.vecs, meaning.embed).catch(() => null)
+        if (sims) meant = new Set(points.filter((_, i) => isMeant(sims[i])).map((l) => l.trim()))
+        how.unshift(`Read by meaning: ${parts.length > 1 ? `${parts.length} parts, cut where the subject changes; ` : ''}${meant?.size ?? 0} of ${points.length} points match what was said`)
+      }
+      const text = groundMeetingNotes(written, transcript, notes, { fallback, dropped, meant })
       if (dropped.length) log.info(`meeting notes: left out ${dropped.length} line(s) not found in what was said`)
       return { text, draft: { parts: partNotesAll, raw: rawOut.slice(0, 20000), how, dropped } }
     })
     log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.text.length})`)
     return { text: result.text, agent: agent.name, draft: result.draft }
+  }
+
+  /**
+   * Texts → vectors, with the embedding model search by meaning uses (null: there isn't one). nomic
+   * models are told which side each text is: what's searched ('document') or what's looked for.
+   */
+  embedder(): Embed | null {
+    if (!this.agents.available('embed')) return null
+    return async (texts, as) => {
+      const { result } = await this.agents.run('embed', async (backend, agent) => {
+        if (!backend.embed) throw new Error(`${agent.name} can't make embeddings`)
+        const prefix = /nomic/i.test(agent.model) ? (as === 'query' ? 'search_query: ' : 'search_document: ') : ''
+        return backend.embed(texts.map((t) => prefix + t))
+      })
+      return result
+    }
+  }
+
+  /** A transcript in stretches, each as a vector – or null (no embedding model, or it failed: words alone then). */
+  async readByMeaning(text: string): Promise<{ stretches: Stretch[]; vecs: number[][]; embed: Embed } | null> {
+    const embed = this.embedder()
+    if (!embed || text.length < 200) return null
+    try {
+      const parts = stretches(text)
+      reportProgress('Reading the meeting by meaning…')
+      return { stretches: parts, vecs: await embed(parts.map((p) => p.text), 'document'), embed }
+    } catch (e) {
+      log.warn(`couldn't read the meeting by meaning (${describeError(e)}) – by its words alone`)
+      return null
+    }
   }
 
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
@@ -852,6 +894,17 @@ export type CompilePart =
 const PART_CHARS = 7000
 
 /** A transcript in parts of about `size` characters, cut between sentences. */
+/**
+ * A long transcript in parts cut where the talk changes subject (see meetingMeaning.ts) – null
+ * without its stretches' vectors, or when no good cuts were found (then cut by length).
+ */
+export function meetingPartsByTopic(text: string, size: number, meaning: { stretches: Stretch[]; vecs: number[][] } | null): string[] | null {
+  const t = text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
+  if (!meaning || t !== text || t.length <= size * 1.4) return null
+  const parts = cutAt(t, topicCuts(t, meaning.stretches, meaning.vecs, size))
+  return parts.length > 1 && parts.every((p) => p.length <= size * 1.6) ? parts : null
+}
+
 export function meetingParts(text: string, size: number): string[] {
   // line breaks stay: a transcript in speaker turns has one per turn
   const t = text.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()

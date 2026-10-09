@@ -11,6 +11,8 @@
  * Needs the word times Whisper (or Apple, on the phone) gives.
  */
 
+import { isMeant, peak } from './meetingMeaning'
+
 export interface TimedWord {
   word: string
   start: number
@@ -43,10 +45,37 @@ export function stem(w: string): string {
 export const telling = (w: string) => w.length >= 3 && !STOP.has(w)
 
 /**
- * For each line, the time (seconds) where what it says was talked about – or null.
- * Lines that aren't bullets (headings, blank) get null.
+ * The same found by meaning (an embedding model): stretches of about half a minute, when each
+ * starts, and for each line how like each stretch it is (null: not a point).
  */
-export function listenTimes(lines: string[], words: TimedWord[]): (number | null)[] {
+export interface ByMeaning {
+  starts: number[]
+  sims: (number[] | null)[]
+}
+
+/**
+ * For each line, the time (seconds) where what it says was talked about – or null.
+ * Lines that aren't bullets (headings, blank) get null. With `byMeaning`, a point worded unlike
+ * what was said is still found, and one whose shared words point somewhere else than what it
+ * means goes to where it means.
+ */
+export function listenTimes(lines: string[], words: TimedWord[], byMeaning?: ByMeaning): (number | null)[] {
+  const byWords = listenTimesByWords(lines, words)
+  if (!byMeaning) return byWords
+  return byWords.map((t, i) => {
+    const sims = byMeaning.sims[i]
+    if (!sims?.length || !isMeant(sims)) return t
+    const best = peak(sims).at
+    if (t !== null) {
+      // the words' place, if it's (nearly) as like the point as the best place: it's more exact
+      const around = byMeaning.starts.map((s, k) => (s <= t + 2 && (byMeaning.starts[k + 1] ?? Infinity) + 15 > t ? sims[k] : -1))
+      if (Math.max(...around) >= sims[best] - 0.04) return t
+    }
+    return Math.max(0, byMeaning.starts[best] - 1)
+  })
+}
+
+function listenTimesByWords(lines: string[], words: TimedWord[]): (number | null)[] {
   if (words.length < 8) return lines.map(() => null)
   const stems = words.map((w) => stem(w.word))
   const WINDOW = 70 // words: about half a minute of speech
@@ -104,9 +133,9 @@ export function listenTimes(lines: string[], words: TimedWord[]): (number | null
  * The notes with a ▶ link at the end of each bullet that was found in the
  * recording (before a due date, which stays last).
  */
-export function addListenLinks(markdown: string, words: TimedWord[], attachmentId: string): { markdown: string; links: number } {
+export function addListenLinks(markdown: string, words: TimedWord[], attachmentId: string, byMeaning?: ByMeaning): { markdown: string; links: number } {
   const lines = markdown.split('\n')
-  const times = listenTimes(lines, words)
+  const times = listenTimes(lines, words, byMeaning)
   let links = 0
   const out = lines.map((line, i) => {
     const t = times[i]

@@ -17,6 +17,8 @@ let base: string
 let dir: string
 let llm: http.Server
 const prompts: string[] = []
+/** what the fake embedding model was given */
+const embedded: string[] = []
 /** what the fake Ollama has in memory */
 let llmLoaded: string[] = []
 
@@ -30,6 +32,12 @@ beforeAll(async () => {
     if (req.url === '/api/tags') return res.end('{"models":[]}')
     if (!body) return res.end('{}')
     const j = JSON.parse(body)
+    // an embedding model: each subject its own direction (see meetingMeaning.test.ts)
+    if (req.url === '/api/embed') {
+      embedded.push(...(j.input as string[]))
+      const vec = (t: string) => ['fence', 'lights', 'dumpster'].map((w) => (t.toLowerCase().match(new RegExp(w, 'g')) ?? []).length + 0.15)
+      return res.end(JSON.stringify({ embeddings: (j.input as string[]).map(vec) }))
+    }
     if (j.keep_alive === 0) return (llmLoaded = llmLoaded.filter((m) => m !== j.model)), res.end('{}')
     if (!llmLoaded.includes(j.model)) llmLoaded.push(j.model)
     // loading the model before a request (prompt ''): not a request
@@ -659,5 +667,48 @@ describe('voices heard for a moment, when the service tells them apart', () => {
     const { segments, voices } = mergeVoices(found, { 0: [1, 0], 1: [0.5, 0.5], 2: [0, 1] })
     expect(new Set(segments.map((s) => s.speaker))).toEqual(new Set([0, 1]))
     expect(voices).toEqual({ 0: [1, 0], 1: [0, 1] })
+  })
+})
+
+describe('a long meeting read by meaning (with an embedding model)', () => {
+  it('is cut into parts where the subject changes', async () => {
+    const talk = (subject: string, n: number) => Array.from({ length: n }, (_, i) => `We talked about the ${subject} again, point ${i}.`).join(' ')
+    const said = [talk('fence', 160), talk('lights', 200), talk('dumpster', 160)].join(' ')
+    const whisper = http.createServer(async (req, res) => {
+      if (req.method === 'DELETE' || req.url === '/api/ps') return res.end('{"models":[]}')
+      for await (const _ of req) void _
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: said }))
+    })
+    await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const port = (llm.address() as AddressInfo).port
+    const embedder = app.ai.agents.save({ name: 'Embed', kind: 'ollama', baseUrl: `http://127.0.0.1:${port}`, model: 'nomic-embed-text', vision: false })
+    try {
+      for (const a of app.ai.agents.chain('audio')) app.ai.agents.remove(a.id)
+      app.ai.agents.save({ name: 'Whisper', kind: 'openai', baseUrl: `http://127.0.0.1:${(whisper.address() as AddressInfo).port}/v1`, model: 'whisper-turbo', vision: false })
+      app.store.putAttachment({ id: 'meaningaudio0001', mime: 'audio/mp4', name: 'Recording.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notemeaning00001', title: 'Shop meeting' }))
+      await app.sync.change(noteDocName('notemeaning00001'), (doc) => {
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'meaningaudio0001')
+        getContent(doc).insert(0, [rec])
+      })
+      prompts.length = 0
+      embedded.length = 0
+      const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeaning00001', input: { attachmentId: 'meaningaudio0001' } })).job
+      const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+      expect(done.error ?? done.status).toBe('done')
+      // read by meaning: the transcript's stretches, as passages
+      expect(embedded.some((t) => t.startsWith('search_document: We talked about the fence'))).toBe(true)
+      expect(done.result.draft.how[0]).toMatch(/^Read by meaning: \d+ parts, cut where the subject changes/)
+      // each part about one subject – the lights not split between parts
+      const partPrompts = prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))
+      const lights = partPrompts.map((p) => (p.match(/lights/g) ?? []).length)
+      expect(Math.max(...lights) / lights.reduce((a, b) => a + b, 0)).toBeGreaterThan(0.95)
+    } finally {
+      app.ai.agents.remove(embedder.id)
+      whisper.close()
+    }
   })
 })

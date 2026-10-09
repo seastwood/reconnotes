@@ -259,7 +259,10 @@ mishears is fixed once – ⋯ → *Fix a misheard word…* – in one transcrip
 transcripts come out fixed. Silences are skipped (no phrases made up in the quiet). A long meeting is
 read in parts of about eight minutes, each written up, then put together – so the end of a long
 meeting is covered as well as its start; a redo with the same transcript reuses each part's notes
-and only puts them together again. Each point in the notes gets a **▶ time** link to where it was
+and only puts them together again. With an embedding model (the one search by meaning uses, e.g.
+`nomic-embed-text`) the meeting is also read by meaning: the parts are cut where the talk changes
+subject, so a topic isn't split between two; a point worded differently from what was said still
+counts as said (names and numbers are still checked); and its ▶ link goes to where it was meant. Each point in the notes gets a **▶ time** link to where it was
 talked about in the recording (found by the words the point and the transcript share; it needs
 the word times Whisper gives). While a recording plays, a slim player stays under the toolbar once
 its own player scrolls out of view, and the transcript scrolls in its own box.

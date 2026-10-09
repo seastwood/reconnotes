@@ -43,7 +43,7 @@ export function groundMeetingNotes(
   text: string,
   transcript: string,
   notes: string,
-  opts: { fallback?: string[]; dropped?: string[] } = {},
+  opts: { fallback?: string[]; dropped?: string[]; meant?: Set<string> } = {},
 ): string {
   const source = `${transcript}\n${notes}`
   const have = new Set(words(source))
@@ -62,6 +62,19 @@ export function groundMeetingNotes(
     if (names.some((n) => !found(n.toLowerCase()) && !/^(I|Speaker|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(n))) return false
     // numbers (dates, amounts) that weren't in it
     if ((body.match(/\d+/g) ?? []).some((n) => !source.includes(n))) return false
+    // what was said, in other words (found by meaning): no names or numbers made up, so it stays –
+    // unless it starts with someone nobody mentioned ("Margaret approved…"; the first word isn't
+    // checked above, since it's capitalised whatever it is: here a name is told by what follows it)
+    if (opts.meant?.has(line.trim())) {
+      const first = tokens[0]?.replace(/[^\p{L}]/gu, '') ?? ''
+      const leadsName =
+        /^\p{Lu}\p{Ll}+$/u.test(first) &&
+        !found(first.toLowerCase()) &&
+        !STOP.has(first.toLowerCase()) &&
+        !GENERIC.has(first.toLowerCase()) &&
+        /^(?:\p{Lu}\p{Ll}+|will|to|and|agreed|approved|asked|said|suggested|wants|needs|is|was|has|had|can|should|would|–|-|:|,)$/u.test(tokens[1]?.replace(/[.,:;]$/, '') ?? '')
+      if (!leadsName) return true
+    }
     const content = words(body).filter((w) => w.length >= 4 && !STOP.has(w) && !GENERIC.has(w) && !/^\d+$/.test(w))
     if (!content.length) return true
     const hits = content.filter(found).length
