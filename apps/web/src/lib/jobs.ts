@@ -66,12 +66,14 @@ export const useJobs = <S,>(select: (s: JobsState) => S) => useStore(jobsStore, 
 export const FINISHED: JobStatus[] = ['done', 'failed', 'cancelled']
 export const isFinished = (j: Job) => FINISHED.includes(j.status)
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   if (!isSyncConfigured()) throw new Error('Connect a ReconNotes server in Settings to use AI features.')
   const res = await fetch(apiUrl(path), {
     method,
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    cache: 'no-store',
+    signal,
   })
   const json = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error((json as { error?: string }).error ?? `Server error ${res.status}`)
@@ -91,6 +93,8 @@ function apply(p: Omit<JobsState, 'loaded' | 'error'>) {
 
 let running = false
 let wake: (() => void) | null = null
+/** the request waiting for changes now: dropped when the app comes back (iOS can leave it hanging forever) */
+let listening: AbortController | null = null
 
 /** Keep the job list up to date while the app is open. */
 export function startJobs() {
@@ -111,19 +115,36 @@ export function startJobs() {
         })
         continue
       }
+      // the server answers within 25 s; a request suspended with the app (iOS) may never answer at all
+      const ctl = new AbortController()
+      listening = ctl
+      const timer = setTimeout(() => ctl.abort(), 40_000)
       try {
         const v = jobsStore.get().loaded ? jobsStore.get().version : 0
-        apply(await call<Omit<JobsState, 'loaded' | 'error'>>('GET', v ? `/api/jobs/changes?since=${v}${document.hidden ? '&away=1' : ''}` : '/api/jobs'))
+        apply(await call<Omit<JobsState, 'loaded' | 'error'>>('GET', v ? `/api/jobs/changes?since=${v}${document.hidden ? '&away=1' : ''}` : '/api/jobs', undefined, ctl.signal))
       } catch (e) {
-        jobsStore.set({ ...jobsStore.get(), error: (e as Error).message })
-        await new Promise((r) => setTimeout(r, 5000))
+        // dropped on purpose (back in the app, or no answer in time): straight on with a fresh one
+        if (!ctl.signal.aborted) {
+          jobsStore.set({ ...jobsStore.get(), error: (e as Error).message })
+          await new Promise((r) => setTimeout(r, 5000))
+        }
+      } finally {
+        clearTimeout(timer)
+        if (listening === ctl) listening = null
       }
     }
   }
   // does the server push notifications itself?
   if (isSyncConfigured()) void call<{ kind: string }>('GET', '/api/notify').then((n) => (serverPush = n.kind !== 'off')).catch(() => {})
+  const back = () => {
+    // what changed while away – now, not after a request left over from before
+    listening?.abort()
+    wake?.()
+  }
+  window.addEventListener('pageshow', back)
+  window.addEventListener('focus', () => !document.hidden && back())
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) return wake?.()
+    if (!document.hidden) return back()
     // going to the background: let the server send notifications from now on
     if (native && isSyncConfigured()) void fetch(apiUrl('/api/jobs/away'), { method: 'POST', headers: authHeaders(), keepalive: true }).catch(() => {})
   })

@@ -76,7 +76,8 @@ const MIME: Record<string, string> = {
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { 'Content-Type': 'application/json' })
+  // live answers: never kept by the browser or a proxy (Cloudflare…) and shown again later
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
   res.end(JSON.stringify(body))
 }
 
