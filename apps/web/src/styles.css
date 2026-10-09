@@ -686,48 +686,50 @@ button.text {
   padding: 4px 8px;
   background: rgba(127, 127, 127, 0.12);
 }
-.row-actions.hover {
+/* a note's ••• menu button: shown on hover with a mouse, always with a finger */
+.row-more {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  margin: 0;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 9px;
   border: 1px solid var(--line);
   background: var(--paper);
+  color: var(--accent-text);
   box-shadow: var(--shadow);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s;
 }
-.note-row:hover .row-actions.hover,
-.row-actions.hover:focus-within {
+.note-row:hover .row-more,
+.row-more.open,
+.row-more:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
-.row-actions.hover button {
-  width: 32px;
-  height: 32px;
-  justify-content: center;
-  padding: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--accent-text);
-}
-.row-actions.hover button:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.row-actions.hover button.danger {
-  color: var(--danger, #e5484d);
-}
-.row-actions.hover button.danger:hover {
-  background: color-mix(in srgb, var(--danger, #e5484d) 16%, transparent);
+.row-more:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--paper));
 }
 @media (hover: none) {
-  .row-actions.hover {
-    display: none;
+  .row-more {
+    opacity: 1;
+    pointer-events: auto;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    color: var(--muted);
+  }
+  .row-more.open {
+    color: var(--accent-text);
+  }
+  .note-row .swipe-content:has(.row-more) {
+    padding-right: 42px;
   }
 }
 .drop-end {

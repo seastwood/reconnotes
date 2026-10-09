@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -30,7 +30,8 @@ import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
 import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
-import { duplicateNote } from '../lib/templates'
+import { duplicateNote, saveAsTemplate } from '../lib/templates'
+import { openAskChat } from '../lib/askChat'
 import { WebImportDialog } from './WebImportDialog'
 import { useStore } from '../lib/store'
 import { loadRefs, openRefs, refsStore } from '../lib/refs'
@@ -73,6 +74,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   const [dropAt, setDropAt] = useState<string | null>(null)
   /** select mode: several notes at once */
   const [selecting, setSelecting] = useState(false)
+  // the ••• menu of a note in the list
+  const [menuFor, setMenuFor] = useState<{ id: string; anchor: { current: HTMLElement | null } } | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const lastPicked = useRef<string | null>(null)
   const stopSelecting = () => {
@@ -395,20 +398,18 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                 </button>
               </div>
             ) : (
-              <div className="row-actions hover">
-                <button onClick={(e) => (e.stopPropagation(), onMoveNote(n.id))} aria-label="Move note" title="Move to a folder">
-                  <FolderInput size={14} />
-                </button>
-                <button onClick={(e) => (e.stopPropagation(), pinNotes([n.id], !n.pinned))} aria-label={n.pinned ? 'Unpin' : 'Pin'} title={n.pinned ? 'Unpin' : 'Pin to top'}>
-                  <Pin size={14} />
-                </button>
-                <button onClick={(e) => (e.stopPropagation(), void duplicateNote(n.id))} aria-label="Duplicate" title="Duplicate">
-                  <Copy size={14} />
-                </button>
-                <button className="danger" onClick={(e) => (e.stopPropagation(), trashNotes([n.id]))} aria-label="Delete" title="Move to Trash">
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              <button
+                className={`row-more${menuFor?.id === n.id ? ' open' : ''}`}
+                aria-label="Note actions"
+                title="More"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuFor(menuFor?.id === n.id ? null : { id: n.id, anchor: { current: e.currentTarget } })
+                }}
+              >
+                <MoreHorizontal size={18} />
+              </button>
             )}
           </NoteRow>
         ))}
@@ -420,6 +421,53 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           <li className="drop-end" onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDropNote(e, notes[notes.length - 1], -1)} />
         )}
       </ul>
+      {menuFor &&
+        (() => {
+          const n = notes.find((x) => x.id === menuFor.id)
+          if (!n) return null
+          const act = (f: () => unknown) => () => {
+            setMenuFor(null)
+            void Promise.resolve(f()).catch((e) => alert((e as Error).message))
+          }
+          return (
+            <Popover anchorRef={menuFor.anchor} align="right" onClose={() => setMenuFor(null)}>
+              <div className="menu-label">{n.title || 'New Note'}</div>
+              <button onClick={act(() => openAskChat({ noteId: n.id, title: n.title }))}>
+                <MessageCircleQuestion size={16} /> Ask about this note
+              </button>
+              <button onClick={act(() => openRefs(n.id))}>
+                <BookOpen size={16} /> References…
+              </button>
+              <div className="menu-sep" />
+              <button onClick={act(() => pinNotes([n.id], !n.pinned))}>
+                {n.pinned ? <PinOff size={16} /> : <Pin size={16} />} {n.pinned ? 'Unpin' : 'Pin to top'}
+              </button>
+              <button onClick={act(() => onMoveNote(n.id))}>
+                <FolderInput size={16} /> Move to folder…
+              </button>
+              <button onClick={act(async () => onOpen(await duplicateNote(n.id)))}>
+                <Copy size={16} /> Duplicate
+              </button>
+              {!n.template && (
+                <button onClick={act(() => saveAsTemplate(n.id))}>
+                  <LayoutTemplate size={16} /> Save as template
+                </button>
+              )}
+              <button
+                onClick={act(() => {
+                  setSelecting(true)
+                  setSelected(new Set([n.id]))
+                })}
+              >
+                <CheckSquare size={16} /> Select notes…
+              </button>
+              <div className="menu-sep" />
+              <button className="danger" onClick={act(() => trashNotes([n.id]))}>
+                <Trash2 size={16} /> Move to Trash
+              </button>
+            </Popover>
+          )
+        })()}
       {selecting && (
         <div className="select-bar">
           <button className="text" onClick={() => setSelected(selected.size === notes.length ? new Set() : new Set(notes.map((n) => n.id)))}>
