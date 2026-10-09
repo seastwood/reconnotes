@@ -40,7 +40,7 @@ export function stem(w: string): string {
   else if (s.length > 3 && s.endsWith('s') && !s.endsWith('ss')) s = s.slice(0, -1)
   return s
 }
-const telling = (w: string) => w.length >= 3 && !STOP.has(w)
+export const telling = (w: string) => w.length >= 3 && !STOP.has(w)
 
 /**
  * For each line, the time (seconds) where what it says was talked about – or null.
@@ -80,6 +80,11 @@ export function listenTimes(lines: string[], words: TimedWord[]): (number | null
     const m = line.match(/^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*)$/)
     if (!m) return null
     const want = [...new Set(m[1].replace(/!\d{4}-\d{2}-\d{2}/g, '').split(/\s+/).map(stem).filter(telling))].filter((s) => df.has(s))
+    // one telling word only ("we'll get the pasta"): enough if it was said just once or twice
+    if (want.length === 1) {
+      const at = stems.flatMap((s, i) => (s === want[0] ? [i] : []))
+      return at.length && at.length <= 2 ? Math.max(0, words[at[0]].start - 2) : null
+    }
     if (want.length < 2) return null
     const total = want.reduce((a, s) => a + idf(s), 0)
     let best: { score: number; hits: number; at: number } | null = null

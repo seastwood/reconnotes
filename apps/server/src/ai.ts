@@ -10,7 +10,7 @@ import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
 import { createHash } from 'node:crypto'
-import { groundMeetingNotes } from './meetingNotes'
+import { coverTopics, groundMeetingNotes, partTopics } from './meetingNotes'
 export { stripThinking } from './agents'
 
 const IMAGE_MIMES = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
@@ -263,7 +263,7 @@ export class Ai {
 - each thing raised but left unsettled or to be found out (leave this section out if none)
 
 ## Action items
-- [ ] each task someone took on or was given, with the person and the deadline only if they were said
+- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
@@ -275,6 +275,7 @@ If no task was said, write "- [ ] No action items" under that heading.`
 - A suggestion ("we could…", "what if…", "another thought is…", "maybe…") is not a decision. A decision is what people agreed on and the talk moved on from ("yep", "done", "let's do that", "you got it", or it was simply acted on).
 - People change their minds: when a later idea replaces an earlier one, only the last one agreed on is the decision. The earlier ideas belong in the Summary ("first suggested X; settled on Y"), never in Decisions or Action items.
 - A task taken back later ("load the crate… actually, no, don't load it up") is not a task.
+- Small talk is not part of the meeting: lunch, food, jokes, banter, who's coming in late. Leave it out of every section.
 - When something wasn't settled, or someone is to find something out, it's an open question (with who looks into it, if said).`
     const rules = `Rules:
 - Use ONLY what is in the transcript and the notes. Never invent names, people, projects, dates, numbers or tasks.
@@ -285,6 +286,7 @@ If no task was said, write "- [ ] No action items" under that heading.`
 
 ${reasoning}`
     const { result, agent } = await this.agents.run('compile', async (backend) => {
+      const partNotesAll: string[] = []
       let body: string
       if (parts.length === 1) {
         body = `Write meeting notes from a recording's transcript and the notes taken during it. Today is ${today}.
@@ -303,7 +305,7 @@ ${said || '(no speech recognised)'}
       } else {
         // a long meeting: each part read on its own (a small model skims a long transcript and
         // writes up only its start), then the parts' notes put together
-        const partNotes: string[] = []
+        const partNotes: string[] = partNotesAll
         for (let i = 0; i < parts.length; i++) {
           reportProgress(`Reading part ${i + 1} of ${parts.length} of the meeting…`)
           const from = Math.round((minutes * i) / parts.length)
@@ -358,7 +360,10 @@ ${partNotes.join('\n\n')}
 </parts>`
       }
       const raw = await backend.generate([{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true })
-      return groundMeetingNotes(collapseRepeats(unwrapModelOutput(raw)).trim(), transcript, notes)
+      // every topic the parts found is in the Summary, even if putting them together dropped it –
+      // then all of it checked against what was said
+      const written = coverTopics(collapseRepeats(unwrapModelOutput(raw)).trim(), partTopics(partNotesAll))
+      return groundMeetingNotes(written, transcript, notes)
     })
     log.info(`meeting notes via "${agent.name}" (${transcript.length} chars of transcript, ${parts.length} part(s) → ${result.length})`)
     return { text: result, agent: agent.name }

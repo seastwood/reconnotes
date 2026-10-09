@@ -1,3 +1,4 @@
+import { stem, telling } from './listen'
 import { STOP } from './ask'
 
 /**
@@ -32,7 +33,7 @@ export function meetingNotesText(markdown: string): string {
 
 /** "[TBD]", "by TBD", "(deadline: not specified)", "– N/A"… with what led into it */
 const PLACEHOLDER =
-  /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none|undisclosed(?: person)?|unnamed(?: person)?|unknown person|someone|person not (?:named|specified))\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
+  /\s*(?:[-–—,:]\s*)?(?:\b(?:by|on|at|due|deadline|when|owner|who)\s*:?\s*)?(?:[[(]\s*(?:TBD|TBC|TBA|unknown|unspecified|not specified|not stated|not mentioned|N\/A|none|undisclosed(?: person)?|unnamed(?: person)?|unknown person|someone|person not (?:named|specified)|unassigned|no owner|owner unknown|anyone)\s*[\])]|\b(?:TBD|TBC|TBA)\b|\((?:deadline|owner|date|time)\s*:?\s*(?:not specified|not stated|not mentioned|unknown|unspecified|N\/A)\))/gi
 
 export function groundMeetingNotes(text: string, transcript: string, notes: string): string {
   const source = `${transcript}\n${notes}`
@@ -82,4 +83,65 @@ export function groundMeetingNotes(text: string, transcript: string, notes: stri
     else if (bullets.length) out.push(s.heading, ...kept, '')
   }
   return out.join('\n').trim()
+}
+
+/**
+ * The topics each part's notes found ("- Topic: …" with its "Said: …"), in order.
+ */
+export function partTopics(partNotes: string[]): { topic: string; said: string }[] {
+  const out: { topic: string; said: string }[] = []
+  for (const part of partNotes) {
+    let cur: { topic: string; said: string } | null = null
+    for (const line of part.split('\n')) {
+      const t = line.match(/^\s*[-*]\s*(?:\*\*)?Topic(?:\*\*)?\s*:?\s*(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$/i)
+      if (t) {
+        cur = { topic: t[1].replace(/\*\*/g, '').trim(), said: '' }
+        out.push(cur)
+        continue
+      }
+      const said = line.match(/^\s*[-*]\s*(?:\*\*)?Said(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$/i)
+      if (said && cur && !cur.said) cur.said = said[1].replace(/\*\*/g, '').trim()
+    }
+  }
+  return out.filter((t) => t.topic && t.said)
+}
+
+/**
+ * A small model putting a long meeting together drops topics (what came up in the middle
+ * mostly). Every topic the parts found that the Summary doesn't mention is added to it, as the
+ * part's notes said it – the Summary is the record of what was discussed.
+ */
+export function coverTopics(markdown: string, topics: { topic: string; said: string }[]): string {
+  const lines = markdown.split('\n')
+  const start = lines.findIndex((l) => /^#{1,6}\s+summary\b/i.test(l))
+  if (start < 0 || !topics.length) return markdown
+  let end = lines.findIndex((l, i) => i > start && /^#{1,6}\s/.test(l))
+  if (end < 0) end = lines.length
+  const bullets = lines.slice(start + 1, end).filter((l) => /^\s*[-*]\s/.test(l))
+  const stems = (s: string) => new Set(s.split(/\s+/).map(stem).filter(telling))
+  const said = bullets.map(stems)
+  // and what else the notes say (a topic can be summed up under Decisions instead)
+  const rest = stems(lines.slice(end).join(' '))
+  const missing: string[] = []
+  const seen = new Set<string>()
+  for (const t of topics) {
+    const key = [...stems(t.topic)].sort().join(' ')
+    if (seen.has(key)) continue
+    seen.add(key)
+    const name = [...stems(t.topic)]
+    const what = [...stems(t.said)]
+    const has = (set: Set<string>) => {
+      const byName = name.filter((w) => set.has(w)).length
+      const byWhat = what.filter((w) => set.has(w)).length
+      return (name.length && byName >= Math.min(2, name.length)) || byWhat >= Math.max(2, Math.ceil(what.length / 3))
+    }
+    if (said.some(has) || (has(rest) && name.length > 1 && name.every((w) => rest.has(w)))) continue
+    missing.push(`- **${t.topic.replace(/[.:]\s*$/, '')}**: ${t.said}`)
+  }
+  if (!missing.length) return markdown
+  // after the last bullet of the Summary
+  let at = end
+  while (at > start + 1 && !lines[at - 1].trim()) at--
+  lines.splice(at, 0, ...missing)
+  return lines.join('\n')
 }

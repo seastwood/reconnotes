@@ -32,6 +32,7 @@ describe('listen links on meeting notes', () => {
       '## Action items',
       '- [ ] Clear space across the road for the dumpster by Tuesday !2026-10-13',
       '- [ ] Order pizza for the team',
+      '- [ ] We will get that company',
     ]
     const t = listenTimes(lines, meeting)
     expect(t[0]).toBeNull() // a heading
@@ -43,6 +44,9 @@ describe('listen links on meeting notes', () => {
     expect(t[5]!).toBeLessThanOrEqual(at('Make space across') + 3)
     // never said: no link
     expect(t[6]).toBeNull()
+    // only one telling word ("company" – like "we'll get that pasta"), said once: found by it
+    expect(t[7]!).toBeGreaterThanOrEqual(at('The locates') - 3)
+    expect(t[7]!).toBeLessThanOrEqual(at('locate company'))
   })
 
   it('puts a ▶ link at the end of each point found – before a due date, which stays last', () => {

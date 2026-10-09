@@ -160,13 +160,13 @@ John, Jane, Mike`
   })
 
   it('leaves out placeholders for what wasn’t said ([TBD], not specified)', () => {
-    const t = 'Finish the gate. Move the cottage box after the project. Charlie to look into Summit.'
+    const t = 'Finish the gate. Move the cottage box after the project. Charlie to look into Summit. Bring the projector.'
     const out = groundMeetingNotes(
-      '## Action items\n- [ ] Finish the gate by [TBD]\n- [ ] Move the cottage box after the project (undisclosed person)\n- [ ] Charlie to look into Summit (deadline: not specified)',
+      '## Action items\n- [ ] Finish the gate by [TBD]\n- [ ] Move the cottage box after the project (undisclosed person)\n- [ ] Charlie to look into Summit (deadline: not specified)\n- [ ] Bring the projector (unassigned)',
       t,
       '',
     )
-    expect(out).toBe('## Action items\n- [ ] Finish the gate\n- [ ] Move the cottage box after the project\n- [ ] Charlie to look into Summit')
+    expect(out).toBe('## Action items\n- [ ] Finish the gate\n- [ ] Move the cottage box after the project\n- [ ] Charlie to look into Summit\n- [ ] Bring the projector')
   })
 
   it('keeps what was said, in other words', () => {
@@ -415,5 +415,25 @@ describe('Whisper short of GPU memory', () => {
     } finally {
       whisper.close()
     }
+  })
+})
+
+describe('a long meeting put together', () => {
+  it('keeps every topic the parts found in the Summary, even when the model drops some', async () => {
+    const { coverTopics, partTopics } = await import('../src/meetingNotes')
+    const parts = [
+      'Part 1:\n- Topic: Sprinkler testing\n  - Said: 20-year sample testing on the quick response sprinklers\n  - Outcome: Open: is it a code requirement\n- Topic: Dumpster\n  - Said: make space across the road for the dumpster coming Tuesday',
+      'Part 2:\n- **Topic:** Tractor purchase\n  - **Said:** West Machinery coming out to finalize the quote, trade-in value of the current tractor\n- Topic: Sweeper service\n  - Said: servicing the sweeper this morning, pickups 22 and 20 are due',
+    ]
+    const topics = partTopics(parts)
+    expect(topics.map((t) => t.topic)).toEqual(['Sprinkler testing', 'Dumpster', 'Tractor purchase', 'Sweeper service'])
+    const written = '## Summary\n- **Sprinkler testing**: 20-year sample testing; unsure if required\n- Dumpster space across the road for Tuesday\n\n## Decisions\n- Service the sweeper this morning\n\n## Action items\n- [ ] Charlie to look into the testing'
+    const out = coverTopics(written, topics)
+    // the tractor was dropped: back in the Summary, after its last bullet
+    expect(out).toContain('- **Tractor purchase**: West Machinery coming out to finalize the quote, trade-in value of the current tractor\n\n## Decisions')
+    // the others are there already (the sweeper under Decisions) – not added twice
+    expect(out.split('Sprinkler').length - 1).toBe(1)
+    expect(out.split('Dumpster').length - 1).toBe(1)
+    expect(out).not.toContain('**Sweeper service**')
   })
 })
