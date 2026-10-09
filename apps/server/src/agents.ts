@@ -323,6 +323,8 @@ export function observeOllama(baseUrl: string, models: OllamaLoaded[]) {
   const cur = gpuInfo(base)
   const big = models.filter((m) => !EMBED_MODEL.test(m.name))
   const vram = models.reduce((a, m) => a + (m.size_vram || 0), 0) / MB
+  // squeezed beside Whisper says nothing about how much fits on the GPU
+  if (big.some(spilled) && speechInUse.size) return
   if (big.some(spilled)) {
     if (!cur.tight) log.info(`Ollama at ${base}: a model was squeezed partly onto the CPU – from now on one model at a time on its GPU`)
     if (!cur.tight || (cur.fitMb ?? Infinity) > vram) saveGpuInfo(base, { tight: true, fitMb: Math.round(Math.min(cur.fitMb ?? Infinity, vram)) })
@@ -374,21 +376,50 @@ export async function speechLoaded(agent: AgentConfig): Promise<string[] | null>
   }
 }
 
-/**
- * After a transcription: Whisper out of the GPU's memory straight away. On an 8 GB card it would
- * otherwise sit there (Speaches keeps it a few minutes) while the language model that writes the
- * meeting notes loads – which then doesn't fit, and runs partly on the CPU, many times slower.
- * Only Speaches can be asked; other servers are left alone.
- */
-export async function unloadSpeech(agent: AgentConfig): Promise<boolean> {
+/** Ask Speaches to let go of its model (other servers can't be asked, and are left alone). */
+async function unloadSpeech(agent: AgentConfig): Promise<boolean> {
   if (agent.kind !== 'openai' || !agent.model) return false
   try {
     const res = await fetch(`${speechRoot(agent)}/api/ps/${agent.model}`, { method: 'DELETE', headers: agent.apiKey ? { Authorization: `Bearer ${agent.apiKey}` } : {}, signal: AbortSignal.timeout(5000) })
-    if (res.ok) log.info(`unloaded ${agent.model} from ${speechRoot(agent)} (room on the GPU for the next model)`)
     return res.ok
   } catch {
     return false
   }
+}
+
+/**
+ * Speech-to-text servers used lately: Speaches keeps Whisper in the GPU's memory for a few
+ * minutes after transcribing. That's fine on a big GPU – on a small one (8 GB) the language
+ * model that writes the meeting notes may then not fit beside it, and runs partly on the CPU,
+ * many times slower. So Whisper is only unloaded when a model was seen not to fit beside it.
+ */
+const speechInUse = new Map<string, AgentConfig>()
+export function speechUsed(agent: AgentConfig) {
+  if (agent.kind === 'openai' && agent.model) speechInUse.set(`${speechRoot(agent)}|${agent.model}`, agent)
+}
+/** The speech servers that still have their model loaded. */
+async function speechHolding(): Promise<AgentConfig[]> {
+  const out: AgentConfig[] = []
+  for (const [key, agent] of speechInUse) {
+    const loaded = await speechLoaded(agent)
+    if (loaded?.includes(agent.model)) out.push(agent)
+    else speechInUse.delete(key)
+  }
+  return out
+}
+
+/** Models (per Ollama server) seen squeezed onto the CPU while Whisper was loaded: for them it's unloaded first. */
+const SPEECH_OUT_KEY = 'ollama.speechOut'
+const needsSpeechOut = (base: string, model: string) => Boolean(spendStore?.getSetting<Record<string, boolean>>(SPEECH_OUT_KEY)?.[`${base}|${model}`])
+function rememberSpeechOut(base: string, model: string) {
+  if (!spendStore || needsSpeechOut(base, model)) return
+  spendStore.setSetting(SPEECH_OUT_KEY, { ...(spendStore.getSetting<Record<string, boolean>>(SPEECH_OUT_KEY) ?? {}), [`${base}|${model}`]: true })
+  log.info(`${model} doesn't fit on the GPU beside the speech-to-text model – from now on that's unloaded first`)
+}
+async function clearSpeech(speech: AgentConfig[], forModel: string) {
+  const done = await Promise.all(speech.map(async (a) => ((await unloadSpeech(a)) ? (speechInUse.delete(`${speechRoot(a)}|${a.model}`), a.model) : null)))
+  const names = done.filter(Boolean)
+  if (names.length) log.info(`made room on the GPU for ${forModel}: unloaded ${names.join(', ')} (speech-to-text)`)
 }
 
 /**
@@ -407,6 +438,10 @@ export async function makeRoomOnGpu(agent: AgentConfig): Promise<string[]> {
   const models = all.filter((m) => !EMBED_MODEL.test(m.name))
   const self = models.find((m) => sameModel(m.name, agent.model))
   if (self && !spilled(self)) return []
+  // Whisper (Speaches) on the same GPU: out only if this model was squeezed beside it
+  const speech = speechInUse.size ? await speechHolding() : []
+  if (speech.length && self) rememberSpeechOut(base, agent.model)
+  if (speech.length && (self || needsSpeechOut(base, agent.model))) await clearSpeech(speech, agent.model)
   const others = models.filter((m) => m !== self)
   if (!self && !others.length) return []
   if (!self) {

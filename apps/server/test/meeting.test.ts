@@ -180,7 +180,8 @@ describe('a long meeting, heard by the server', () => {
       expect(done.error ?? done.status).toBe('done')
       // Whisper's reading, with your words as a hint – not the phone's
       expect(hint).toBe('Doug, MinneTrials.')
-      expect(unloaded).toContain('/api/ps/faster-whisper-large-v3-turbo')
+      // plenty of room beside it here: Whisper stays loaded for the next recording
+      expect(unloaded).toEqual([])
       expect(prompts.join('\n')).not.toContain('Locates try to keep up')
       // each part read, then all of them put together – the last minutes included
       const partPrompts = prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p))

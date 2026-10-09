@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { AgentRegistry, makeBackend, validateAgent } from '../src/agents'
+import { AgentRegistry, makeBackend, speechUsed, validateAgent } from '../src/agents'
 import { loadConfig } from '../src/config'
 import { Store } from '../src/store'
 
@@ -13,12 +13,17 @@ import { Store } from '../src/store'
  * doesn't fit beside the ones already loaded goes mostly onto the CPU.
  */
 let GPU = 7000
-const SIZES: Record<string, number> = { 'qwen2.5vl:7b': 5000, 'qwen2.5:3b': 2200, 'nomic-embed-text:latest': 300 }
+const SIZES: Record<string, number> = { 'qwen3:8b': 6100, 'qwen2.5vl:7b': 5000, 'qwen2.5:3b': 2200, 'nomic-embed-text:latest': 300 }
 let loaded: { name: string; size: number; vram: number; ctx: number }[] = []
 const loads: { name: string; ctx: number }[] = []
 const unloads: string[] = []
+/** Whisper in Speaches, on the same GPU (MB it holds; 0 = not loaded) */
+let whisperMb = 0
+const speechUnloads: string[] = []
 let server: http.Server
+let speaches: http.Server
 let url: string
+let speechUrl: string
 let dir: string
 let store: Store
 
@@ -42,7 +47,7 @@ beforeAll(async () => {
     const have = loaded.find((m) => m.name === body.model)
     if (!have || have.ctx !== ctx) {
       loaded = loaded.filter((m) => m.name !== body.model)
-      const used = loaded.reduce((a, m) => a + m.vram, 0)
+      const used = loaded.reduce((a, m) => a + m.vram, 0) + whisperMb
       const size = SIZES[body.model] ?? 1000
       loaded.push({ name: body.model, size, vram: Math.max(0, Math.min(size, GPU - used)), ctx })
       loads.push({ name: body.model, ctx })
@@ -51,6 +56,17 @@ beforeAll(async () => {
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  speaches = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    if (req.method === 'DELETE') {
+      speechUnloads.push(req.url!)
+      whisperMb = 0
+      return res.end('{}')
+    }
+    res.end(JSON.stringify({ models: whisperMb ? ['whisper-turbo'] : [] }))
+  })
+  await new Promise<void>((r) => speaches.listen(0, '127.0.0.1', () => r()))
+  speechUrl = `http://127.0.0.1:${(speaches.address() as AddressInfo).port}/v1`
   // what's learned about the GPU is kept in the server's settings
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reconnotes-gpu-'))
   store = new Store(dir)
@@ -58,6 +74,7 @@ beforeAll(async () => {
 })
 afterAll(() => {
   server.close()
+  speaches.close()
   store.close()
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -65,6 +82,7 @@ beforeEach(() => {
   store.setSetting('ollama.gpu', null)
   unloads.length = 0
   loads.length = 0
+  speechUnloads.length = 0
 })
 
 const agent = (model: string) => validateAgent({ name: model, kind: 'ollama', baseUrl: url, model })
@@ -124,5 +142,46 @@ describe('one model at a time on a small GPU', () => {
     await run('qwen2.5vl:7b', 100) // a short one: keeps the bigger one, no reload
     expect(loads).toHaveLength(1)
     expect(loads[0].ctx).toBe(16384)
+  })
+})
+
+describe('Whisper (Speaches) on the same GPU', () => {
+  const whisper = validateAgent({ name: 'Whisper', kind: 'openai', baseUrl: '', model: 'whisper-turbo' })
+  const transcribed = () => {
+    whisperMb = 1600
+    speechUsed({ ...whisper, baseUrl: speechUrl })
+  }
+
+  it('stays loaded when there’s room beside it', async () => {
+    GPU = 24000
+    loaded = []
+    transcribed()
+    await run('qwen3:8b')
+    await run('qwen3:8b')
+    expect(speechUnloads).toEqual([])
+    expect(on('qwen3:8b')!.vram).toBe(6100)
+    GPU = 7000
+  })
+
+  it('is unloaded when the notes model doesn’t fit beside it – and first, from then on', async () => {
+    // what you saw: 7 GB usable, Whisper holding 1.6 GB – qwen3 (6.1 GB) only partly on the GPU
+    loaded = []
+    transcribed()
+    await run('qwen3:8b')
+    expect(on('qwen3:8b')!.vram).toBeLessThan(6100)
+    await run('qwen3:8b') // seen half on the CPU: Whisper out, loaded again fully
+    expect(speechUnloads).toEqual(['/api/ps/whisper-turbo'])
+    expect(on('qwen3:8b')!.vram).toBe(6100)
+    // next meeting: Whisper's unloaded before the model loads, so it's never squeezed
+    speechUnloads.length = 0
+    loaded = []
+    loads.length = 0
+    transcribed()
+    await run('qwen3:8b')
+    expect(speechUnloads).toEqual(['/api/ps/whisper-turbo'])
+    expect(loads).toHaveLength(1)
+    expect(on('qwen3:8b')!.vram).toBe(6100)
+    // and the squeeze didn't teach it that this GPU only holds 5.4 GB
+    expect(store.getSetting<Record<string, { fitMb?: number }>>('ollama.gpu')?.[url]?.fitMb ?? 6100).toBeGreaterThanOrEqual(6100)
   })
 })
