@@ -206,3 +206,52 @@ describe('a long meeting, heard by the server', () => {
     }
   })
 })
+
+describe('Transcribe on a recording', () => {
+  it('replaces the recording’s own transcript – with the server’s speech-to-text, else the phone’s – and says who made it', async () => {
+    const whisper = http.createServer(async (req, res) => {
+      for await (const _ of req);
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: 'We need to figure out plans for tomorrow.' }))
+    })
+    await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
+    const { getTranscripts } = await import('@reconnotes/core')
+    const { APPLE_SPEECH } = await import('../src/attachments')
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const run = async (input: Record<string, unknown>) => (await api('GET', `/api/jobs/${(await api('POST', '/api/jobs', { kind: 'transcribe', noteId: 'transcribe0000001', input })).job.id}/wait`)).job
+    try {
+      // only this speech-to-text agent
+      for (const a of app.ai.agents.chain('audio')) app.ai.agents.remove(a.id)
+      const w = app.ai.agents.save({ name: 'Whisper turbo', kind: 'openai', baseUrl: `http://127.0.0.1:${(whisper.address() as AddressInfo).port}/v1`, model: 'faster-whisper-large-v3-turbo', vision: false })
+      app.store.putAttachment({ id: 'transcribeaudio01', mime: 'audio/mp4', name: 'Recording.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      app.store.setAttachmentText('transcribeaudio01', 'Testing, needing a mode, self-sack.', 'done')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'transcribe0000001', title: 'Recording' }))
+      await app.sync.change(noteDocName('transcribe0000001'), (doc) => {
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'transcribeaudio01')
+        getContent(doc).insert(0, [rec])
+      })
+      const done = await run({ attachmentId: 'transcribeaudio01' })
+      expect(done.error ?? done.status).toBe('done')
+      expect(done.agent).toMatch(/^Whisper turbo/)
+      await new Promise((r) => setTimeout(r, 50))
+      const tr = () => getTranscripts(app.sync.getDoc(noteDocName('transcribe0000001'))!)
+      // the recording's transcript is replaced – nothing written into the note
+      expect(tr().get('att:transcribeaudio01')).toBe('We need to figure out plans for tomorrow.')
+      expect(tr().get('by:att:transcribeaudio01')).toBe('Whisper turbo')
+      expect(getContent(app.sync.getDoc(noteDocName('transcribe0000001'))!).toString()).not.toContain('plans for tomorrow')
+
+      // no speech-to-text on the server: the phone is asked, and its reading kept with the recording
+      app.ai.agents.remove(w.id)
+      const ask = await run({ attachmentId: 'transcribeaudio01' })
+      expect(ask.result.needsDevice).toBe(true)
+      const sent = await run({ attachmentId: 'transcribeaudio01', transcript: 'Testing meeting mode.' })
+      expect(sent.agent).toBe(APPLE_SPEECH)
+      for (let i = 0; i < 40 && tr().get('att:transcribeaudio01') !== 'Testing meeting mode.'; i++) await new Promise((r) => setTimeout(r, 50))
+      expect(tr().get('att:transcribeaudio01')).toBe('Testing meeting mode.')
+      expect(tr().get('by:att:transcribeaudio01')).toBe(APPLE_SPEECH)
+    } finally {
+      whisper.close()
+    }
+  })
+})

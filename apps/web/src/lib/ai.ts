@@ -297,50 +297,41 @@ export async function convertImage(editor: Editor, noteId: string, attachmentId:
 }
 
 /**
- * Transcribe a recording or audio file and insert the text right below it.
- * In the iOS app Apple's speech recognizer runs on the device first; the
- * server's "Audio to text" agents (e.g. a Whisper server) are the fallback
- * and the only option in the web app. Returns the transcript (also kept with
- * the recording for search).
+ * "Transcribe" on a recording or audio file: its transcript – shown with it, and searched – read
+ * again and replaced. The server's speech-to-text (Whisper) does it when there is one; otherwise
+ * Apple's recognition on this iPhone/iPad, its text kept on the server with the recording. Says
+ * who made it ("Transcribed by …"). Returns the transcript.
  */
-export async function transcribeAudio(
-  editor: Editor,
-  noteId: string,
-  attachmentId: string,
-  insertAt: () => number | undefined,
-  /** a transcript the server already made (Whisper): usually the best one */
-  existing?: string | null,
-): Promise<string> {
+export async function transcribeAudio(noteId: string, attachmentId: string, doc: Y.Doc): Promise<string> {
   const startedAt = Date.now()
-  let text = ''
-  let deviceError: Error | null = null
-  // the server's transcript is used by its job; otherwise Apple's recognizer here first
-  if (!(existing?.trim() && isSyncConfigured()) && useDeviceSpeech()) {
+  const apple = async () => {
     const blob = await attachmentBlob(attachmentId)
-    if (blob && deviceCanDecode(blob.type)) {
-      try {
-        text = await transcribeOnDevice(blob)
-      } catch (e) {
-        deviceError = e as Error
-      }
-    }
-  }
-  if (text.trim()) {
-    const at = insertAt()
-    if (at === undefined) throw new Error('The recording no longer exists')
-    const id = localJobId()
-    insertConverted(editor, at, speechToParagraphs(text), id)
-    recordJob({ id, kind: 'transcribe', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: 'Apple speech recognition (on this device)', startedAt })
+    if (!blob || !deviceCanDecode(blob.type)) throw new Error('This recording can’t be read on this device.')
+    const text = await transcribeOnDevice(blob)
+    if (!text.trim()) throw new Error('No speech was recognised in this recording.')
     return text
   }
   if (!isSyncConfigured()) {
-    if (deviceError) throw deviceError
-    throw new Error(useDeviceSpeech() ? 'No speech was recognised in this recording.' : 'Connect a ReconNotes server in Settings to transcribe audio.')
+    if (!useDeviceSpeech()) throw new Error('Connect a ReconNotes server in Settings to transcribe audio.')
+    // no server: kept in the note itself (it syncs once there is one)
+    const text = await apple()
+    doc.transact(() => {
+      getTranscripts(doc).set(`att:${attachmentId}`, text)
+      getTranscripts(doc).set(`by:att:${attachmentId}`, 'Apple speech recognition (on the phone)')
+    })
+    recordJob({ id: localJobId(), kind: 'transcribe', title: noteTitle(noteId), noteId, input: { attachmentId }, result: { noteId, text: text.slice(0, 1500) }, agent: 'Apple speech recognition (on this device)', startedAt })
+    return text
   }
   await flushUploads()
   await flushNote(noteId)
+  // the server's speech-to-text first
   const job = await runJob({ kind: 'transcribe', noteId, input: { attachmentId } })
-  return String(job.result?.text ?? '')
+  if (!job.result?.needsDevice) return String(job.result?.text ?? '')
+  // none there: Apple's, here – kept on the server with the recording
+  if (!useDeviceSpeech()) throw new Error('Add an “Audio to text” agent (e.g. a Whisper server) in Settings › AI agents to transcribe recordings.')
+  const text = await apple()
+  const sent = await runJob({ kind: 'transcribe', noteId, input: { attachmentId, transcript: text } })
+  return String(sent.result?.text ?? text)
 }
 
 /**

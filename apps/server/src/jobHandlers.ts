@@ -219,25 +219,33 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     return { result: { noteId, text: preview(text) }, agent }
   })
 
+  // "Transcribe" on a recording: its transcript (shown with it, and searched) read again – by the server's
+  // speech-to-text when there is one, else the phone's reading (Apple) sent along – and kept with the recording
   jobs.register('transcribe', async (job) => {
     const { noteId, attachmentId } = job.input as { noteId: string; attachmentId: string }
     noteDoc(noteId)
     const att = store.getAttachment(attachmentId)
-    if (!att || !store.hasBlob(att.id)) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
+    if (!att) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
+    const onDevice = String(job.input.transcript ?? '').trim()
     let text: string
-    let agent: string | null = null
-    // the server may already have transcribed it (for search); a redo always does it again
-    if (att.text_status === 'done' && att.text?.trim() && !job.input.replace) text = att.text
-    else {
+    let by: string
+    if (ai.agents.available('audio') && !onDevice) {
+      if (!store.hasBlob(att.id)) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
       const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name)
       text = r.text
-      agent = r.agent
-      store.setAttachmentText(att.id, text, 'done')
-      sync.reindexNotesFor(att.id)
+      by = r.agent
+    } else if (onDevice) {
+      text = onDevice
+      by = APPLE_SPEECH
+    } else {
+      // no speech-to-text here: the phone reads it (Apple) and sends it back – or there's nothing to read it with
+      return { result: { noteId, needsDevice: true } }
     }
     if (!text.trim()) throw new Error('No speech was recognised in this recording.')
-    await writeResult(sync, noteId, job.id, speechToParagraphs(text), { after: (el) => el.nodeName === 'audio' && el.getAttribute('attachmentId') === attachmentId }, replaced(job))
-    return { result: { noteId, text: preview(text) }, agent: agent ?? 'Transcript made earlier on the server' }
+    setTranscribedBy(store, att.id, by)
+    store.setAttachmentText(att.id, text, 'done')
+    sync.reindexNotesFor(att.id)
+    return { result: { noteId, text: preview(text), heardBy: by }, agent: by }
   })
 
   for (const action of ['summary', 'todos'] as const) {

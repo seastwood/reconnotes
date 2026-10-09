@@ -245,10 +245,11 @@ kind **Wyoming speech-to-text**, address `tcp://<whisper-ip>:10300` (find the po
 `ss -tlnp` on that machine) and press **Test connection**. The ReconNotes server converts
 recordings with `ffmpeg` (`sudo apt install ffmpeg`), and Home Assistant keeps working as before.
 
-Every recording and audio file has a **Transcribe** button that puts the spoken words into the
-note below it. In the iPhone/iPad app Apple's speech recognition does this on the device. The
-web app, and the iPad app when Apple can't read a file, use the server's **Audio to text**
-agents: any OpenAI-compatible speech-to-text server. Ollama and Claude can't transcribe audio.
+Every recording and audio file has a transcript (*Show transcript*), which search finds too. Its
+**Transcribe** button reads the recording again and replaces that transcript – with the server's
+**Audio to text** agents (any OpenAI-compatible speech-to-text server, or Wyoming) when there are
+any, otherwise with Apple's speech recognition on the iPhone/iPad. The transcript says which made
+it ("Transcribed by …"). Ollama and Claude can't transcribe audio.
 
 **Meetings** are always transcribed by the server's Audio to text agent when there is one (Apple's
 recognition is made for dictation, not a room of people – it's only used when the server can't).

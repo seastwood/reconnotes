@@ -425,16 +425,10 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
     setBusy(true)
     setError(null)
     try {
-      await transcribeAudio(
-        editor,
-        ctx?.noteId ?? '',
-        node.attrs.attachmentId,
-        () => {
-          const pos = getPos()
-          return typeof pos === 'number' ? pos + node.nodeSize : undefined
-        },
-        transcript,
-      )
+      if (!ctx) return
+      // the recording's own transcript, replaced (and shown)
+      await transcribeAudio(ctx.noteId, node.attrs.attachmentId, ctx.doc)
+      setOpen(true)
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -446,7 +440,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
       <div className="audio-head">
         <Mic size={16} /> <span>{node.attrs.name || 'Recording'}</span>
         {editor.isEditable && (
-          <button className="audio-transcribe" {...tap(() => void transcribe())} disabled={busy} title="Turn the speech into text below this recording">
+          <button className="audio-transcribe" {...tap(() => void transcribe())} disabled={busy} title="Transcribe this recording again – its transcript is replaced">
             {busy ? <Loader2 size={15} className="spin" /> : <AudioLines size={15} />} {busy ? 'Transcribing…' : 'Transcribe'}
           </button>
         )}
