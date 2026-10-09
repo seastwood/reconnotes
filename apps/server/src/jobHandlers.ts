@@ -765,7 +765,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const names = att ? parseSpeakerNames(getTranscripts(noteDoc(noteId)).get(speakerNamesKey(att.id)) ?? null) : {}
     const voices = turns ? voiceCount(turns) : 0
     const heard = turns && voices >= 2 ? labelledTranscript(turns, names) : transcript
-    const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, people, voices, named: Object.values(names) })
+    const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, people, voices, named: Object.values(names), fresh })
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
     const md = r.text
       .split('\n')

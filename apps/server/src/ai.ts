@@ -252,7 +252,8 @@ export class Ai {
     notes: string,
     transcript: string,
     today: string,
-    who: { attendees?: string[]; people?: number; voices?: number; named?: string[] } = {},
+    /** `fresh`: read every part again, not the notes on it from before (asked for a fresh start) */
+    who: { attendees?: string[]; people?: number; voices?: number; named?: string[]; fresh?: boolean } = {},
   ): Promise<{ text: string; agent: string; draft?: { parts: string[]; raw: string; how: string[]; dropped: string[] } }> {
     // a line per speaker's turn ("Jesse: …") when the voices were told apart: kept as lines
     const said = transcript.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
@@ -364,7 +365,7 @@ ${parts[i]}
           // read before – the same words, the same instructions, the same model (a redo of the notes):
           // what it made of it then. Most of a long meeting's time is here, so a redo only puts it together again.
           const key = createHash('sha256').update(`meeting-part|${model.kind}|${model.baseUrl}|${model.model}|${prompt}`).digest('hex')
-          const saved = this.savedReading(key)
+          const saved = who.fresh ? null : this.savedReading(key)
           let t: string
           if (saved !== null) {
             t = saved

@@ -337,6 +337,12 @@ describe('a long meeting, heard by the server', () => {
       expect(plain.input.retranscribe).toBeUndefined()
       expect((await api('GET', `/api/jobs/${plain.id}/wait`)).job.status).toBe('done')
       expect(hint).toBe('')
+
+      // a fresh start (Redo from a fresh transcript): every part read again
+      prompts.length = 0
+      const freshRun = (await fetch(`${base}/api/jobs/${(await api('GET', '/api/jobs')).jobs.filter((j: { kind: string; noteId: string; replacedBy?: string }) => j.kind === 'meeting' && j.noteId === 'notemeeting00002' && !j.replacedBy)[0].id}/redo`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fresh: true }) }).then((r) => r.json())).job
+      expect((await api('GET', `/api/jobs/${freshRun.id}/wait`)).job.status).toBe('done')
+      expect(prompts.filter((p) => /This is part \d+ of \d+ of a meeting/.test(p)).length).toBeGreaterThanOrEqual(2)
     } finally {
       whisper.close()
     }
