@@ -277,7 +277,9 @@ Check that it's being used:
 
 Whisper and Ollama's models share the GPU's memory. On a big card, both simply stay loaded. On a small one (8 GB), a language model loaded right after a transcription may not fit beside Whisper. Ollama then runs it partly on the CPU, many times slower. The **Jobs** view shows that as "partly on the CPU, slow".
 
-ReconNotes handles this by itself: the first time a model is squeezed beside Whisper, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' small voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. It's tiny and stays loaded, and Whisper itself is what gets unloaded after 5 minutes (`STT_MODEL_TTL`) or when a model needs the room.
+It also happens the other way round: a language model still loaded from the last job can leave Whisper too little memory, and it fails ("CUDA failed with error out of memory" in `journalctl -u speaches`). Then ReconNotes unloads Ollama's models and lets Whisper try again. When that's what it took, it remembers, and from then on makes room before Whisper starts. If Whisper still fails, a meeting falls back to the phone's own transcript, and the job shows why under **Speech-to-text**.
+
+For language models, ReconNotes handles this by itself too: the first time a model is squeezed beside Whisper, it unloads Whisper and loads the model again with the whole GPU. It remembers that, and from then on unloads Whisper before loading that model. Models that fit stay beside it. The **In memory** line in **Jobs** shows Speaches' model too, marked "(speech-to-text)". It may also show `silero_vad_v5`: that's not Whisper, but Speaches' small voice detector, which finds the parts of a recording where someone is speaking before Whisper listens. It's tiny and stays loaded, and Whisper itself is what gets unloaded after 5 minutes (`STT_MODEL_TTL`) or when a model needs the room.
 
 ## Updating Speaches
 
@@ -311,3 +313,4 @@ Then repeat the `patchelf` line from step 5 and the `uv pip install "nvidia-cudn
 | works by hand but not as a service | the service is missing the `LD_LIBRARY_PATH` line (step 9) |
 | Jobs says "Apple speech recognition" | ReconNotes can't reach Speaches: check the agent's address ends in `:8000/v1` (step 10) |
 | notes model "partly on the CPU" after a meeting | handled automatically after the first time (step 11) |
+| a meeting job says "Done by Apple speech recognition" with a **Speech-to-text: Failed** line | the reason is on that line; `journalctl -u speaches -n 50` shows Speaches' side (step 11) |

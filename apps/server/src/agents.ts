@@ -423,6 +423,46 @@ async function clearSpeech(speech: AgentConfig[], forModel: string) {
 }
 
 /**
+ * The other way round: Whisper failing because a language model left too little of the GPU
+ * (e.g. qwen3 still loaded from the last job, on an 8 GB card – CUDA "out of memory"). Ollama's
+ * models are unloaded and Whisper tried again; when that's what it took, it's remembered, and
+ * from then on Ollama makes room before this speech model transcribes.
+ */
+export async function freeOllamaGpu(baseUrls: string[]): Promise<string[]> {
+  const out: string[] = []
+  for (const base of [...new Set(baseUrls.map(trimSlash))]) {
+    const models = await loadedModels(base)
+    if (!models?.length) continue
+    await Promise.all(
+      models.map((m) =>
+        fetch(`${base}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+          signal: AbortSignal.timeout(15_000),
+        }).catch(() => undefined),
+      ),
+    )
+    for (let i = 0; i < 30; i++) {
+      const now = await loadedModels(base)
+      if (!now?.length) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    for (const m of models) lastCtx.delete(`${base}|${m.name}`)
+    out.push(...models.map((m) => m.name))
+  }
+  if (out.length) log.info(`made room on the GPU for speech-to-text: unloaded ${out.join(', ')}`)
+  return out
+}
+const SPEECH_ROOM_KEY = 'speech.needsRoom'
+export const speechNeedsRoom = (agent: AgentConfig) => Boolean(spendStore?.getSetting<Record<string, boolean>>(SPEECH_ROOM_KEY)?.[`${speechRoot(agent)}|${agent.model}`])
+export function rememberSpeechNeedsRoom(agent: AgentConfig) {
+  if (!spendStore || speechNeedsRoom(agent)) return
+  spendStore.setSetting(SPEECH_ROOM_KEY, { ...(spendStore.getSetting<Record<string, boolean>>(SPEECH_ROOM_KEY) ?? {}), [`${speechRoot(agent)}|${agent.model}`]: true })
+  log.info(`${agent.model} needs the GPU to itself – from now on Ollama's models are unloaded before it transcribes`)
+}
+
+/**
  * Before a job: make sure its model will run on the GPU. On a small GPU
  * (8 GB) Ollama keeps the last model in memory and squeezes the next one in
  * beside it – mostly on the CPU, many times slower. So before loading a model,
@@ -1359,7 +1399,7 @@ function toView(a: AgentConfig, status?: AgentStatus): AgentView {
   }
 }
 
-function describeError(err: unknown): string {
+export function describeError(err: unknown): string {
   if (err instanceof Anthropic.AuthenticationError) return 'API key rejected'
   if (err instanceof Anthropic.NotFoundError) return 'model not found'
   if (err instanceof Anthropic.RateLimitError) return 'rate limited'

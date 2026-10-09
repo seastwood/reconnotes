@@ -5,7 +5,7 @@ import { Vocabulary } from './vocabulary'
 import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, NoTextError, readingMode, speechUsed, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, describeError, freeOllamaGpu, readingMode, rememberSpeechNeedsRoom, speechNeedsRoom, speechUsed, streaming, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
@@ -355,7 +355,22 @@ ${partNotes.join('\n\n')}
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
       const prompt = this.vocabulary?.speechPrompt() || undefined
       // with each word's time, where the server gives it (to follow along as it plays)
-      const r = backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt) : { text: await backend.transcribe(data, mime, filename, prompt) }
+      const once = async () => (backend.transcribeTimed ? await backend.transcribeTimed(data, mime, filename, prompt) : { text: await backend.transcribe!(data, mime, filename, prompt) })
+      // Whisper on the same GPU as Ollama: room made first if it's needed it before
+      const ollama = this.agents.agents().filter((a) => a.enabled && a.kind === 'ollama').map((a) => a.baseUrl)
+      const shared = agent.kind === 'openai' && ollama.length > 0
+      if (shared && speechNeedsRoom(agent)) await freeOllamaGpu(ollama)
+      let r: Awaited<ReturnType<typeof once>>
+      try {
+        r = await once()
+      } catch (e) {
+        // failed (often out of GPU memory beside a language model): once more with the GPU to itself
+        if (!shared || jobSignal()?.aborted || /timed out|aborted/i.test(describeError(e)) || !(await freeOllamaGpu(ollama)).length) throw e
+        log.warn(`${agent.name} failed (${describeError(e)}) – trying again with Ollama's models out of the GPU`)
+        reportProgress('Transcribing the recording again, with the GPU to itself…')
+        r = await once()
+        rememberSpeechNeedsRoom(agent)
+      }
       return { text: collapseRepeats(r.text), words: r.words }
     })
     log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.text.length} chars${result.words ? `, ${result.words.length} timed words` : ''})`)

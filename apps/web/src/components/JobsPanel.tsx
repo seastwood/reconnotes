@@ -365,6 +365,13 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                 <dd>{j.agent}</dd>
               </>
             )}
+            {/* the server's speech-to-text failed: the phone's reading was used instead – and why */}
+            {typeof j.result?.speechError === 'string' && (
+              <>
+                <dt>Speech-to-text</dt>
+                <dd className="error-text">Failed – the phone’s reading was used instead: {j.result.speechError}</dd>
+              </>
+            )}
             {j.prompt && (
               <>
                 <dt>Your instructions</dt>

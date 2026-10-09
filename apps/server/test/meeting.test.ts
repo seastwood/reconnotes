@@ -17,6 +17,8 @@ let base: string
 let dir: string
 let llm: http.Server
 const prompts: string[] = []
+/** what the fake Ollama has in memory */
+let llmLoaded: string[] = []
 
 beforeAll(async () => {
   llm = http.createServer(async (req, res) => {
@@ -24,9 +26,12 @@ beforeAll(async () => {
     for await (const c of req) body += c
     res.writeHead(200, { 'Content-Type': 'application/json' })
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion'] }))
-    if (req.url === '/api/ps' || req.url === '/api/tags') return res.end('{"models":[]}')
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: llmLoaded.map((name) => ({ name, size: 0, size_vram: 0 })) }))
+    if (req.url === '/api/tags') return res.end('{"models":[]}')
     if (!body) return res.end('{}')
     const j = JSON.parse(body)
+    if (j.keep_alive === 0) return (llmLoaded = llmLoaded.filter((m) => m !== j.model)), res.end('{}')
+    if (!llmLoaded.includes(j.model)) llmLoaded.push(j.model)
     prompts.push(j.messages?.[0]?.content ?? '')
     const content = '## Summary\n- Doug orders the parts; the gym needs booking\n\n## Action items\n- [ ] Doug – order the parts by Friday\n- [ ] Book the gym'
     res.end(JSON.stringify({ message: { role: 'assistant', content }, done_reason: 'stop', eval_count: 5 }))
@@ -285,6 +290,54 @@ describe('Transcribe on a recording', () => {
       expect(withTimes.error ?? withTimes.status).toBe('done')
       for (let i = 0; i < 40 && !tr().get('timing:att:transcribeaudio01'); i++) await new Promise((r) => setTimeout(r, 50))
       expect(parseWordTimes(tr().get('timing:att:transcribeaudio01'))!.map((w) => w.start)).toEqual([0.1, 0.7, 1.2])
+    } finally {
+      whisper.close()
+    }
+  })
+})
+
+describe('Whisper short of GPU memory', () => {
+  it('Ollama makes room and Whisper tries again – remembered; when it still fails, the job says why', async () => {
+    let fails = false
+    const whisper = http.createServer(async (req, res) => {
+      if (req.method === 'DELETE') return res.end('{}')
+      if (req.url === '/api/ps') return res.end('{"models":[]}')
+      for await (const _ of req) void _
+      // what CTranslate2 says beside a language model on an 8 GB card
+      if (fails || llmLoaded.length) return res.writeHead(500).end('CUDA failed with error out of memory')
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ text: 'Doug orders the parts by Friday.' }))
+    })
+    await new Promise<void>((r) => whisper.listen(0, '127.0.0.1', () => r()))
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const meeting = async (attachmentId = 'meetingoomaudio1') => (await api('GET', `/api/jobs/${(await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeetingoom01', input: { attachmentId, transcript: 'Locates try to keep up with the gas.' } })).job.id}/wait`)).job
+    try {
+      for (const a of app.ai.agents.chain('audio')) app.ai.agents.remove(a.id)
+      app.ai.agents.save({ name: 'Whisper', kind: 'openai', baseUrl: `http://127.0.0.1:${(whisper.address() as AddressInfo).port}/v1`, model: 'whisper-oom', vision: false })
+      app.store.putAttachment({ id: 'meetingoomaudio1', mime: 'audio/mp4', name: 'Recording.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notemeetingoom01', title: 'Meeting' }))
+      await app.sync.change(noteDocName('notemeetingoom01'), (doc) => {
+        const rec = new Y.XmlElement('audio')
+        rec.setAttribute('attachmentId', 'meetingoomaudio1')
+        getContent(doc).insert(0, [rec])
+      })
+      // the notes model still loaded from the last job
+      llmLoaded = ['qwen2.5:7b']
+      const done = await meeting()
+      expect(done.error ?? done.status).toBe('done')
+      expect(done.agent).toMatch(/^Whisper \+ /)
+      expect(done.result.speechError).toBeUndefined()
+      expect(app.store.getAttachment('meetingoomaudio1')!.text).toBe('Doug orders the parts by Friday.')
+      // remembered: next time Ollama makes room first
+      expect(Object.keys(app.store.getSetting<Record<string, boolean>>('speech.needsRoom') ?? {})).toHaveLength(1)
+
+      // Whisper broken: the phone's reading – and the job says what went wrong
+      fails = true
+      app.store.putAttachment({ id: 'meetingoomaudio2', mime: 'audio/mp4', name: 'Recording 2.m4a', size: 4, created_at: Date.now() }, Buffer.from('fake'), 'skipped')
+      const fallback = await meeting('meetingoomaudio2')
+      expect(fallback.error ?? fallback.status).toBe('done')
+      expect(fallback.agent).toMatch(/^Apple speech recognition/)
+      expect(fallback.result.speechError).toMatch(/out of memory/)
     } finally {
       whisper.close()
     }

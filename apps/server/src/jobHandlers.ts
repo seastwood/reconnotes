@@ -1,3 +1,4 @@
+import { log } from './log'
 import fs from 'node:fs'
 import * as Y from 'yjs'
 import {
@@ -462,6 +463,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     let transcript = ''
     let agent: string | null = null
     let times: { word: string; start: number; end: number }[] | undefined
+    let speechError: string | undefined
     // the server's speech-to-text (Whisper) reads a meeting far better: it comes first when there is one
     const serverHears = ai.agents.available('audio')
     const saved = att?.text_status === 'done' && att.text?.trim() ? att.text : ''
@@ -477,6 +479,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         times = r.words
       } catch (e) {
         if (!onDevice && !saved) throw e
+        // the phone's reading instead – and the job says why
+        speechError = (e as Error).message
+        log.warn(`meeting "${job.title}": the server's speech-to-text failed, using the phone's reading – ${speechError}`)
       }
     }
     if (!transcript) {
@@ -516,7 +521,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       })
       .join('\n')
     await writeResult(sync, noteId, job.id, md, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
-    return { result: { noteId, text: preview(md), heardBy }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
+    return { result: { noteId, text: preview(md), heardBy, ...(speechError ? { speechError } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
   jobs.register('extract-text', async (job) => {
