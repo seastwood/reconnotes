@@ -51,10 +51,32 @@ declare module '@tiptap/core' {
   }
 }
 
-const norm = (s: string) => s.toLocaleLowerCase()
+/**
+ * Text as find compares it: lower case, a run of spaces (or a non-breaking space) as one,
+ * curly quotes and dashes as plain ones, and no * _ ` – so "R401 BUMPERS all around"
+ * finds "R401 *BUMPERS all around" (a link from Ask is written without the marks).
+ * Each kept character's index in the original, to map matches back.
+ */
+function fold(s: string): { text: string; index: number[] } {
+  let text = ''
+  const index: number[] = []
+  for (let i = 0; i < s.length; i++) {
+    let c = s[i]
+    if (c === '*' || c === '_' || c === '`') continue
+    if (/\s/.test(c)) {
+      if (text.endsWith(' ')) continue
+      c = ' '
+    } else if (c === '‘' || c === '’') c = "'"
+    else if (c === '“' || c === '”') c = '"'
+    else if (c === '–' || c === '—') c = '-'
+    text += c.toLocaleLowerCase()
+    index.push(i)
+  }
+  return { text, index }
+}
 
 function findMatches(doc: PMNode, query: string, transcriptOf: FindOptions['transcriptOf']): FindMatch[] {
-  const q = norm(query.trim())
+  const q = fold(query.trim()).text.trim()
   if (!q) return []
   const out: FindMatch[] = []
   doc.descendants((node, pos) => {
@@ -73,15 +95,15 @@ function findMatches(doc: PMNode, query: string, transcriptOf: FindOptions['tran
           text += child.type.name === 'hardBreak' ? '\n' : '￼'
         }
       })
-      const hay = norm(text)
-      for (let i = hay.indexOf(q); i >= 0; i = hay.indexOf(q, i + Math.max(1, q.length))) {
-        out.push({ from: at[i], to: at[i + q.length - 1] + 1, block: false })
+      const hay = fold(text)
+      for (let i = hay.text.indexOf(q); i >= 0; i = hay.text.indexOf(q, i + Math.max(1, q.length))) {
+        out.push({ from: at[hay.index[i]], to: at[hay.index[i + q.length - 1]] + 1, block: false })
       }
       return false
     }
     if (node.isAtom) {
       const t = transcriptOf(node)
-      if (t && norm(t).includes(q)) out.push({ from: pos, to: pos + node.nodeSize, block: true })
+      if (t && fold(t).text.includes(q)) out.push({ from: pos, to: pos + node.nodeSize, block: true })
       return false
     }
     return true
