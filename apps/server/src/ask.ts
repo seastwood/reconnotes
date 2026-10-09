@@ -454,8 +454,8 @@ const PERMITS = /\b(?:are|is) (?:permitted|allowed)\b|\bmay\b(?! not)|\bpermitte
 /** An answer whose first sentence says no. */
 const saysNo = (answer: string) => {
   const first = answer.split(/(?<=[.!?])\s/)[0] ?? ''
-  // "No, unless…": the exception is given – not a flat no
-  return /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(first) && !/\b(?:unless|except|only if|as long as|provided that|other than)\b/i.test(first)
+  // "No, unless…" / "No, if it would…": a condition is given – not a flat no
+  return /\b(?:no\b|cannot|can't|can not|not (?:allowed|permitted)|prohibited|forbidden|must not|isn't allowed)\b/i.test(first) && !/\b(?:unless|except|only if|as long as|provided that|other than|if (?:it|the|they|you|this|that|a|an)|when (?:it|the|they))\b/i.test(first)
 }
 
 /** Words an answer uses when it reasons beyond what the notes say. */
