@@ -62,7 +62,8 @@ function fold(s: string): { text: string; index: number[] } {
   const index: number[] = []
   for (let i = 0; i < s.length; i++) {
     let c = s[i]
-    if (c === '*' || c === '_' || c === '`') continue
+    // formatting marks – and "~" ("about": a citation may quote "(58 mm)" where the note says "(~58 mm)")
+    if (c === '*' || c === '_' || c === '`' || c === '~') continue
     if (/\s/.test(c)) {
       if (text.endsWith(' ')) continue
       c = ' '
