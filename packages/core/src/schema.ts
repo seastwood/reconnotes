@@ -51,6 +51,8 @@ export interface FolderData {
   lock: FolderLock | null
   /** left out of search and "Ask your notes" (with its subfolders), unless searched on purpose */
   noSearch: boolean
+  /** its notes (and its subfolders') can't be edited by accident – see noteReadOnly */
+  readOnly: boolean
 }
 
 /** A folder password, stored only as a salted PBKDF2-SHA-256 hash (hex). */
@@ -82,6 +84,8 @@ export interface NoteData {
   file: { name: string; mime: string; size: number } | null
   /** the web page it was imported from (checked for updates) */
   source: string | null
+  /** read only (true), editable even in a read-only folder (false), or as its folder is (null) – see noteReadOnly */
+  readOnly: boolean | null
 }
 
 export type FolderMap = Y.Map<unknown>
@@ -110,6 +114,7 @@ export function readFolder(m: FolderMap): FolderData {
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
     lock: (m.get('lock') as FolderLock | null | undefined) ?? null,
     noSearch: Boolean(m.get('noSearch')),
+    readOnly: Boolean(m.get('readOnly')),
   }
 }
 
@@ -130,6 +135,7 @@ export function readNote(m: NoteMetaMap): NoteData {
     due: (m.get('due') as NoteData['due'] | undefined) ?? [],
     file: (m.get('file') as NoteData['file'] | undefined) ?? null,
     source: (m.get('source') as string | undefined) ?? null,
+    readOnly: typeof m.get('readOnly') === 'boolean' ? (m.get('readOnly') as boolean) : null,
   }
 }
 

@@ -47,6 +47,7 @@ import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { takeQuickAction } from '../lib/appLinks'
 
 import { printNote } from '../lib/printNote'
+import { setNoteReadOnly, useNoteReadOnly } from '../lib/readOnly'
 
 interface Props {
   noteId: string
@@ -99,6 +100,11 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
   }, [tagChip])
   useEffect(() => () => undoManager.destroy(), [undoManager])
   const ctx = useMemo(() => ({ doc, noteId }), [doc, noteId])
+  // read only (the note, or a folder it's in): nothing in it changes by accident
+  const ro = useNoteReadOnly(noteId)
+  const readOnly = ro.readOnly
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
 
   const editor = useEditor(
     {
@@ -142,9 +148,12 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         FileNode,
         VideoNode,
       ],
+      // (made afresh when it turns read only or back, so its pictures, drawings and checkboxes follow)
+      editable: !readOnly,
       editorProps: {
-        attributes: { class: 'note-content', spellcheck: 'true' },
+        attributes: { class: `note-content${readOnly ? ' read-only' : ''}`, spellcheck: 'true' },
         handlePaste: (view, event) => {
+          if (readOnlyRef.current) return true
           const files = Array.from(event.clipboardData?.files ?? [])
           if (!files.length) return false
           // copied from ReconNotes (a checklist item with its pictures…): the blocks, not just the picture
@@ -154,6 +163,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           return true
         },
         handleDrop: (view, event, _slice, moved) => {
+          if (readOnlyRef.current) return true
           const files = Array.from(event.dataTransfer?.files ?? [])
           if (moved || !files.length) return false
           event.preventDefault()
@@ -163,7 +173,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         },
       },
     },
-    [doc],
+    [doc, readOnly],
   )
   const editorRef = useRef<TiptapEditor | null>(null)
   editorRef.current = editor
@@ -201,7 +211,26 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     if (!editor) return
     const c = () => editor.chain().focus()
     const S = 'This note'
+    const toggleRo = {
+      id: 'read-only',
+      label: readOnly ? 'Make this note editable' : 'Make this note read only',
+      section: S,
+      keywords: 'lock protect edit readonly view',
+      run: () => setNoteReadOnly(noteId, ro, !readOnly),
+    }
+    // read only: only what leaves the note as it is
+    if (readOnly)
+      return registerCommands('editor', [
+        toggleRo,
+        { id: 'find', label: 'Find in note', section: S, shortcut: '⌘F', keywords: 'search', run: () => openFindRef.current() },
+        { id: 'history', label: 'Version history', section: S, keywords: 'restore earlier undo', run: () => setHistoryOpen(true) },
+        { id: 'share', label: 'Share a read-only link', section: S, keywords: 'public url send', run: () => setShareOpen(true) },
+        { id: 'print', label: 'Print or save as PDF', section: S, keywords: 'share pdf export', run: () => void printNote(editor, doc, noteId) },
+        { id: 'compile', label: 'Compile into a clean document with AI', section: S, keywords: 'ai tidy', run: () => void compileNote(editor, noteId).then((id) => onOpenNoteRef.current(id)).catch((e) => errorText(e) && alert(errorText(e))) },
+        { id: 'template', label: 'Save as template', section: S, run: () => void saveAsTemplate(noteId) },
+      ])
     return registerCommands('editor', [
+      toggleRo,
       { id: 'find', label: 'Find in note', section: S, shortcut: '⌘F', keywords: 'search replace', run: () => openFindRef.current() },
       { id: 'drawing', label: 'Add drawing', section: S, keywords: 'pen handwriting sketch ink', run: () => c().insertDrawing().run() },
       ...(scannerAvailable() ? [{ id: 'scan', label: 'Scan a document', section: S, keywords: 'camera paper pages', run: () => void scanIntoNote(editor, noteId) }] : []),
@@ -219,13 +248,13 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       { id: 'template', label: 'Save as template', section: S, run: () => void saveAsTemplate(noteId) },
     ])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, noteId, doc])
+  }, [editor, noteId, doc, readOnly, ro.folderId])
 
   // opened by "Scan" in the widget / Siri: scan straight away
   useEffect(() => {
     if (!editor) return
     const t = setTimeout(() => {
-      if (takeQuickAction(noteId, 'scan') && scannerAvailable()) void scanIntoNote(editor, noteId)
+      if (!readOnlyRef.current && takeQuickAction(noteId, 'scan') && scannerAvailable()) void scanIntoNote(editor, noteId)
     }, 400)
     return () => clearTimeout(t)
   }, [editor, noteId])
@@ -245,7 +274,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
 
   // New, empty note: put the cursor in it.
   useEffect(() => {
-    if (editor && editor.isEmpty) editor.commands.focus('start')
+    if (editor && editor.isEmpty && editor.isEditable) editor.commands.focus('start')
   }, [editor])
 
   /**
@@ -267,7 +296,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       window.addEventListener('pointerup', close, true)
       window.addEventListener('pointercancel', close, true)
     }
-    if (e.pointerType !== 'pen' || !editor) return
+    if (e.pointerType !== 'pen' || !editor || readOnly) return
     if (!inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     const target = e.target as HTMLElement
     // Only start a drawing when the Pencil touches text – never when it taps a
@@ -312,8 +341,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             onHistory={() => setHistoryOpen(true)}
             onShareLink={isSyncConfigured() ? () => setShareOpen(true) : undefined}
             onPrint={() => printNote(editor, doc, noteId)}
+            readOnly={ro}
           />
-          {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
+          {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} canReplace={!readOnly} />}
           {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
             {settingUp && (

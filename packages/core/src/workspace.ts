@@ -337,6 +337,8 @@ export interface FolderRule {
   lockedBy: string | null
   /** left out of search: set on it or a folder it's in */
   noSearch: boolean
+  /** read only: set on it or a folder it's in – the folder it's set on (or null) */
+  readOnlyBy: string | null
 }
 
 /** Locks and "leave out of search" apply to subfolders too. */
@@ -346,14 +348,16 @@ export function folderRules(folders: FolderData[]): Map<string, FolderRule> {
   for (const f of byId.values()) {
     let lockedBy: string | null = null
     let noSearch = false
+    let readOnlyBy: string | null = null
     const seen = new Set<string>()
     for (let cur: FolderData | undefined = f; cur && !seen.has(cur.id); cur = cur.parentId ? byId.get(cur.parentId) : undefined) {
       seen.add(cur.id)
       // the outermost lock wins: one password opens everything inside it
       if (cur.lock) lockedBy = cur.id
       if (cur.noSearch) noSearch = true
+      if (cur.readOnly && !readOnlyBy) readOnlyBy = cur.id
     }
-    out.set(f.id, { lockedBy, noSearch })
+    out.set(f.id, { lockedBy, noSearch, readOnlyBy })
   }
   return out
 }
@@ -420,4 +424,15 @@ export function noteGroup(ws: Y.Doc, noteId: string): string {
     id = readFolder(folders.get(id)!).parentId
   }
   return top
+}
+
+/**
+ * Is a note read only (so it isn't edited by accident)? Set on the note itself, or on its folder or
+ * a folder that's in – unless the note is set to be editable anyway. `by`: where it comes from.
+ */
+export function noteReadOnly(note: Pick<NoteData, 'readOnly' | 'folderId'>, rules: Map<string, FolderRule>): { readOnly: boolean; by: 'note' | 'folder' | null; folderId: string | null } {
+  const folder = note.folderId ? (rules.get(note.folderId)?.readOnlyBy ?? null) : null
+  if (note.readOnly === true) return { readOnly: true, by: 'note', folderId: folder }
+  if (note.readOnly === false) return { readOnly: false, by: folder ? 'note' : null, folderId: folder }
+  return { readOnly: Boolean(folder), by: folder ? 'folder' : null, folderId: folder }
 }

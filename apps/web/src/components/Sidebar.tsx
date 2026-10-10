@@ -29,6 +29,7 @@ import {
   LockOpen,
   SearchX,
   Users,
+  PenOff,
 } from 'lucide-react'
 import {
   buildTree,
@@ -59,6 +60,8 @@ import { openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
 import { refreshShares, useShares } from '../lib/shares'
 import { ShareFolderDialog } from './ShareFolderDialog'
+import { setFolderReadOnly } from '../lib/readOnly'
+import { folderRules } from '@reconnotes/core'
 
 export type View =
   | { kind: 'all' }
@@ -165,6 +168,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // folders shared with others (marked, and shared from the folder's menu)
   const [sharing, setSharing] = useState<string | null>(null)
+  // read-only folders: set on it, or on a folder it's in
+  const readOnlyBy = useMemo(() => {
+    const rules = folderRules(ws.folders)
+    return (id: string) => rules.get(id)?.readOnlyBy ?? null
+  }, [ws.folders])
   const shareLinks = useShares((s) => s.shares)
   const sharedWith = useMemo(() => {
     const by = new Map<string, string[]>()
@@ -355,6 +363,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 <CloudDownload size={13} />
               </span>
             )}
+            {f.readOnly && (
+              <span className="folder-flag" title="Read only – its notes (and its subfolders’) can’t be changed by accident">
+                <PenOff size={13} />
+              </span>
+            )}
             {sharedWith.has(f.id) && (
               <span className="folder-flag shared" title={`Shared with ${sharedWith.get(f.id)!.join(', ')}`}>
                 <Users size={13} />
@@ -432,6 +445,19 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                     title="Fetch its imported web pages again and bring the changed ones up to date"
                   >
                     Check for updates
+                  </button>
+                )}
+                {readOnlyBy(f.id) && readOnlyBy(f.id) !== f.id ? (
+                  <button disabled title="A folder it’s in is read only">
+                    <PenOff size={14} /> Read only (like “{ws.folders.find((x) => x.id === readOnlyBy(f.id))?.name ?? 'its folder'}”)
+                  </button>
+                ) : (
+                  <button
+                    className={f.readOnly ? 'checked' : ''}
+                    title="Its notes (and its subfolders’) open read only, so nothing in them changes by accident – a note can still be made editable on its own"
+                    onClick={() => (setMenuFor(null), setFolderReadOnly(f.id, !f.readOnly))}
+                  >
+                    <PenOff size={14} /> Read only
                   </button>
                 )}
                 <button

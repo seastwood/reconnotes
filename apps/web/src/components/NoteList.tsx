@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
+import { PenOff, ArrowUpDown, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -19,6 +19,8 @@ import {
   updateNote,
   type NoteData,
   type SortMode,
+  folderRules,
+  noteReadOnly,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate } from '../lib/templates'
@@ -70,6 +72,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
     return Boolean(m && !readNote(m).trashedAt)
   }
   const ws = useWorkspace()
+  // read only (the note, or a folder it's in): marked in the list
+  const folderRuleMap = useMemo(() => folderRules(ws.folders), [ws.folders])
   const [sortMenu, setSortMenu] = useState(false)
   const sortBtn = useRef<HTMLButtonElement>(null)
   const [dropAt, setDropAt] = useState<string | null>(null)
@@ -367,6 +371,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           >
             <div className="note-title">
               {n.pinned && <Pin size={12} className="pin" />} {n.file && <FileText size={14} className="file-mark" />}
+              {noteReadOnly(n, folderRuleMap).readOnly && <PenOff size={12} className="pin" aria-label="Read only" />}
               {view.kind !== 'trash' && (allRefs[n.id]?.filter(liveRef).length ?? 0) > 0 && (
                 <button
                   className="ref-badge"

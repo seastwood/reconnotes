@@ -778,6 +778,20 @@ button.text {
 .tb-scroll::-webkit-scrollbar {
   display: none;
 }
+/* a read-only note: no editing buttons, just this */
+.read-only-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.14);
+  white-space: nowrap;
+}
 .tb-scroll {
   display: flex;
   align-items: center;

@@ -8,7 +8,7 @@ import { useUndoManager } from './undo'
  * The find bar under the note's toolbar: type to highlight every match,
  * Enter / ↓ for the next, Shift+Enter / ↑ for the previous, Esc to close.
  */
-export function FindBar({ editor, initial, focus = true, onClose }: { editor: Editor; initial: string; focus?: boolean; onClose: () => void }) {
+export function FindBar({ editor, initial, focus = true, onClose, canReplace = true }: { editor: Editor; initial: string; focus?: boolean; onClose: () => void; canReplace?: boolean }) {
   const input = useRef<HTMLInputElement>(null)
   const [replacing, setReplacing] = useState(false)
   const [replacement, setReplacement] = useState('')
@@ -138,20 +138,22 @@ export function FindBar({ editor, initial, focus = true, onClose }: { editor: Ed
       <button className="icon" onClick={next} disabled={!state.count} aria-label="Next match" title="Next (↩)">
         <ChevronDown size={18} />
       </button>
-      <button
-        className={`icon${replacing ? ' on' : ''}`}
-        onClick={() => setReplacing(!replacing)}
-        aria-label="Replace"
-        title="Find and replace"
-        aria-pressed={replacing}
-      >
-        <Replace size={17} />
-      </button>
+      {canReplace && (
+        <button
+          className={`icon${replacing ? ' on' : ''}`}
+          onClick={() => setReplacing(!replacing)}
+          aria-label="Replace"
+          title="Find and replace"
+          aria-pressed={replacing}
+        >
+          <Replace size={17} />
+        </button>
+      )}
       <button className="icon" onClick={onClose} aria-label="Close find" title="Close (Esc)">
         <X size={18} />
       </button>
     </div>
-    {replacing && (
+    {replacing && canReplace && (
       <div className="find-bar replace-bar">
         <Replace size={16} className="find-icon" aria-hidden="true" />
         <input

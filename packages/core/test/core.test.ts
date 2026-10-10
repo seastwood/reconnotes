@@ -20,6 +20,11 @@ import {
   strokeInLasso,
   trashFolder,
   updateFolder,
+  folderRules,
+  getNotes,
+  noteReadOnly,
+  readNote,
+  updateNote,
   type Stroke,
 } from '../src'
 
@@ -322,5 +327,26 @@ describe('scaleStroke', () => {
     expect(big.size).toBe(6)
     expect(big.id).toBe('b')
     expect(s.pts[3]).toBe(30)
+  })
+})
+
+describe('read-only notes and folders', () => {
+  it('a note, or everything in a folder (and its subfolders) – unless a note is set editable anyway', () => {
+    const doc = new Y.Doc()
+    const top = createFolder(doc, { name: 'Recipes' })
+    const sub = createFolder(doc, { name: 'Soups', parentId: top })
+    const other = createFolder(doc, { name: 'Work' })
+    updateFolder(doc, top, { readOnly: true })
+    const rules = folderRules(listFolders(doc))
+    expect(rules.get(sub)?.readOnlyBy).toBe(top)
+    expect(rules.get(other)?.readOnlyBy).toBeNull()
+    expect(noteReadOnly({ readOnly: null, folderId: sub }, rules)).toEqual({ readOnly: true, by: 'folder', folderId: top })
+    expect(noteReadOnly({ readOnly: false, folderId: sub }, rules)).toEqual({ readOnly: false, by: 'note', folderId: top })
+    expect(noteReadOnly({ readOnly: true, folderId: other }, rules)).toEqual({ readOnly: true, by: 'note', folderId: null })
+    expect(noteReadOnly({ readOnly: null, folderId: null }, rules).readOnly).toBe(false)
+    const id = createNote(doc, { folderId: other })
+    expect(readNote(getNotes(doc).get(id)!).readOnly).toBeNull()
+    updateNote(doc, id, { readOnly: true })
+    expect(readNote(getNotes(doc).get(id)!).readOnly).toBe(true)
   })
 })

@@ -3,6 +3,7 @@ import { findTextFor } from '../lib/findText'
 import { ChevronLeft, ChevronRight, Repeat as RepeatIcon } from 'lucide-react'
 import { isoDate, occurrences, REPEAT_LABELS, type Repeat } from '@reconnotes/core'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
+import { refuseIfReadOnly } from '../lib/readOnly'
 import { completeDue, daysUntil, formatDue, noteDocName } from '@reconnotes/core'
 import { showToast } from '../lib/toast'
 import { useWorkspace } from '../lib/workspace'
@@ -90,7 +91,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
                     type="checkbox"
                     aria-label="Mark done"
                     onClick={(e) => e.stopPropagation()}
-                    onChange={() => void complete(r.noteId, r.id)}
+                    onChange={(e) => (refuseIfReadOnly(r.noteId) ? void (e.target.checked = false) : void complete(r.noteId, r.id))}
                   />
                   <div>
                     <div className="note-title">{r.text || 'Untitled item'}</div>
@@ -175,7 +176,7 @@ function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId
         {items.map((r) => (
           <li key={`${r.id}-${picked}`} className={`note-row due-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId, findTextFor(r.text))}>
             {r.date === picked ? (
-              <input type="checkbox" aria-label="Mark done" onClick={(e) => e.stopPropagation()} onChange={() => void complete(r.noteId, r.id)} />
+              <input type="checkbox" aria-label="Mark done" onClick={(e) => e.stopPropagation()} onChange={(e) => (refuseIfReadOnly(r.noteId) ? void (e.target.checked = false) : void complete(r.noteId, r.id))} />
             ) : (
               <RepeatIcon size={15} className="due-repeat" aria-label="Repeats" />
             )}

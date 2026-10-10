@@ -1,3 +1,4 @@
+import { refuseIfReadOnly } from '../lib/readOnly'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { findTextFor } from '../lib/findText'
 import { Repeat as RepeatIcon } from 'lucide-react'
@@ -60,6 +61,7 @@ export function TasksList({ activeNoteId, onOpen }: { activeNoteId: string | nul
   }, [key, load])
 
   const toggle = async (t: Task) => {
+    if (refuseIfReadOnly(t.noteId)) return
     // gone from this list straight away (a repeating one comes back with its next date)
     setTasks((cur) => cur?.filter((x) => !(x.noteId === t.noteId && x.i === t.i)) ?? cur)
     try {

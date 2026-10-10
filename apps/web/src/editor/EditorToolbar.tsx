@@ -60,7 +60,10 @@ import {
   Table2,
   Globe,
   ScanLine,
+  Lock,
+  LockOpen,
 } from 'lucide-react'
+import { setNoteReadOnly, type ReadOnlyState } from '../lib/readOnly'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
 import { insertFiles } from './nodes'
@@ -100,6 +103,8 @@ interface Props {
   onShareLink?: () => void
   /** print / share as PDF */
   onPrint?: () => Promise<void>
+  /** read only (the note, or a folder it's in): no editing buttons, only what leaves it as it is */
+  readOnly?: ReadOnlyState
 }
 
 type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
@@ -195,7 +200,10 @@ export function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote, onHistory, onShareLink, onPrint }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote: linkNote, onHistory, onShareLink, onPrint, readOnly: ro }: Props) {
+  const readOnly = Boolean(ro?.readOnly)
+  // read only: nothing offered that would change the note
+  const onLinkNote = readOnly ? undefined : linkNote
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | null>(null)
@@ -345,6 +353,14 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       )}
       {/* the middle buttons scroll sideways when space is short; navigation
           (left) and AI + ⋯ (right) always stay in view */}
+      {readOnly && (
+        <div className="tb-scroll">
+          <span className="read-only-badge" title={ro?.by === 'folder' ? `Read only, like everything in “${ro.folderName}” – ⋯ › Make editable to change it` : 'Read only – ⋯ › Make editable to change it'}>
+            <Lock size={14} /> Read only
+          </span>
+        </div>
+      )}
+      {!readOnly && (
       <div className="tb-scroll">
       <button className="tb undo" onClick={() => um?.undo()} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
         <Undo2 size={20} />
@@ -526,6 +542,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={onFiles} />
       <input ref={fileRef} type="file" multiple hidden onChange={onFiles} />
       </div>
+      )}
 
       {busy && <Loader2 size={18} className="spin" aria-label={busy} />}
       <button
@@ -541,6 +558,23 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       </button>
       {menu === 'more' && (
         <Popover anchorRef={moreBtn} align="right" onClose={() => setMenu(null)}>
+            {ro && (
+              <>
+                <button
+                  className={readOnly ? 'checked' : ''}
+                  onClick={() => (setMenu(null), setNoteReadOnly(noteId, ro, !readOnly))}
+                  title={readOnly ? 'Allow editing this note again' : 'Nothing in this note can be changed by accident until you make it editable again'}
+                >
+                  {readOnly ? <LockOpen size={16} /> : <Lock size={16} />}
+                  <span>
+                    {readOnly ? (ro.folderId ? 'Make this note editable' : 'Make editable') : ro.folderId && ro.own === false ? 'Make read only again' : 'Make read only'}
+                    {readOnly && ro.folderId && <span className="menu-sub">“{ro.folderName}” stays read only</span>}
+                    {!readOnly && ro.folderId && ro.own === false && <span className="menu-sub">Like the rest of “{ro.folderName}”</span>}
+                  </span>
+                </button>
+                <div className="menu-sep" />
+              </>
+            )}
             <div className="menu-label">AI</div>
             <button
               disabled={Boolean(busy)}
@@ -549,6 +583,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             >
               <Sparkles size={16} /> Compile into a clean document
             </button>
+            {!readOnly && (
+              <>
             <button onClick={() => (setMenu(null), void run('Summarising…', () => noteAction(editor, noteId, 'summary')))}>
               <ScrollText size={16} /> Summarise note
             </button>
@@ -558,7 +594,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor, noteId)))} title="Fix spelling, grammar and clarity of the selected text">
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
             </button>
-            {source && (
+              </>
+            )}
+            {source && !readOnly && (
               <button onClick={() => (setMenu(null), void tidy())} title="Take out the website’s leftovers – share buttons, ratings, ads, newsletter boxes. Nothing is rewritten; Undo puts it back.">
                 <Eraser size={16} /> Tidy with AI
               </button>
@@ -573,9 +611,11 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 <button onClick={() => (setMenu(null), cook())}>
                   <ChefHat size={16} /> Cook mode
                 </button>
-                <button onClick={() => (setMenu(null), scale())}>
-                  <Scale size={16} /> Scale servings…
-                </button>
+                {!readOnly && (
+                  <button onClick={() => (setMenu(null), scale())}>
+                    <Scale size={16} /> Scale servings…
+                  </button>
+                )}
                 <button onClick={() => (setMenu(null), void shop())}>
                   <ShoppingCart size={16} /> Add ingredients to shopping list
                 </button>
@@ -616,7 +656,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 <LayoutTemplate size={16} /> Save as template
               </button>
             )}
-            {source && (
+            {source && !readOnly && (
               <button onClick={() => (setMenu(null), void checkForUpdates({ noteId }))} title={`Fetch ${source} again and bring this note up to date if the page changed`}>
                 <RefreshCw size={16} /> Check page for updates
               </button>
@@ -627,6 +667,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             <button onClick={() => updateNote(workspaceDoc, noteId, { pinned: !pinned })}>
               {pinned ? <PinOff size={16} /> : <Pin size={16} />} {pinned ? 'Unpin' : 'Pin to top'}
             </button>
+            {!readOnly && (
             <button
               onClick={() =>
                 run('Converting handwriting…', async () => {
@@ -638,6 +679,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             >
               <ScanText size={16} /> Convert all handwriting to text
             </button>
+            )}
             {onHistory && (
               <button
                 onClick={() => {
