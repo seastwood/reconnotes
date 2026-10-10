@@ -519,8 +519,8 @@ button.text {
 .menu.floating {
   position: fixed;
   z-index: 200;
-  /* never wider than the screen (long items wrap) */
-  max-width: calc(100vw - 16px);
+  /* a menu's width, never wider than the screen (long items wrap) */
+  max-width: min(360px, calc(100vw - 16px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -590,6 +590,12 @@ button.text {
   font-size: 12px;
   color: var(--muted);
   padding: 8px 10px 2px;
+  /* a long name (a file name with a web address in it): two lines at most, broken anywhere */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .menu .st-title {
   font-size: 24px;
@@ -699,6 +705,8 @@ button.text {
 /* a note's ••• menu button: shown on hover with a mouse, always with a finger */
 .row-more {
   position: absolute;
+  /* over the title (a long one runs under it until it's cut short) */
+  z-index: 2;
   right: 6px;
   top: 50%;
   transform: translateY(-50%);
