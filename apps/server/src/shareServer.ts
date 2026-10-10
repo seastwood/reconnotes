@@ -4,6 +4,7 @@ import * as Y from 'yjs'
 import { WORKSPACE_DOC, extractNote, folderRules, getFolders, getNotes, noteDocName, readFolder, readNote, type FolderData, type NoteData } from '@reconnotes/core'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
+import { COOK_SCRIPT, cookPage, recipeIn } from './shareCook'
 import { SHARE_HEADERS, type ShareRow, type Shares, drawingSvg, esc, noteHas, pageShell, sharePage, sharedNote } from './shares'
 
 /**
@@ -50,11 +51,13 @@ function failed(keys: string[]) {
   if (tries.size > 10_000) tries.clear()
 }
 
-const send = (res: http.ServerResponse, status: number, html: string, head = false, form = false) => {
+const send = (res: http.ServerResponse, status: number, html: string, head = false, form = false, script = false) => {
   res.writeHead(status, {
     ...SHARE_HEADERS,
     // the passcode page's form may send to this address (any other page: no forms at all)
     ...(form ? { 'Content-Security-Policy': SHARE_HEADERS['Content-Security-Policy'].replace("form-action 'none'", "form-action 'self'") } : {}),
+    // cook mode runs its one fixed script, from this address (no other page runs any)
+    ...(script ? { 'Content-Security-Policy': `${SHARE_HEADERS['Content-Security-Policy']}; script-src 'self'` } : {}),
     'Content-Type': 'text/html; charset=utf-8',
   })
   res.end(head ? undefined : html)
@@ -193,15 +196,22 @@ const readForm = (req: http.IncomingMessage) =>
 export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
   const head = req.method === 'HEAD'
   const path = url.pathname.replace(/\/$/, '')
+  // cook mode's script (the same for everyone; nothing of anyone's in it)
+  if (path === '/s/_/cook.js') {
+    res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=3600' })
+    return res.end(head ? undefined : COOK_SCRIPT), true
+  }
   // a note's own link (/s/<link>, its files /s/<link>/a|d/…)
-  const m = new RegExp(`^/s/${LINK}(?:/(a|d)/${ID}(\\.svg)?)?$`).exec(path)
+  const m = new RegExp(`^/s/${LINK}(?:/(a|d)/${ID}(\\.svg)?|/(cook))?$`).exec(path)
   const share = m ? ctx.shares.get(m[1]) : null
   if (m && (!share || share.kind === 'note')) {
     if (req.method !== 'GET' && !head) return gone(res), true
     const shared = sharedNote(ctx.shares, ctx.sync, m[1])
     if (!shared) return gone(res, head), true
     ctx.shares.opened(m[1])
-    if (!m[2]) return send(res, 200, sharePage(`/s/${m[1]}`, shared.title, shared.doc, shared.updatedAt), head), true
+    const recipe = recipeIn(shared.doc)
+    if (m[5]) return recipe ? send(res, 200, cookPage(shared.title, recipe, `/s/${m[1]}`), head, false, true) : gone(res, head), true
+    if (!m[2]) return send(res, 200, sharePage(`/s/${m[1]}`, shared.title, shared.doc, shared.updatedAt, { cookHref: recipe ? `/s/${m[1]}/cook` : undefined }), head), true
     if (m[2] === 'd') {
       if (!noteHas(shared.doc, 'drawing', m[3])) return gone(res, head), true
       res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'image/svg+xml' })
@@ -212,7 +222,7 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
   }
 
   // a folder's link
-  const f = new RegExp(`^/s/${LINK}(?:/(unlock|f/${ID}|n/${ID}(?:/(a|d)/${ID}(\\.svg)?)?))?$`).exec(path)
+  const f = new RegExp(`^/s/${LINK}(?:/(unlock|f/${ID}|n/${ID}(?:/(a|d)/${ID}(\\.svg)?|/(cook))?))?$`).exec(path)
   if (!f) return false
   const link = f[1]
   const folderShare = ctx.shares.get(link)
@@ -260,9 +270,12 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
   const doc = note ? ctx.sync.getDoc(noteDocName(note.id)) : null
   if (!note || !doc) return gone(res, head), true
   const base = `/s/${link}/n/${note.id}`
+  const title = note.title || extractNote(doc).title || 'Note'
+  const recipe = recipeIn(doc)
+  if (f[8]) return recipe ? send(res, 200, cookPage(title, recipe, base), head, false, true) : gone(res, head), true
   if (!f[5]) {
-    const title = note.title || extractNote(doc).title || 'Note'
     const html = sharePage(base, title, doc, note.updatedAt, {
+      cookHref: recipe ? `${base}/cook` : undefined,
       noteHref: (id) => (notes.has(id) ? `/s/${link}/n/${id}` : null),
       top: crumbs(link, folders, folderShare.folderId!, note.folderId!, title),
     })

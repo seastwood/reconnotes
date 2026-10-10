@@ -231,7 +231,7 @@ const safeHref = (h: string) => (/^(https?:|mailto:)/i.test(h.trim()) ? h.trim()
  * another note that's shared too (else it's shown as plain words); `opts.top`: a bar above it (the
  * way back to the folder).
  */
-export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: number, opts: { noteHref?: (noteId: string) => string | null; top?: string } = {}): string {
+export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: number, opts: { noteHref?: (noteId: string) => string | null; top?: string; cookHref?: string } = {}): string {
   const transcripts = getTranscripts(doc)
 
   const inline = (el: Y.XmlElement): string => {
@@ -344,7 +344,9 @@ export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: nu
   const when = new Date(updatedAt || Date.now()).toUTCString()
   return pageShell(
     title,
-    `${opts.top ?? ''}<div class="meta">Shared from ReconNotes · updated ${esc(when)}</div><div class="note">${body}</div><footer>Read-only copy. It shows the note as it is now.</footer>`,
+    `${opts.top ?? ''}<div class="meta">Shared from ReconNotes · updated ${esc(when)}</div>${
+      opts.cookHref ? `<a class="cook-link" href="${esc(opts.cookHref)}">🍳 Cook mode</a>` : ''
+    }<div class="note">${body}</div><footer>Read-only copy. It shows the note as it is now.</footer>`,
   )
 }
 
@@ -399,6 +401,7 @@ form.pass { margin-top: 24px; display: grid; gap: 10px; max-width: 320px; }
 form.pass input { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
 form.pass button { font: inherit; font-weight: 600; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--accent); color: #1d1d1f; }
 .error { color: #d92d20; }
+.cook-link { display: inline-block; margin: 0 0 18px; padding: 10px 16px; border-radius: 12px; background: var(--accent); color: #1d1d1f; font-weight: 700; text-decoration: none; }
 </style></head>
 <body><main>${inner}</main></body></html>`
 }

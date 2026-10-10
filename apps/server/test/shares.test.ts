@@ -221,3 +221,67 @@ describe('a shared folder', () => {
     await json('PUT', '/api/share-address', { address: '' })
   })
 })
+
+describe('cook mode on a shared recipe', () => {
+  const el = (name: string, kids: (Y.XmlElement | Y.XmlText)[] = [], attrs: Record<string, unknown> = {}) => {
+    const e = new Y.XmlElement(name)
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v as string)
+    e.insert(0, kids)
+    return e
+  }
+  const p = (t: string) => el('paragraph', [new Y.XmlText(t)])
+  const json = (method: string, url: string, body?: unknown) =>
+    fetch(base + url, { method, headers: { ...auth, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => r.json())
+
+  it('a Cook mode button on a recipe; the page has its ingredients and steps, and runs only its own script', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => {
+      createFolder(ws, { id: 'cookbook0001', name: 'Cookbook' })
+      createNote(ws, { id: 'stew00000001', title: 'Stew', folderId: 'cookbook0001' })
+      createNote(ws, { id: 'plain0000001', title: 'Shopping', folderId: 'cookbook0001' })
+    })
+    await app.sync.change(noteDocName('stew00000001'), (doc) => {
+      getContent(doc).insert(0, [
+        el('heading', [new Y.XmlText('Stew')], { level: 1 }),
+        el('heading', [new Y.XmlText('Ingredients')], { level: 2 }),
+        el('taskList', [el('taskItem', [p('2 carrots')], { checked: false }), el('taskItem', [p('1 <b>onion</b>')], { checked: false })]),
+        el('heading', [new Y.XmlText('Steps')], { level: 2 }),
+        el('orderedList', [el('listItem', [p('Chop everything.')]), el('listItem', [p('Simmer <script>alert(1)</script> 2 hours.')])]),
+      ])
+    })
+    await app.sync.change(noteDocName('plain0000001'), (doc) => void getContent(doc).insert(0, [p('Milk')]))
+    const made = await json('POST', '/api/folders/cookbook0001/shares', { name: 'Sydney' })
+    const link = `${sharePort}/s/${made.id}`
+
+    const page = await (await fetch(`${link}/n/stew00000001`)).text()
+    expect(page).toContain(`href="/s/${made.id}/n/stew00000001/cook"`)
+    expect(await (await fetch(`${link}/n/plain0000001`)).text()).not.toContain('Cook mode')
+    expect((await fetch(`${link}/n/plain0000001/cook`)).status).toBe(404)
+
+    const cook = await fetch(`${link}/n/stew00000001/cook`)
+    const html = await cook.text()
+    expect(cook.status).toBe(200)
+    expect(cook.headers.get('content-security-policy')).toContain("script-src 'self'")
+    expect(html).toContain('<span>2 carrots</span>')
+    expect(html).toContain('1 &lt;b&gt;onion&lt;/b&gt;')
+    expect(html).toContain('Simmer &lt;script&gt;alert(1)&lt;/script&gt; 2 hours.')
+    expect(html).not.toMatch(/<script>(?!<\/script>)/) // no script of its own: only the fixed file
+    expect(html).toContain('<script src="/s/_/cook.js"></script>')
+    expect(html).toContain(`href="/s/${made.id}/n/stew00000001"`) // back to the recipe
+
+    const js = await fetch(`${sharePort}/s/_/cook.js`)
+    expect(js.headers.get('content-type')).toContain('javascript')
+    expect(await js.text()).toContain('wakeLock')
+    // the other shared pages still run nothing
+    expect((await fetch(`${link}/n/stew00000001`)).headers.get('content-security-policy')).not.toContain('script-src')
+
+    // with a passcode: cook mode asks for it too
+    await json('PATCH', `/api/shares/${made.id}`, { passcode: 'carrots!' })
+    expect(await (await fetch(`${link}/n/stew00000001/cook`)).text()).toContain('Enter the passcode')
+  })
+
+  it('a single shared recipe note has cook mode too', async () => {
+    const made = await json('POST', '/api/notes/stew00000001/share')
+    expect(await (await fetch(`${sharePort}${made.path}`)).text()).toContain(`href="${made.path}/cook"`)
+    expect((await fetch(`${sharePort}${made.path}/cook`)).status).toBe(200)
+  })
+})

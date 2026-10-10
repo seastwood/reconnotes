@@ -5,7 +5,8 @@ Share a folder with someone, and they can read everything in it, read-only and a
 ## What they see, and what they can't
 
 - **They see** the folder and its subfolders, every note in them, and the notes' pictures, drawings, recordings (with transcripts) and files, exactly as they are now. A link from one shared note to another works.
-- **They can't** edit anything, search your library, use Ask or the AI, or see version history.
+- **Recipes have cook mode**: a 🍳 **Cook mode** button on any recipe note (one with *Ingredients* and *Steps*) opens the same view as in the app. It shows all the steps as tiles with the ingredients to tick off, or one step at a time with Next and Back. Tap a tile to see it big. Over `https://` the screen stays on while it's open. Ticks are for that visit and change nothing in your note.
+- **They can't** edit anything (cook mode's ticks stay on their screen), search your library, use Ask or the AI, or see version history.
 - **They can't reach** notes outside the folder. A link from a shared note to one outside it shows only its words, not the note. Folders with a password (and everything in them) are left out, and so are deleted notes and templates.
 - Move a note out of the folder, and it's no longer shared. What's in a shared folder is what's shared, so keep in it only what you mean to share.
 
