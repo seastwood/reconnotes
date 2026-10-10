@@ -906,27 +906,42 @@ button.text {
 }
 /* where the note is (its folders): a bar under the note's buttons, folding to a tab */
 .note-path {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--note-path-h);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  padding: 4px 4px 4px 10px;
+  padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   color: var(--muted);
   font-size: 13px;
-  max-height: 44px;
-  overflow: hidden;
   transition:
-    max-height 0.2s ease,
-    padding 0.2s ease,
-    opacity 0.15s ease;
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
-/* scrolled down the note: slid away */
+/* scrolled down the note: slid up under the buttons – over the note, so the note doesn't move */
 .note-path.away {
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-bottom-width: 0;
+  transform: translateY(-100%);
   opacity: 0;
+  pointer-events: none;
+}
+.editor {
+  --note-path-h: 38px;
+}
+/* room at the top of the note for the bar over it */
+.editor:has(.note-path) .editor-scroll {
+  padding-top: var(--note-path-h);
+  /* (what find scrolls to isn't left under it) */
+  scroll-padding-top: var(--note-path-h);
+}
+/* the find bar stays over the path sliding up under it */
+.find-bar {
+  position: relative;
+  z-index: 6;
 }
 /* the crumbs: in one line, never squeezed into each other – scrolled sideways when they don't fit */
 .note-path-crumbs {

@@ -36,7 +36,7 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
   const bar = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!open) return
-    const scroller = bar.current?.parentElement?.querySelector<HTMLElement>(':scope > .editor-scroll')
+    const scroller = bar.current?.closest('.editor')?.querySelector<HTMLElement>(':scope > .editor-scroll')
     if (!scroller) return
     let last = scroller.scrollTop
     // how far it has gone the same way: a small jiggle doesn't flip it
@@ -82,39 +82,42 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
       </div>
     )
   return (
-    <nav ref={bar} className={`note-path${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
-      <div className="note-path-crumbs" ref={crumbs}>
-        <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
-          <Inbox size={13} aria-hidden /> All Notes
-        </button>
-        {sep}
-        {path.length ? (
-          path.map((f) => (
-            <span key={f.id} className="note-path-part">
-              <button title={`Show the folder “${f.name}”`} onClick={() => onShow({ kind: 'folder', folderId: f.id })}>
-                <Folder size={13} aria-hidden />{' '}
-                <span className="note-path-name" title={f.name}>
-                  {f.name}
-                </span>
+    // over the top of the note (which leaves room for it), so sliding away moves nothing under your finger
+    <div className="note-path-hang">
+      <nav ref={bar} className={`note-path${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
+        <div className="note-path-crumbs" ref={crumbs}>
+          <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
+            <Inbox size={13} aria-hidden /> All Notes
+          </button>
+          {sep}
+          {path.length ? (
+            path.map((f) => (
+              <span key={f.id} className="note-path-part">
+                <button title={`Show the folder “${f.name}”`} onClick={() => onShow({ kind: 'folder', folderId: f.id })}>
+                  <Folder size={13} aria-hidden />{' '}
+                  <span className="note-path-name" title={f.name}>
+                    {f.name}
+                  </span>
+                </button>
+                {sep}
+              </span>
+            ))
+          ) : (
+            <span className="note-path-part">
+              <button title="Show the notes in no folder" onClick={() => onShow({ kind: 'unfiled' })}>
+                <FolderMinus size={13} aria-hidden /> Not in a folder
               </button>
               {sep}
             </span>
-          ))
-        ) : (
-          <span className="note-path-part">
-            <button title="Show the notes in no folder" onClick={() => onShow({ kind: 'unfiled' })}>
-              <FolderMinus size={13} aria-hidden /> Not in a folder
-            </button>
-            {sep}
+          )}
+          <span className="note-path-here" aria-current="page">
+            <FileText size={13} aria-hidden /> <span className="note-path-name">{title}</span>
           </span>
-        )}
-        <span className="note-path-here" aria-current="page">
-          <FileText size={13} aria-hidden /> <span className="note-path-name">{title}</span>
-        </span>
-      </div>
-      <button className="note-path-fold" title="Hide the path" aria-label="Hide the path" aria-expanded onClick={() => setOpen(false)}>
-        <ChevronUp size={14} aria-hidden />
-      </button>
-    </nav>
+        </div>
+        <button className="note-path-fold" title="Hide the path" aria-label="Hide the path" aria-expanded onClick={() => setOpen(false)}>
+          <ChevronUp size={14} aria-hidden />
+        </button>
+      </nav>
+    </div>
   )
 }
