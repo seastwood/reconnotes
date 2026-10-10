@@ -61,7 +61,7 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 {"name": "", "description": "", "servings": "", "prep": "", "cook": "", "total": "", "ingredients": [""], "steps": [{"title": "", "text": ""}], "notes": [""], "nutrition": [["Calories", ""]]}
 
 - Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
-- name: the recipe's title – the big name on the front (e.g. "Lemon Thyme Pork with Jasmine Rice"), not the time or calorie line.
+- name: the recipe's title – the big name on the front with the line under it, if it has one (e.g. "Lemon Thyme Pork with Jasmine Rice", "Balsamic Tomato & Herb Chicken over Buttery Garlic Spaghetti"), not the time or calorie line. A letter missing where the card has a hole punched in it ("ALM ND", "TOM TO"): fill it in.
 - ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. An ingredient whose amount you can't read: just its name.
 - Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
 - steps: in order, each with its title if it has one ("Cook the beef") and its text.
@@ -100,6 +100,9 @@ function parseJson(reply: string): Structured | null {
 /** an amount: a number (or fraction) and its unit – "2 TBSP", "½ Cup", "12 oz", "1" */
 const AMOUNT = String.raw`(?:\d+(?:[.,/]\d+)?|[½⅓⅔¼¾⅛])(?:\s*[½⅓⅔¼¾⅛])?(?:\s*(?:tbsps?|tsps?|tablespoons?|teaspoons?|oz|ounces?|cups?|lbs?|pounds?|g|kg|ml|l|cloves?|pieces?|cans?|slices?|qt|pt|unit|units|pkg|packages?)\b\.?)?`
 
+/** an amount with its unit ("1 TBSP", "½ Cup") – not a bare number */
+const UNIT_AMOUNT = String.raw`(?:\d+(?:[.,/]\d+)?|[½⅓⅔¼¾⅛])(?:\s*[½⅓⅔¼¾⅛])?\s*(?:tbsps?|tsps?|tablespoons?|teaspoons?|oz|ounces?|cups?|lbs?|pounds?|g|kg|ml|cloves?|slices?|cans?)\b\.?`
+
 /**
  * An ingredient with amounts for different numbers of people side by side: the first amount, the
  * other(s), and the ingredient. "2 TBSP | 4 TBSP • Sour Cream", "1|2 • Lemon", "Butter (1 TBSP | 2 TBSP)".
@@ -112,6 +115,9 @@ export function splitColumns(raw: string): { first: string; other: string; name:
   if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/^\(contains:[^)]*\)\s*[•·]?\s*/i, '').trim() }
   // after the name, as in a card's table: "Jasmine Rice ½ Cup | 1 Cup"
   m = new RegExp(`^(.*?\\p{L}.*?)\\s+(${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\s*$`, 'iu').exec(t)
+  if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/\s*[•·:–-]\s*$/, '').trim() }
+  // the bar not read at all, between two amounts with units: "Italian Seasoning 1 TBSP 1 TBSP"
+  m = new RegExp(`^(.*?\\p{L}.*?)\\s+(${UNIT_AMOUNT})\\s+(${UNIT_AMOUNT})\\s*$`, 'iu').exec(t)
   if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/\s*[•·:–-]\s*$/, '').trim() }
   return null
 }
@@ -128,11 +134,64 @@ export function fixBars(t: string): string {
 }
 
 /** Kitchen equipment, not food: a pan, a pot, a baking sheet, paper towels, a bowl… (with no amount). */
-export const isEquipment = (t: string) =>
-  !/\d|[½⅓⅔¼¾⅛]/.test(t) &&
+export const isEquipment = (raw: string) => {
+  // ("*Baking sheet", "2 Small bowls": a mark, or how many – still no amount of anything)
+  const t = raw.replace(/^[\s*•·-]+/, '').replace(/^\d+\s+(?=\p{L})/u, '')
+  return !/\d|[½⅓⅔¼¾⅛]/.test(t) &&
   /^(?:an?\s+)?(?:(?:large|small|medium|big|non-?stick|oven-?proof|mixing|sauce|baking|sheet|frying|grill|cast[- ]iron)\s+)*(?:pans?|pots?|skillets?|baking sheets?|sheet pans?|paper towels?|bowls?|whisk|zester|grater|colander|strainer|peeler|cutting board|knife|tongs|spatula|blender|food processor|foil|parchment(?: paper)?|plastic wrap|microplane|measuring cups?|measuring spoons?|dutch oven|wok|baking dish|casserole dish)$/i.test(
     t.trim(),
   )
+}
+
+/** What everyone has at home – salt, pepper (with no amount): "From your pantry", not an ingredient. */
+export const isPantry = (raw: string) => /^(?:(?:kosher|sea|table|fine)\s+)?salt(?:\s*(?:&|and)\s*(?:black\s+)?pepper)?$|^(?:(?:ground\s+)?black\s+)?pepper$/i.test(raw.replace(/^[\s*•·-]+/, '').trim())
+
+const ALLERGEN = String.raw`(?:milk|eggs?|wheat|soy|fish|shellfish|tree\s+nuts?|peanuts?|sesame|gluten)`
+/**
+ * An ingredient line tidied: an allergen note ("(Contains: Milk)", "Contains: Wheat") taken out and
+ * given back, a stray mark first ("*", "•"), and a lone letter last (from an icon read as text).
+ */
+export function tidyIngredient(raw: string): { text: string; allergens: string[] } {
+  const allergens: string[] = []
+  const text = raw
+    .replace(new RegExp(String.raw`\(?\s*contains:?\s*((?:${ALLERGEN}\s*(?:,|and|&)?\s*)+)\)?`, 'gi'), (_all, list: string) => {
+      for (const a of list.split(/,|and|&/)) if (a.trim()) allergens.push(a.trim().replace(/^\w/, (c) => c.toUpperCase()))
+      return ' '
+    })
+    .replace(/^[\s*•·-]+/, '')
+    .replace(/\s+[a-z]$/, '')
+    .replace(/\s*[•·]\s*$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return { text, allergens }
+}
+
+/**
+ * Steps numbered on the card ("4 COOK VEGGIES: …"): in the card's order, without the numbers – they
+ * come back in the order they were read, which on a card in columns isn't always the card's.
+ */
+export function inCardOrder(steps: string[]): string[] {
+  const num = (t: string) => /^(\d{1,2})\s*[.):]?\s+(?=\S)/.exec(t)
+  const numbered = steps.map((t) => ({ t, m: num(t) }))
+  const have = numbered.filter((x) => x.m)
+  if (have.length < Math.max(2, steps.length * 0.6)) return steps
+  const nums = have.map((x) => Number(x.m![1]))
+  const order = new Set(nums).size === nums.length
+  const out = numbered.map((x, i) => ({ t: x.m ? x.t.slice(x.m[0].length) : x.t, n: x.m ? Number(x.m[1]) : i + 0.5 }))
+  return (order ? out.sort((a, b) => a.n - b.n) : out).map((x) => x.t)
+}
+
+/** A name in capitals ("APRICOT, ALMOND & CHICKPEA TAGINE") in title case ("Apricot, Almond & Chickpea Tagine"). */
+export function titleCase(name: string): string {
+  const letters = name.replace(/[^\p{L}]/gu, '')
+  if (!letters || letters.replace(/[^\p{Lu}]/gu, '').length < letters.length * 0.8) return name
+  const small = new Set(['a', 'an', 'and', 'or', 'of', 'with', 'over', 'on', 'in', 'the', 'to', 'for', 'by'])
+  return name
+    .toLowerCase()
+    .split(/(\s+)/)
+    .map((w, i) => (i > 0 && small.has(w) ? w : w.replace(/\p{L}/u, (c) => c.toUpperCase())))
+    .join('')
+}
 
 const str = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : typeof v === 'number' ? String(v) : '')
 
@@ -190,8 +249,15 @@ export async function recipeFromPhotos(
   }
   const columns: string[] = []
   const kitchen: string[] = []
+  const pantry: string[] = []
+  const allergens = new Set<string>()
   const ingredients = (s.ingredients ?? [])
     .map(str)
+    .map((t) => {
+      const x = tidyIngredient(t)
+      x.allergens.forEach((a) => allergens.add(a))
+      return x.text
+    })
     .filter(keep)
     .map((t) => {
       // amounts for 2 and 4 people side by side ("2 TBSP | 4 TBSP • Sour Cream", "Butter (1 TBSP | 2 TBSP)"): the first
@@ -201,7 +267,9 @@ export async function recipeFromPhotos(
     })
     .filter((t) => {
       // a pan, a sheet, paper towels… (no amount): equipment, not an ingredient
-      if (isEquipment(t)) return (kitchen.push(t), false)
+      if (isEquipment(t)) return (kitchen.push(t.replace(/^[\s*•·-]+/, '')), false)
+      // salt, pepper: from home
+      if (isPantry(t)) return (pantry.push(t.replace(/^[\s*•·-]+/, '')), false)
       return true
     })
     .map(mark)
@@ -209,17 +277,24 @@ export async function recipeFromPhotos(
     .map((x) => (typeof x === 'string' ? { title: '', text: str(x) } : { title: str((x as Record<string, unknown>)?.title), text: str((x as Record<string, unknown>)?.text) }))
     .filter((x) => keep(`${x.title} ${x.text}`.trim()))
     .map((x) => mark(x.title && !x.text.toLowerCase().startsWith(x.title.toLowerCase()) ? `${x.title}: ${x.text}` : x.text || x.title))
-  if (!ingredients.length && !steps.length) throw new Error('No ingredients or steps could be found in the photos.')
+  const ordered = inCardOrder(steps)
+  if (!ingredients.length && !ordered.length) throw new Error('No ingredients or steps could be found in the photos.')
   const notes = (s.notes ?? [])
     .map(str)
     // the other column's amounts are worked out here (not the AI's version, often with gaps: "Zucchini: ?"); an allergen on its own, a gap
     .filter((n) => !/also on the card|\bfor n people\b/i.test(n) && !/^\(?contains:[^)]*\)?\.?$/i.test(n) && !/:\s*\?|\?\s*(?:oz|,|\))/i.test(n))
+    // a heading with nothing under it ("Bust out"), or a gap left for later ("You'll need: …")
+    .filter((n) => !/^(?:bust out|you['’]ll need|from your pantry|ingredients|notes?)\s*:?$/i.test(n) && !/:\s*(?:\.{3}|…)\s*$/.test(n))
+    .map((n) => tidyIngredient(n).text)
     .filter(keep)
     .map(mark)
   // what was taken out of the ingredients goes in the notes (unless the AI already said so there)
   const said = notes.join(' ').toLowerCase()
   const needed = kitchen.filter((k) => !said.includes(k.toLowerCase()))
   if (needed.length) notes.unshift(`You’ll need: ${needed.join(', ')}`)
+  const fromHome = pantry.filter((k) => !said.includes(k.toLowerCase()))
+  if (fromHome.length) notes.push(`From your pantry: ${fromHome.join(', ')}`)
+  if (allergens.size && !/\bcontains\b|allergen/i.test(said)) notes.push(`Contains: ${[...allergens].filter((a, i, all) => all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i).join(', ')}`)
   if (columns.length) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)
   const nutrition = (s.nutrition ?? [])
     .map((x) => (Array.isArray(x) ? ([str(x[0]), str(x[1])] as [string, string]) : (['', ''] as [string, string])))
@@ -239,7 +314,7 @@ export async function recipeFromPhotos(
     if (cook && cook === total) return { cook: undefined, total }
     return { cook, total }
   }
-  const name = str(s.name) && grounded(str(s.name), readWords) >= 0.5 ? str(s.name) : texts[0].split('\n').find((l) => l.trim().length > 3)?.trim().slice(0, 80) || 'Recipe'
+  const name = titleCase(str(s.name) && grounded(str(s.name), readWords) >= 0.5 ? str(s.name) : texts[0].split('\n').find((l) => l.trim().length > 3)?.trim().slice(0, 80) || 'Recipe')
   const recipe: Recipe = {
     name,
     description: str(s.description) && grounded(str(s.description), readWords) >= 0.6 ? str(s.description) : undefined,
@@ -247,7 +322,7 @@ export async function recipeFromPhotos(
     prep: time(s.prep),
     ...cookAndTotal(),
     ingredients,
-    steps: [{ steps }],
+    steps: [{ steps: ordered }],
     nutrition,
   }
 

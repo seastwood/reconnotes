@@ -379,3 +379,38 @@ export function readingOrderText(found: TextBox[]): string {
     })
     .join('\n\n')
 }
+
+/**
+ * Which way up a photo of text is: the quarter turns clockwise that set it upright (0 – it is
+ * already; 1, 2, 3), or null when it can't tell. Apple's text recognition reads text on its side
+ * too, so how well it reads doesn't tell; which way its words run does: left to right when upright,
+ * down the page when the photo was turned clockwise, up it when turned the other way, right to left
+ * when upside down. `aspect`: the photo's width over its height (the boxes are 0–1 of each).
+ */
+export function uprightTurns(found: { text: string; x: number; y: number; w: number; h: number; words?: { x: number; y: number; w: number; h: number }[] }[], aspect: number): number | null {
+  const votes = [0, 0, 0, 0]
+  let total = 0
+  for (const l of found) {
+    const ws = l.words ?? []
+    if (ws.length < 2) continue
+    const a = ws[0]
+    const b = ws[ws.length - 1]
+    const dx = (b.x + b.w / 2 - (a.x + a.w / 2)) * aspect
+    const dy = b.y + b.h / 2 - (a.y + a.h / 2)
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 0.01) continue
+    const turns = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 0 : 2) : dy > 0 ? 3 : 1
+    votes[turns] += ws.length
+    total += ws.length
+  }
+  if (total >= 6) {
+    const best = votes.indexOf(Math.max(...votes))
+    if (votes[best] >= total * 0.7) return best
+  }
+  return null
+}
+
+/** Are most of the lines on their side (taller than wide)? For when there are no word boxes to tell which way. */
+export function linesOnTheirSide(found: { text: string; w: number; h: number }[], aspect: number): boolean {
+  const long = found.filter((l) => l.text.trim().length >= 6)
+  return long.length >= 3 && long.filter((l) => l.h > l.w * aspect * 1.5).length >= long.length * 0.6
+}

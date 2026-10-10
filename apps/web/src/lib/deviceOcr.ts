@@ -24,7 +24,7 @@ import { inkUi } from '../drawing/toolState'
  * read the text.
  */
 
-interface VisionLine {
+export interface VisionLine {
   text: string
   confidence: number
   /** normalised 0–1, origin top-left */
@@ -122,6 +122,14 @@ export async function recognizeImageOnDevice(blob: Blob): Promise<string> {
   const base64 = await blobToBase64(blob)
   return positionedLinesToMarkdown(await recognize(base64))
 }
+
+/** What the device's text recognition finds in a picture: each line, with its words' boxes. */
+export async function recognizeLinesOnDevice(blob: Blob): Promise<VisionLine[]> {
+  return recognize(await blobToBase64(blob))
+}
+
+/** Lines found (as above) set out as text, the same way as recognizeImageOnDevice. */
+export const linesToText = (lines: VisionLine[]) => positionedLinesToMarkdown(lines)
 
 /**
  * A photographed page of print (a recipe card, a book, a guide) read on the device, in reading order:

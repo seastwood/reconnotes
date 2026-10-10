@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { fixBars, isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
+import { fixBars, inCardOrder, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
 import { guessKind, kindFromWords, kindIn, notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
@@ -216,6 +216,42 @@ BUST OUT Large pot, Salt, Pepper
 })
 
 describe('a meal-kit card’s lines', () => {
+  it('allergen notes out of the ingredients, stray marks off', () => {
+    expect(tidyIngredient('2 TBSP Contains: Milk Butter Garlic Herb')).toEqual({ text: '2 TBSP Butter Garlic Herb', allergens: ['Milk'] })
+    expect(tidyIngredient('(Contains: Eggs, Potato Buns')).toEqual({ text: 'Potato Buns', allergens: ['Eggs'] })
+    expect(tidyIngredient('Concentrate Chicken Stock (Contains: Milk, Wheat)')).toEqual({ text: 'Concentrate Chicken Stock', allergens: ['Milk', 'Wheat'] })
+    expect(tidyIngredient('1 tsp Hot Sauce y').text).toBe('1 tsp Hot Sauce')
+    expect(tidyIngredient('*Baking sheet').text).toBe('Baking sheet')
+    expect(tidyIngredient('1 Eggplant').text).toBe('1 Eggplant')
+  })
+  it('equipment and pantry staples, however they’re written', () => {
+    expect(isEquipment('*Baking sheet')).toBe(true)
+    expect(isEquipment('2 Small bowls')).toBe(true)
+    expect(isEquipment('2 Small onions')).toBe(false)
+    expect(isPantry('Kosher salt')).toBe(true)
+    expect(isPantry('Black pepper')).toBe(true)
+    expect(isPantry('1 tsp salt')).toBe(false)
+    expect(isPantry('Bell pepper')).toBe(false)
+  })
+  it('steps in the card’s order, without its numbers', () => {
+    expect(inCardOrder(['4 COOK VEGGIES: Heat oil.', '5 SIMMER TAGINE: Add water.', '2 COOK RICE: Heat a pot.', '1 PREP: Wash.', '3 MIX: Combine.'])).toEqual([
+      'PREP: Wash.',
+      'COOK RICE: Heat a pot.',
+      'MIX: Combine.',
+      'COOK VEGGIES: Heat oil.',
+      'SIMMER TAGINE: Add water.',
+    ])
+    expect(inCardOrder(['Heat oil.', 'Add 2 eggs.'])).toEqual(['Heat oil.', 'Add 2 eggs.'])
+  })
+  it('a name in capitals, in title case', () => {
+    expect(titleCase('APRICOT, ALMOND & CHICKPEA TAGINE WITH ZUCCHINI, BASMATI RICE AND CHERMOULA')).toBe('Apricot, Almond & Chickpea Tagine with Zucchini, Basmati Rice and Chermoula')
+    expect(titleCase('Lemon Thyme Pork')).toBe('Lemon Thyme Pork')
+  })
+  it('two amounts with the bar not read', () => {
+    expect(splitColumns('Italian Seasoning 1 TBSP 1 TBSP')).toEqual({ first: '1 TBSP', other: '1 TBSP', name: 'Italian Seasoning' })
+    expect(splitColumns('Bake 2 cups 350 degrees')).toBeNull()
+  })
+
   it('amounts after the name, as in the card’s table, and bars read as letters or ones', () => {
     expect(splitColumns('Jasmine Rice ½ Cup | 1 Cup')).toEqual({ first: '½ Cup', other: '1 Cup', name: 'Jasmine Rice' })
     expect(splitColumns('Pork Cutlets* 12 oz | 24 oz')).toEqual({ first: '12 oz', other: '24 oz', name: 'Pork Cutlets*' })

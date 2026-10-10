@@ -99,7 +99,7 @@ describe('lines that are only a bullet mark', () => {
   })
 })
 
-import { positionedLinesToMarkdown, readingOrderText } from '../src'
+import { linesOnTheirSide, positionedLinesToMarkdown, readingOrderText, uprightTurns } from '../src'
 
 describe('positioned lines from an on-device recogniser', () => {
   it('rebuilds nesting from where each line starts', () => {
@@ -157,5 +157,35 @@ describe('reading order of a printed page', () => {
   it('two columns of a book: the whole first column, then the second', () => {
     const found = [0, 1, 2].flatMap((i) => [line(`left ${'abc'[i]}`, 0.05, 0.1 + i * 0.015, 0.4), line(`right ${'abc'[i]}`, 0.55, 0.1 + i * 0.015, 0.4)])
     expect(readingOrderText(found)).toBe('left a\nleft b\nleft c\n\nright a\nright b\nright c')
+  })
+})
+
+describe('which way up a photo of text is', () => {
+  // a line of three words, running from (x0, y0) by (dx, dy) per word
+  const line = (x0: number, y0: number, dx: number, dy: number) => ({
+    text: 'one two three',
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+    words: [0, 1, 2].map((i) => ({ x: x0 + dx * i, y: y0 + dy * i, w: 0.05, h: 0.05 })),
+  })
+  const many = (f: (i: number) => ReturnType<typeof line>) => [0, 1, 2, 3].map(f)
+  it('upright, on its side either way, upside down', () => {
+    expect(uprightTurns(many((i) => line(0.1, 0.1 + i * 0.05, 0.1, 0)), 0.75)).toBe(0)
+    // turned clockwise: the words run down the page – a quarter turn back (three clockwise)
+    expect(uprightTurns(many((i) => line(0.9 - i * 0.05, 0.1, 0, 0.1)), 0.75)).toBe(3)
+    // turned anticlockwise: they run up it
+    expect(uprightTurns(many((i) => line(0.1 + i * 0.05, 0.9, 0, -0.1)), 0.75)).toBe(1)
+    expect(uprightTurns(many((i) => line(0.9, 0.9 - i * 0.05, -0.1, 0)), 0.75)).toBe(2)
+  })
+  it('can’t tell: too few words, or no agreement', () => {
+    expect(uprightTurns([line(0.1, 0.1, 0.1, 0)], 1)).toBeNull()
+    expect(uprightTurns([...many((i) => line(0.1, 0.1 + i * 0.05, 0.1, 0)), ...many((i) => line(0.9, 0.1 + i * 0.05, 0, 0.1))], 1)).toBeNull()
+    expect(uprightTurns([{ text: 'no words here', x: 0, y: 0, w: 0.5, h: 0.05 }], 1)).toBeNull()
+  })
+  it('lines on their side', () => {
+    expect(linesOnTheirSide([0, 1, 2].map(() => ({ text: 'a long line', w: 0.03, h: 0.5 })), 0.75)).toBe(true)
+    expect(linesOnTheirSide([0, 1, 2].map(() => ({ text: 'a long line', w: 0.5, h: 0.03 })), 0.75)).toBe(false)
   })
 })

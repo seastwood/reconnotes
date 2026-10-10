@@ -1,4 +1,5 @@
-import { recognizeImageOnDevice, useDeviceOcr } from './deviceOcr'
+import { linesOnTheirSide, uprightTurns } from '@reconnotes/core'
+import { linesToText, recognizeImageOnDevice, recognizeLinesOnDevice, useDeviceOcr } from './deviceOcr'
 
 /**
  * Turning pictures the right way up
@@ -32,16 +33,40 @@ export async function rotateImage(blob: Blob, quarters: number): Promise<Blob> {
 /** How much a reading looks like real text: its words of three letters or more, with a vowel. */
 const readability = (text: string) => (text.match(/\b[A-Za-z]{3,}\b/g) ?? []).filter((w) => /[aeiouy]/i.test(w)).length
 
+/** The picture's width over its height, the way it's shown (a phone photo's own "this way up" applied). */
+async function aspectOf(blob: Blob): Promise<number> {
+  const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' } as ImageBitmapOptions)
+  const a = bmp.width / Math.max(1, bmp.height)
+  bmp.close()
+  return a
+}
+
 /**
- * A photo of text, the right way up (on this device's text recognition – the phone's): read every
- * way round, kept the way that reads best, with what it read. null: can't tell here.
+ * A photo of text, the right way up (on this device's text recognition – the phone's), with what it
+ * read. null: can't tell here.
+ *
+ * Apple's recognition reads text on its side as well as level, so how well it reads doesn't say
+ * which way up the photo is – which way its words run does (uprightTurns): read once, turned the way
+ * the words say. Only when they can't say (an older app without word boxes) is it read every way round,
+ * kept the way that reads best.
  */
 export async function uprightPhoto(blob: Blob): Promise<{ blob: Blob; text: string; quarters: number } | null> {
   if (!useDeviceOcr()) return null
+  const lines = await recognizeLinesOnDevice(blob).catch(() => [])
+  if (!lines.length) return null
+  const aspect = await aspectOf(blob).catch(() => 1)
+  const turns = uprightTurns(lines, aspect)
+  if (turns === 0) return { blob, text: linesToText(lines), quarters: 0 }
+  if (turns !== null) {
+    const turned = await rotateImage(blob, turns)
+    return { blob: turned, text: (await recognizeImageOnDevice(turned).catch(() => '')).trim(), quarters: turns }
+  }
+  // can't tell from the words: every way round, the best reading kept (on its side: not level as it is)
+  const sideways = linesOnTheirSide(lines, aspect)
   let best: { blob: Blob; text: string; quarters: number; score: number } | null = null
-  for (const quarters of [0, 1, 3, 2]) {
+  for (const quarters of sideways ? [1, 3] : [0, 1, 3, 2]) {
     const turned = await rotateImage(blob, quarters)
-    const text = (await recognizeImageOnDevice(turned).catch(() => '')).trim()
+    const text = quarters === 0 ? linesToText(lines) : (await recognizeImageOnDevice(turned).catch(() => '')).trim()
     const score = readability(text)
     if (!best || score > best.score * 1.15) best = { blob: turned, text, quarters, score }
     // plainly the right way already: no need to try the others
