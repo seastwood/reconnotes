@@ -13,7 +13,7 @@ import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
 import { fixBars, isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
-import { notesFromPhotos, reflow, sameWords } from '../src/photoPages'
+import { guessKind, kindFromWords, kindIn, notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
 let dir: string
@@ -294,5 +294,28 @@ describe('a note from photos of pages', () => {
     expect(md).toContain('It was a bright cold day in April, and the clocks were striking thirteen.')
     expect(md).not.toContain('stormy')
     expect(md).toContain('kept as read')
+  })
+})
+
+describe('photos whose kind is worked out (Auto)', () => {
+  it('a recipe or a route is plain from the words', () => {
+    expect(kindFromWords('INGREDIENTS\n2 tbsp butter\n1 cup rice\nPreheat oven. Stir in the chopped thyme, simmer, season.')).toBe('recipe')
+    expect(kindFromWords('From the trailhead parking, turn left at the junction. After 0.5 miles bear right at the fork toward the ridge and summit.')).toBe('directions')
+    expect(kindFromWords('Dear Sam, thanks for the lovely weekend.')).toBeNull()
+  })
+  it('the kind named in a model’s reply', () => {
+    expect(kindIn('HANDWRITING')).toBe('handwriting')
+    expect(kindIn('<think>maybe a recipe?</think>\nIt is PRINTED.')).toBe('printed')
+    expect(kindIn('recipe or printed')).toBeNull()
+    expect(kindIn('no idea')).toBeNull()
+  })
+  it('otherwise the AI says, from the text (printed when it can’t tell)', async () => {
+    const id = 'guessphoto000001'
+    app.store.putAttachment({ id, mime: 'image/png', name: 'p.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    reply = 'HANDWRITING'
+    expect(await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Call mum about Sunday\nbuy stamps')).toEqual({ kind: 'handwriting', by: 'the text' })
+    expect(prompts.at(-1)).toContain('Call mum about Sunday')
+    reply = 'not sure'
+    expect((await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Chapter one')).kind).toBe('printed')
   })
 })

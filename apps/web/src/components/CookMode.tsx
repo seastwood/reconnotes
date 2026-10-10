@@ -1,23 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronLeft, ChevronRight, LayoutGrid, ListChecks, Square, X } from 'lucide-react'
-import { safeLocalGet, safeLocalSet } from '../lib/store'
 
 type View = 'step' | 'board'
-const VIEW = 'reconnotes.cookView'
 
 /**
  * Cook mode, two ways (the screen kept on while it's open):
  *
  * - One step: the steps one at a time, big – Next and Back (or swipe, or the
  *   arrow keys), the ingredients a tap away.
- * - All steps (the default on a bigger screen, like a recipe card from a meal
+ * - All steps (where it opens, like a recipe card from a meal
  *   kit): the ingredients down the side, ticked off as they go in, and every
  *   step a numbered tile, in rows – scroll for more; tap one to see it big.
  */
 export function CookMode({ title, steps, ingredients, onClose }: { title: string; steps: string[]; ingredients: string[]; onClose: () => void }) {
-  const [view, setViewState] = useState<View>(() => safeLocalGet<View | null>(VIEW, null) ?? (window.innerWidth >= 900 ? 'board' : 'step'))
-  const setView = (v: View) => (setViewState(v), safeLocalSet(VIEW, v))
+  // always all the steps to start with (One step is a tap away)
+  const [view, setView] = useState<View>('board')
   const [at, setAt] = useState(0)
   /** All steps: the step shown big (null: none) */
   const [zoom, setZoom] = useState<number | null>(null)

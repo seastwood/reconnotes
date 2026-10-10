@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
-import { reportProgress } from './jobs'
+import { jobSignal, reportProgress } from './jobs'
 import { createPhotoNote, numbersIn, words, type PhotoPage } from './photoRecipe'
 
 /**
@@ -163,4 +163,77 @@ export async function notesFromPhotos(
   ].join('\n')
   const noteId = await createPhotoNote(store, sync, md, pages, folderId, title)
   return { noteId, title, asRead: !ok, agent: [reader, agent].filter(Boolean).join(' + ') }
+}
+
+export type PhotoKind = PageKind | 'recipe'
+
+const GUESS = (text: string) => `What are these photos of? Answer with one word:
+RECIPE – a recipe (a meal-kit card, a cookbook page: ingredients and cooking steps)
+HANDWRITING – handwritten notes, a letter or a notebook page (written by hand, not printed)
+DIRECTIONS – directions or a route (a trail guide, turn-by-turn instructions, how to get somewhere)
+PRINTED – any other printed page (a book, a magazine, a letter, a manual)
+${text.trim() ? `\nThe text read from them begins:\n${text.slice(0, 1500)}\n` : ''}
+Reply with only the word.`
+
+const WORDS: Record<string, PhotoKind> = { RECIPE: 'recipe', HANDWRITING: 'handwriting', DIRECTIONS: 'directions', PRINTED: 'printed' }
+/** The kind named in a model's reply ("RECIPE", "It's a recipe."), if it names one. */
+export function kindIn(reply: string): PhotoKind | null {
+  const t = reply.replace(/<think>[\s\S]*?<\/think>/g, '').toUpperCase()
+  const hits = Object.keys(WORDS).filter((w) => new RegExp(`\\b${w}\\b`).test(t))
+  return hits.length === 1 ? WORDS[hits[0]] : null
+}
+
+/** A sure guess from the words alone (or null): a recipe's ingredients and steps, a route's turns. */
+export function kindFromWords(text: string): PhotoKind | null {
+  const count = (re: RegExp) => (text.match(re) ?? []).length
+  const recipe =
+    count(/\b(?:ingredients?|servings?|preheat|simmer|tbsp|tsp|tablespoons?|teaspoons?|cups?|oz|minced|chopped|stir|bake|saut[eé]|season)\b/gi) +
+    2 * count(/\b(?:ingredients|preheat)\b/gi)
+  const route = count(/\b(?:trail(?:head)?|turn (?:left|right)|bear (?:left|right)|junction|fork|miles?|km|kilomet(?:er|re)s?|elevation|summit|ridge|parking|north|south|east|west|cairn|blaze[sd]?)\b/gi)
+  if (recipe >= 6 && recipe >= route * 3) return 'recipe'
+  if (route >= 6 && route >= recipe * 3) return 'directions'
+  return null
+}
+
+/**
+ * Photos of pages whose kind wasn't chosen: what they are. The words first (a recipe and a route are
+ * plain from them); otherwise a "Pictures" model looks at the first photo (it can tell handwriting
+ * from print) or, without one, the AI reads the text. Printed, when it can't tell.
+ */
+export async function guessKind(store: Store, ai: Ai, pages: PhotoPage[], text: string): Promise<{ kind: PhotoKind; by: string }> {
+  const plain = kindFromWords(text)
+  if (plain) return { kind: plain, by: 'the words' }
+  try {
+    const att = store.getAttachment(pages[0]?.attachmentId ?? '')
+    if (ai.canImages && att && store.hasBlob(att.id)) {
+      const k = kindIn(await ai.whatPageIs(fs.readFileSync(store.blobPath(att.id)), att.mime, GUESS(text)))
+      if (k) return { kind: k, by: 'the picture' }
+    }
+    if (text.trim()) {
+      const k = kindIn((await ai.chat(GUESS(text))).text)
+      if (k) return { kind: k, by: 'the text' }
+    }
+  } catch (e) {
+    if (jobSignal()?.aborted) throw e
+  }
+  return { kind: 'printed', by: 'a default' }
+}
+
+/** Photos read here (the ones the phone didn't read): their text, for working out what they are. */
+export async function readForGuess(store: Store, ai: Ai, pages: PhotoPage[]): Promise<{ pages: PhotoPage[]; agent: string }> {
+  let agent = ''
+  const out: PhotoPage[] = []
+  for (const [k, p] of pages.entries()) {
+    if ((p.text ?? '').trim().length >= 20) {
+      out.push(p)
+      continue
+    }
+    const att = store.getAttachment(p.attachmentId)
+    if (!att || !store.hasBlob(att.id)) throw new Error('A photo hasn’t reached the server yet – try again in a moment.')
+    reportProgress(`Reading photo ${k + 1} of ${pages.length}…`)
+    const r = await ai.readPrintedPage(fs.readFileSync(store.blobPath(att.id)), att.mime)
+    agent = r.agent
+    out.push({ ...p, text: r.text })
+  }
+  return { pages: out, agent }
 }

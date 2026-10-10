@@ -825,6 +825,17 @@ ${partNotes.join('\n\n')}
     return this.readPage(data, mime, PRINTED_PAGE_PROMPT)
   }
 
+  /**
+   * What a photographed page is – a recipe, handwriting, a printed page or directions – seen by a
+   * "Pictures" model (it can tell handwriting from print). The raw one-word reply.
+   */
+  async whatPageIs(data: Buffer, mime: string, prompt: string): Promise<string> {
+    if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
+    const fit = fitForAi(data, mime)
+    const { result } = await this.agents.run('images', (backend) => backend.generate([{ image: fit.data, mime: fit.mime }, { text: prompt }], 400))
+    return result
+  }
+
   private async readPage(data: Buffer, mime: string, prompt: string): Promise<{ text: string; agent: string }> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)

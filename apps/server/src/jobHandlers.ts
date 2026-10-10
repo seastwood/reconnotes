@@ -36,7 +36,7 @@ import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type
 import { askGeneral, askNotes } from './ask'
 import { tidyNote } from './tidy'
 import { recipeFromPhotos } from './photoRecipe'
-import { PAGE_KINDS, notesFromPhotos } from './photoPages'
+import { PAGE_KINDS, guessKind, notesFromPhotos, readForGuess, type PhotoKind } from './photoPages'
 import { attendeesFor, groupOfAttachment, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
@@ -768,11 +768,31 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       .filter((p) => typeof p.attachmentId === 'string')
       .slice(0, 30)
       .map((p) => ({ attachmentId: String(p.attachmentId), ...(typeof p.text === 'string' ? { text: p.text.slice(0, 20000) } : {}) }))
-    const kind = PAGE_KINDS.find((k) => k === job.input.kind) ?? 'printed'
     const folderId = typeof job.input.folderId === 'string' ? job.input.folderId : null
+    // "Auto": read, then worked out what they are (guessKind)
+    let kind: PhotoKind | undefined = job.input.kind === 'recipe' ? 'recipe' : PAGE_KINDS.find((k) => k === job.input.kind)
+    let guessed: string | undefined
+    let reader = ''
+    if (!kind) {
+      const read = await readForGuess(store, ai, pages)
+      pages.splice(0, pages.length, ...read.pages)
+      reader = read.agent
+      reportProgress('Working out what the photos are…')
+      const g = await guessKind(store, ai, pages, pages.map((p) => p.text ?? '').join('\n\n'))
+      kind = g.kind
+      guessed = g.by
+    }
+    const agents = (a: string) => [reader, a].filter(Boolean).join(' + ')
+    // (what was read, to make it again as another kind without reading it again)
+    const read = guessed ? { read: pages } : {}
+    if (kind === 'recipe') {
+      const r = await recipeFromPhotos(store, sync, ai, pages, folderId)
+      const text = [`${r.title} (a recipe${guessed ? ', worked out from ' + guessed : ''})`, ...(r.unsure ? [`${r.unsure} amount${r.unsure === 1 ? '' : 's'} to check (dotted underline).`] : []), ...(r.left.length ? ['Left out – not found in what was read:', ...r.left.map((x) => `• ${x}`)] : [])].join('\n')
+      return { result: { noteId: r.noteId, title: r.title, kind, guessed: Boolean(guessed), ...read, left: r.left, unsure: r.unsure, text: preview(text) }, agent: agents(r.agent) }
+    }
     const r = await notesFromPhotos(store, sync, ai, pages, kind, folderId)
-    const text = [r.title, ...(r.asRead ? ['Kept as read: the AI’s layout changed the words, so it wasn’t used.'] : [])].join('\n')
-    return { result: { noteId: r.noteId, title: r.title, asRead: r.asRead, text: preview(text) }, agent: r.agent }
+    const text = [`${r.title} (${kind}${guessed ? ', worked out from ' + guessed : ''})`, ...(r.asRead ? ['Kept as read: the AI’s layout changed the words, so it wasn’t used.'] : [])].join('\n')
+    return { result: { noteId: r.noteId, title: r.title, kind, guessed: Boolean(guessed), ...read, asRead: r.asRead, text: preview(text) }, agent: agents(r.agent) }
   })
 
   // imported pages: fetched again, the changed ones brought up to date (see webImport.ts)

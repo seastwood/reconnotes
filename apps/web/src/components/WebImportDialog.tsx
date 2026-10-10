@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, Camera, ChefHat, Globe, Loader2, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, Camera, ChefHat, Globe, Loader2, Sparkles, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
+import { trashNotes } from '../lib/noteActions'
 import { preferServerOcr, recognizeImageOnDevice, recognizePageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
 import { scanDocument, scannerAvailable } from '../lib/scanner'
 import { rotateImage, uprightPhoto } from '../lib/rotate'
 
 export type ImportTab = 'web' | 'photos'
-export type PhotoKind = 'recipe' | 'handwriting' | 'printed' | 'directions'
+export type PhotoKind = 'auto' | 'recipe' | 'handwriting' | 'printed' | 'directions'
 
 /** What photos of pages can be, and what each becomes. */
 const PHOTO_KINDS: { kind: PhotoKind; icon: LucideIcon; label: string; examples: string; becomes: string }[] = [
+  {
+    kind: 'auto',
+    icon: Sparkles,
+    label: 'Auto',
+    examples: 'Works out what they are',
+    becomes: 'Reads the photos and works out whether they’re a recipe, handwriting, a printed page or directions – then sets them out that way. If it guesses wrong, you can make it again as the right kind.',
+  },
   {
     kind: 'recipe',
     icon: ChefHat,
@@ -71,7 +79,7 @@ export function WebImportDialog({
   // the tab and the kind of photos: as last time, unless asked for
   const [tab, setTabState] = useState<ImportTab>(() => startOn?.tab ?? (initialUrl ? 'web' : safeLocalGet<ImportTab>('reconnotes.importTab', 'web')))
   const setTab = (t: ImportTab) => (setTabState(t), safeLocalSet('reconnotes.importTab', t))
-  const [kind, setKindState] = useState<PhotoKind>(() => startOn?.kind ?? safeLocalGet<PhotoKind>('reconnotes.importPhotoKind', 'recipe'))
+  const [kind, setKindState] = useState<PhotoKind>(() => startOn?.kind ?? safeLocalGet<PhotoKind>('reconnotes.importPhotoKind', 'auto'))
   const setKind = (k: PhotoKind) => (setKindState(k), safeLocalSet('reconnotes.importPhotoKind', k))
   const kindInfo = PHOTO_KINDS.find((k) => k.kind === kind) ?? PHOTO_KINDS[0]
   const [url, setUrl] = useState(initialUrl)
@@ -143,6 +151,27 @@ export function WebImportDialog({
   previews.current = photos.map((p) => p.url)
   useEffect(() => () => previews.current.forEach((u) => URL.revokeObjectURL(u)), [])
   const [reading, setReading] = useState(false)
+  /** the photos as sent (uploaded, with what the phone read): to make again as another kind */
+  const [sent, setSent] = useState<{ attachmentId: string; text?: string }[]>([])
+  const submitPhotos = async (pages: { attachmentId: string; text?: string }[], as: PhotoKind) => {
+    const label = PHOTO_KINDS.find((k) => k.kind === as)?.label ?? 'Note'
+    const j =
+      as === 'recipe'
+        ? await submitJob({ kind: 'recipe-photos', title: 'Recipe from photos', input: { photos: pages, folderId } })
+        : await submitJob({ kind: 'photo-pages', title: as === 'auto' ? 'Note from photos' : `${label} from photos`, input: { photos: pages, kind: as, folderId } })
+    setJobId(j.id)
+  }
+  /** a wrong guess: that note to Recently Deleted, the photos made again as `as` */
+  const redoAs = async (as: PhotoKind) => {
+    setError(null)
+    try {
+      if (result?.noteId) trashNotes([result.noteId])
+      // (with what the server read in them, when it did)
+      await submitPhotos(result?.read?.length === sent.length ? result.read : sent, as)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
   const startPhotos = async () => {
     setError(null)
     setReading(true)
@@ -160,11 +189,8 @@ export function WebImportDialog({
         pages.push({ attachmentId, ...(text.trim() ? { text } : {}) })
       }
       await flushUploads()
-      const j =
-        kind === 'recipe'
-          ? await submitJob({ kind: 'recipe-photos', title: 'Recipe from photos', input: { photos: pages, folderId } })
-          : await submitJob({ kind: 'photo-pages', title: `${kindInfo.label} from photos`, input: { photos: pages, kind, folderId } })
-      setJobId(j.id)
+      setSent(pages)
+      await submitPhotos(pages, kind)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -202,7 +228,7 @@ export function WebImportDialog({
   })()
   const result =
     job?.status === 'done'
-      ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[]; title?: string; left?: string[]; unsure?: number; asRead?: boolean } | null)
+      ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[]; title?: string; left?: string[]; unsure?: number; asRead?: boolean; kind?: PhotoKind; guessed?: boolean; read?: { attachmentId: string; text?: string }[] } | null)
       : null
   const fromPhotos = job?.kind === 'recipe-photos' || job?.kind === 'photo-pages'
   const busy = Boolean(job && !isFinished(job))
@@ -331,7 +357,14 @@ export function WebImportDialog({
             <>
             <div className="photo-kinds" role="radiogroup" aria-label="What’s in the photos?">
               {PHOTO_KINDS.map(({ kind: k, icon: Icon, label, examples }) => (
-                <button key={k} type="button" role="radio" aria-checked={kind === k} className={`photo-kind${kind === k ? ' on' : ''}`} onClick={() => setKind(k)}>
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={kind === k}
+                  className={`photo-kind${kind === k ? ' on' : ''}${k === 'auto' ? ' wide' : ''}`}
+                  onClick={() => setKind(k)}
+                >
                   <Icon size={20} aria-hidden />
                   <strong>{label}</strong>
                   <span>{examples}</span>
@@ -412,9 +445,24 @@ export function WebImportDialog({
             {result && fromPhotos && (
               <>
                 <p>
-                  ✅ {result.title ?? (job?.kind === 'recipe-photos' ? 'The recipe' : 'The note')} – {job?.kind === 'recipe-photos' ? 'set out' : 'made'} from {photos.length || 'the'} photo
+                  ✅ {result.title ?? (job?.kind === 'recipe-photos' || result.kind === 'recipe' ? 'The recipe' : 'The note')} – {job?.kind === 'recipe-photos' || result.kind === 'recipe' ? 'set out' : 'made'} from {photos.length || 'the'} photo
                   {photos.length === 1 ? '' : 's'}.
                 </p>
+                {result.guessed && result.kind && (
+                  <div className="photo-guess">
+                    <p className="hint">
+                      Read as: <strong>{PHOTO_KINDS.find((k) => k.kind === result.kind)?.label ?? result.kind}</strong>. Not right? Make it as:
+                    </p>
+                    <div className="photo-guess-kinds">
+                      {PHOTO_KINDS.filter((k) => k.kind !== 'auto' && k.kind !== result.kind).map(({ kind: k, icon: Icon, label }) => (
+                        <button key={k} type="button" onClick={() => void redoAs(k)}>
+                          <Icon size={14} /> {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {error && <p className="error-text">{error}</p>}
                 {result.asRead && <p className="hint">Kept as it was read: the AI’s layout changed some of the words, so it wasn’t used.</p>}
                 {!!result.unsure && (
                   <p className="hint">
