@@ -139,6 +139,37 @@ describe('meeting notes', () => {
     expect(app.store.listVersions(noteDocName('notemeeting00001')).filter((v) => v.label === 'Before a redo').length).toBe(2)
   })
 
+  it('written again without a redo (its job no longer listed, or cleared away): replaces the notes written before', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'notemeeting00002', title: 'Meeting' }))
+    await app.sync.change(noteDocName('notemeeting00002'), (doc) => {
+      const p = new Y.XmlElement('paragraph')
+      p.insert(0, [new Y.XmlText('Attendees: Doug')])
+      getContent(doc).insert(0, [p])
+    })
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const write = async () => {
+      const job = (await api('POST', '/api/jobs', { kind: 'meeting', noteId: 'notemeeting00002', input: { attachmentId: 'nonexistent00002', transcript: 'Doug will order the parts by Friday. We need to book the gym.' } })).job
+      const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+      expect(done.error ?? done.status).toBe('done')
+      return job.id as string
+    }
+    const times = () => getContent(app.sync.getDoc(noteDocName('notemeeting00002'))!).toString().split('Book the gym').length - 1
+    const first = await write()
+    const second = await write()
+    expect(times()).toBe(1)
+    expect(app.jobs.get(first)?.replacedBy).toBe(second)
+    // the job that wrote them cleared from the list: its notes, the only ones a job wrote in a note with one recording
+    await app.sync.change(noteDocName('notemeeting00002'), (doc) => {
+      const audio = new Y.XmlElement('audio')
+      audio.setAttribute('attachmentId', 'nonexistent00002')
+      getContent(doc).insert(0, [audio])
+    })
+    app.store.db.prepare('DELETE FROM jobs WHERE id = ?').run(second)
+    await write()
+    expect(times()).toBe(1)
+  })
+
   it('leaves ▶ links into the recording out of what you wrote', () => {
     expect(meetingNotesText('Attendees: Doug\n\n- Fence line [▶ 4:10](listen:abc123@250) stays')).toBe('Attendees: Doug\n\n- Fence line stays')
   })

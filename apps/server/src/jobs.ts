@@ -346,6 +346,19 @@ export class Jobs {
     return r ? this.toJob(r) : null
   }
 
+  /**
+   * The meeting notes last written from a recording in a note (done, not since replaced) – found
+   * even when it's no longer among the jobs listed.
+   */
+  lastMeeting(noteId: string, attachmentId: string, except?: string): Job | null {
+    const r = this.store.db
+      .prepare(
+        "SELECT * FROM jobs WHERE kind = 'meeting' AND note_id = ? AND json_extract(input, '$.attachmentId') = ? AND status = 'done' AND replaced_by IS NULL AND id != ? ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(noteId, attachmentId, except ?? '') as Row | undefined
+    return r ? this.toJob(r) : null
+  }
+
   /** Newest first; queued and running ones always included. */
   list(limit = 150): Job[] {
     const active = this.rows("status IN ('queued', 'paused', 'running') ORDER BY rank")

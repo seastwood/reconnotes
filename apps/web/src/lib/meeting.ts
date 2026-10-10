@@ -167,12 +167,18 @@ export async function writeMeetingNotes(noteId: string, attachmentId: string, bl
 
 /**
  * Meeting notes from a recording already in a note (its ⋯ menu): the server reads it (Whisper),
- * or uses the transcript it already has.
+ * or uses the transcript it already has. Notes it wrote before are replaced (the server finds them).
  */
-export async function meetingNotesFor(noteId: string, attachmentId: string) {
+export async function meetingNotesFor(noteId: string, attachmentId: string, opts: { fresh?: boolean; redo?: boolean } = {}) {
   if (!isSyncConfigured()) return showToast('Connect your ReconNotes server in Settings to get meeting notes written for you.')
   await flushUploads()
   await flushNote(noteId)
-  await submitJob({ kind: 'meeting', noteId, input: { attachmentId, tzOffset: new Date().getTimezoneOffset() } })
-  showToast('Writing the meeting notes – they’ll appear at the end of the note (see Jobs)')
+  await submitJob({ kind: 'meeting', noteId, input: { attachmentId, tzOffset: new Date().getTimezoneOffset(), ...(opts.fresh ? { retranscribe: true } : {}) } })
+  showToast(
+    !opts.redo
+      ? 'Writing the meeting notes – they’ll appear at the end of the note (see Jobs)'
+      : opts.fresh
+        ? 'Reading the recording again, then rewriting the meeting notes (see Jobs)'
+        : 'Rewriting the meeting notes – what you changed in them stays (see Jobs)',
+  )
 }

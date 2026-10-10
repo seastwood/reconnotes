@@ -9,7 +9,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { attendeeCount, attendeeNames, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
+import { attendeeCount, attendeeNames, getContent, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
@@ -507,13 +507,31 @@ function AudioMenu({
   // the meeting notes last written from this recording (to redo in place)
   const meeting = useMeetingJob(noteId, attachmentId)
   const running = meeting && !isFinished(meeting)
+  // notes an AI wrote into this note by a job no longer in the list (it holds the latest 150):
+  // likely this recording's meeting notes – a redo replaces them (the server finds which)
+  const listed = useJobs((s) => s.jobs)
+  const earlier = useMemo(() => {
+    if (!open || meeting) return false
+    const ids = new Set(listed.map((j) => j.id))
+    let found = false
+    const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+      for (const c of el.toArray()) {
+        if (found || !(c instanceof Y.XmlElement)) continue
+        const job = c.getAttribute('job')
+        if (typeof job === 'string' && job && !ids.has(job)) found = true
+        else walk(c)
+      }
+    }
+    walk(getContent(doc))
+    return found
+  }, [open, meeting, listed, doc])
   const editable = editor.isEditable
   const act = (f: () => unknown) => () => {
     setOpen(false)
     void Promise.resolve(f()).catch((e) => showToast(errorText(e) ?? 'Couldn’t do that.'))
   }
   const redo = (fresh: boolean) => async () => {
-    if (!meeting) return
+    if (!meeting) return meetingNotesFor(noteId, attachmentId, { fresh, redo: true })
     await redoJob(meeting.id, undefined, fresh)
     showToast(fresh ? 'Reading the recording again, then rewriting the meeting notes (see Jobs)' : 'Rewriting the meeting notes – what you changed in them stays (see Jobs)')
   }
@@ -525,8 +543,9 @@ function AudioMenu({
     const n = Math.round(Number(answer.trim()))
     if (!Number.isFinite(n) || n < 1 || n > 30) return showToast('A number from 1 to 30, please')
     setPeopleCount(doc, n)
-    if (meeting && !running) {
-      await redoJob(meeting.id, undefined, false)
+    if (!running && (meeting || earlier)) {
+      if (meeting) await redoJob(meeting.id, undefined, false)
+      else await meetingNotesFor(noteId, attachmentId, { redo: true })
       showToast(`Telling ${n} voices apart, then rewriting the meeting notes (see Jobs)`)
     } else showToast(`Saved: ${n} people – used when the meeting notes are written`)
   }
@@ -574,7 +593,7 @@ function AudioMenu({
               <button disabled>
                 <Loader2 size={16} className="spin" /> Writing meeting notes…
               </button>
-            ) : meeting ? (
+            ) : meeting || earlier ? (
               <>
                 <button onClick={act(redo(false))}>
                   <RotateCcw size={16} /> Redo meeting notes

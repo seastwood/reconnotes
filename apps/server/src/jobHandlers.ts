@@ -195,6 +195,23 @@ function markGuesses(text: string, raw: string | undefined): string {
   return out
 }
 
+/** The jobs whose results are in a note (the job its blocks are marked with), and its recordings. */
+function inNote(doc: Y.Doc): { jobs: Set<string>; recordings: number } {
+  const jobs = new Set<string>()
+  let recordings = 0
+  const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+    for (const c of el.toArray()) {
+      if (!(c instanceof Y.XmlElement)) continue
+      const job = c.getAttribute('job')
+      if (typeof job === 'string' && job) jobs.add(job)
+      if (c.nodeName === 'audio') recordings++
+      walk(c)
+    }
+  }
+  walk(getContent(doc))
+  return { jobs, recordings }
+}
+
 /** A copy of a note without the blocks jobs wrote into it (marked with their job). */
 function withoutAiResults(doc: Y.Doc): Y.Doc {
   const copy = new Y.Doc()
@@ -693,6 +710,22 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     return { result: { noteId: firstNote, changed, notes, text: notes.join('\n') } }
   })
 
+  /**
+   * Meeting notes written for a recording that was given notes before – by a job no longer among the
+   * jobs listed, so its ⋯ menu couldn't ask for a redo: they're replaced, not added to.
+   */
+  const earlierNotes = (job: Job, noteId: string, attachmentId: string): string | null => {
+    const here = inNote(noteDoc(noteId))
+    const last = jobs.lastMeeting(noteId, attachmentId, job.id)
+    if (last && here.jobs.has(last.id)) {
+      jobs.markReplaced(last.id, job.id)
+      return last.id
+    }
+    // written by a job since cleared away: when it's the only one gone and this is the note's only recording
+    const gone = [...here.jobs].filter((id) => id !== job.id && !jobs.get(id))
+    return gone.length === 1 && here.recordings === 1 ? gone[0] : null
+  }
+
   jobs.register('meeting', async (job) => {
     const { noteId, attachmentId } = job.input as { noteId: string; attachmentId: string }
     const doc = noteDoc(noteId)
@@ -779,7 +812,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       .join('\n')
     // each point with a ▶ link to where it was said in the recording (where words have times)
     const withLinks = att && said.length ? addListenLinks(md, said, att.id, await meaningOfPoints(md, said)).markdown : md
-    await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
+    await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job) ?? earlierNotes(job, noteId, String(attachmentId)), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })
     return { result: { noteId, text: preview(md), heardBy, ...(voices >= 2 ? { voices } : {}), ...(speechError ? { speechError } : {}), ...(r.draft ? { draft: r.draft } : {}) }, agent: heardBy ? `${heardBy} + ${r.agent}` : r.agent }
   })
 
