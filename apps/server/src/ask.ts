@@ -452,6 +452,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     text = text.replace(new RegExp(`\\s*(?:\\b(?:in|from|of|see)\\s+)?(?:the\\s+)?["“'‘]${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["”'’](?:\\s+(?:note|manual|document))?`, 'g'), '')
   // a citation to a source that doesn't say it, when another one does: that one
   text = recite(text, texts, sources)
+  // …and a short list item ("Walk dogs"), by which source has its words
+  text = reciteByWords(text, texts)
   // a fact without a citation: cited to the source it came from
   text = autoCite(text, texts)
   // the AI's own reasoning ("it can be inferred that…"): marked as such, not cited to a note that doesn't say it
@@ -706,6 +708,51 @@ export function recite(answer: string, texts: Map<number, string>, sources: AskS
     })
     return [...new Set(fixed)].map((n) => `[${n}]`).join('')
   })
+}
+
+/** a word as compared: lower case, without a plural or -ed / -ing ending */
+const stem = (w: string) => w.replace(/(?:ing|ed|es|s)$/, '').slice(0, 7)
+/** how much of a claim one line of a source says: the share of the claim's words in its best line (0–1) */
+export function coverage(text: string, claim: string): number {
+  const words = [...new Set((claim.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((w) => !STOP.has(w) && !CLAIM_WORDS.has(w)).map(stem))]
+  if (!words.length) return 0
+  let best = 0
+  for (const line of text.split('\n')) {
+    const have = new Set((line.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).map(stem))
+    if (!have.size) continue
+    best = Math.max(best, words.filter((w) => have.has(w)).length / words.length)
+  }
+  return best
+}
+/** words of the answer's own ("listed", "note"), not of what it reports */
+const CLAIM_WORDS = new Set('note notes listed list mentioned mentions says said stated based explicitly per item items task tasks'.split(' '))
+
+/**
+ * Citations checked by the words themselves – what recite() can't do for a short list item
+ * ("Walk dogs [1]": two words, too few to score): an item cited to a source that hardly says it,
+ * when another plainly does, is cited to that one. A sentence too, when its source shares almost
+ * none of its words and another shares clearly more.
+ */
+export function reciteByWords(answer: string, texts: Map<number, string>): string {
+  return answer
+    .split('\n')
+    .map((line) => {
+      const item = LIST_ITEM.exec(line)
+      return line.replace(/(?:\[\d+\])+/g, (group, at: number) => {
+        const claim = (item ? item[1] : sentenceAround(line, at, group.length)).replace(/\[\d+\]/g, ' ')
+        const scores = [...texts].map(([n, t]) => ({ n, c: coverage(t, claim) }))
+        const best = scores.reduce((a, b) => (b.c > a.c ? b : a), { n: 0, c: 0 })
+        if (!best.n) return group
+        const ns = [...group.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]))
+        const fixed = ns.map((n) => {
+          const own = scores.find((x) => x.n === n)?.c ?? 0
+          const wrong = item ? best.c >= 0.75 && own <= best.c - 0.4 : own < 0.2 && best.c >= own + 0.2
+          return wrong ? best.n : n
+        })
+        return [...new Set(fixed)].map((n) => `[${n}]`).join('')
+      })
+    })
+    .join('\n')
 }
 
 /** Each citation in the answer, in order, with the line its sentence came from. */

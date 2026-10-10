@@ -13,7 +13,7 @@ import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet, useStore } from './lib/store'
-import { askChat } from './lib/askChat'
+import { ALL_NOTES, askChat, openAskChat } from './lib/askChat'
 import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
@@ -429,6 +429,7 @@ export function App() {
     const commands = [
       { id: 'new-note', label: 'New note', section: N, keywords: 'create add', run: () => a().openNote(createNote(workspaceDoc, { folderId: folderNow() })) },
       { id: 'today', label: 'Today’s note', section: N, keywords: 'daily journal date', run: () => void openDailyNote().then((id) => a().openNote(id)) },
+      { id: 'ask-chat', label: 'Ask your notes (chat)', section: N, keywords: 'question ai chat answer', run: () => openAskChat(ALL_NOTES) },
       { id: 'new-meeting', label: 'New meeting', section: N, keywords: 'record minutes agenda action items', run: () => void startMeeting(folderNow()).then((id) => a().openNote(id)) },
       {
         id: 'new-folder',

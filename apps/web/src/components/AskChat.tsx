@@ -41,7 +41,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
   const key = chatKey(target)
   const chatId = useStore(askChat, (s) => s.chat[key] ?? null)
   const setChat = (id: string | null) => askChat.set((s) => ({ chat: { ...s.chat, [key]: id } }))
-  const history = useAskHistory(target.folderId ? { folderId: target.folderId } : { noteId: target.noteId })
+  const history = useAskHistory(target.all ? {} : target.folderId ? { folderId: target.folderId } : { noteId: target.noteId })
   const [listOpen, setListOpen] = useState(false)
   const jobs = useJobs((s) => s.jobs)
   const conversation = chatId ? history.list?.find((c) => c.id === chatId) : undefined
@@ -58,6 +58,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
   const ofThis = (j: Job) => {
     const notes = Array.isArray(j.input.notes) ? j.input.notes.map(String) : []
     const folders = Array.isArray(j.input.folders) ? j.input.folders.map(String) : []
+    if (target.all) return !notes.length && !folders.length
     return target.folderId ? !notes.length && folders.length === 1 && folders[0] === target.folderId : notes.length === 1 && notes[0] === target.noteId
   }
   const answering = jobs.filter((j) => j.kind === 'ask' && !isFinished(j) && ofThis(j)).sort((a, b) => b.createdAt - a.createdAt)
@@ -107,7 +108,9 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     return () => ids.forEach((id) => watchingJob(id, false))
   }, [liveIds])
 
-  const scope = target.folderId
+  const scope = target.all
+    ? { folders: [] as string[], unlocked: access.unlockedIds }
+    : target.folderId
     ? { folders: [target.folderId], unlocked: access.unlockedIds }
     : {
         folders: [] as string[],
@@ -196,11 +199,11 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     <div className="ask-chat" role="dialog" aria-label={`Ask about ${target.title || 'this note'}`}>
       <header className="ask-chat-head">
         <button className="text ask-chat-back" onClick={closeAskChat} aria-label="Back to the note">
-          <ChevronLeft size={20} /> {target.folderId ? 'Back' : 'Note'}
+          <ChevronLeft size={20} /> {target.noteId ? 'Note' : 'Back'}
         </button>
         <div className="ask-chat-title">
           <span className="ask-chat-kicker">
-            <MessageCircleQuestion size={13} /> {target.folderId ? 'Ask this folder' : 'Ask about this note'}
+            <MessageCircleQuestion size={13} /> {target.all ? 'Ask your notes' : target.folderId ? 'Ask this folder' : 'Ask about this note'}
           </span>
           <span className="ask-chat-name">{target.title || 'Untitled'}</span>
         </div>

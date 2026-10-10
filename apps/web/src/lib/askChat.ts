@@ -8,6 +8,8 @@ import { Store } from './store'
 export interface AskChatTarget {
   noteId?: string
   folderId?: string
+  /** a chat about all your notes */
+  all?: boolean
   title: string
 }
 
@@ -21,7 +23,14 @@ interface AskChatState {
 
 export const askChat = new Store<AskChatState>({ target: null, hidden: false, chat: {} })
 
-export const chatKey = (t: AskChatTarget) => (t.folderId ? `folder:${t.folderId}` : `note:${t.noteId}`)
+export const chatKey = (t: AskChatTarget) => (t.all ? 'all' : t.folderId ? `folder:${t.folderId}` : `note:${t.noteId}`)
+/** the chat about all your notes */
+export const ALL_NOTES: AskChatTarget = { all: true, title: 'All your notes' }
+/** a chat, open at one conversation (its first question's job) */
+export const openChatAt = (target: AskChatTarget, conversation: string) => {
+  askChat.set((s) => ({ chat: { ...s.chat, [chatKey(target)]: conversation } }))
+  openAskChat(target)
+}
 
 export const openAskChat = (target: AskChatTarget) => askChat.set({ target, hidden: false })
 export const closeAskChat = () => askChat.set({ target: null, hidden: false })

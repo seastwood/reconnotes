@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowUp, CornerDownRight, FileText, Loader2, Sparkles, XCircle } from 'lucide-react'
+import { ArrowUp, CornerDownRight, FileText, Loader2, MessageCircleQuestion, Sparkles, XCircle } from 'lucide-react'
+import { ALL_NOTES, openChatAt } from '../lib/askChat'
 import { marked } from '../lib/markdown'
 import { isSyncConfigured } from '../lib/settings'
 import { cancelJob, isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
@@ -97,6 +98,12 @@ export function AskPanel({
         <Sparkles size={16} /> {question}
       </div>
       <Turn job={job} error={error} onRetry={retry} onOpen={onOpen} />
+      {/* asked of all your notes: carried on in the chat window */}
+      {job && !folders.length && !notes.length && (
+        <button className="text ask-go-chat" onClick={() => openChatAt(ALL_NOTES, job.id)}>
+          <MessageCircleQuestion size={14} /> Continue in chat
+        </button>
+      )}
       {job && <AskThread root={job} onOpen={onOpen} />}
     </li>
   )

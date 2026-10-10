@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getNotes, listFolders, readNote } from '@reconnotes/core'
-import { askChat, chatKey, openAskChat, type AskChatTarget } from '../lib/askChat'
+import { ALL_NOTES, askChat, chatKey, openAskChat, type AskChatTarget } from '../lib/askChat'
 import {
   AudioLines,
   MessageCircleQuestion,
@@ -587,7 +587,7 @@ function GoToChat({ job }: { job: Job }) {
   } else if (!notes.length && folders.length === 1) {
     const f = listFolders(workspaceDoc).find((x) => x.id === folders[0])
     if (f) target = { folderId: f.id, title: f.name }
-  }
+  } else if (!notes.length && !folders.length) target = ALL_NOTES
   if (!target) return null
   const t = target
   return (

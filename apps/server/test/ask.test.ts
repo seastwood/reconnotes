@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, sectionItems } from '../src/ask'
+import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -543,6 +543,19 @@ describe('the AI gets the line that answers it, and cites it', () => {
     expect(recite('The maximum height of the robot is 60 inches tall [1].', texts)).toBe('The maximum height of the robot is 60 inches tall [2].')
     // one that does say it stays
     expect(recite('Leaving the STARTING LINE scores 5 pts [1].', texts)).toBe('Leaving the STARTING LINE scores 5 pts [1].')
+  })
+  it('a short list item cited to a note that doesn’t have it moves to the one that does (a meeting transcript cited for a chores list)', () => {
+    const notes = new Map([
+      [1, '## Notes\n🎙️ So I think we should ask the build team to split, and do the scrum in two groups. Do we need the lawn mower in the shop?'],
+      [2, '# Sydney’s chores that I had no idea she did that I need to do\n- Feed Stache (cat) every morning\n- Water Lawn\n- Walk dogs\n\nHouse projects:\n- Recess Fridge plug'],
+    ])
+    expect(reciteByWords('- Water Lawn [1]\n- Walk dogs [1]\n- Recess Fridge plug [1]\n- Feed Stache (cat) every morning [2]', notes)).toBe(
+      '- Water Lawn [2]\n- Walk dogs [2]\n- Recess Fridge plug [2]\n- Feed Stache (cat) every morning [2]',
+    )
+    // the answer's own summing up, cited to the transcript: to the chores note it describes
+    expect(reciteByWords('These were listed as Sydney’s chores I need to do [1].', notes)).toBe('These were listed as Sydney’s chores I need to do [2].')
+    // cited right: left alone – both say it, the one cited stays
+    expect(reciteByWords('- Split the scrum into two groups [1]', notes)).toBe('- Split the scrum into two groups [1]')
   })
 })
 
