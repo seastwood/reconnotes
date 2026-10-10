@@ -905,13 +905,13 @@ button.text {
   -webkit-overflow-scrolling: touch;
 }
 /* where the note is (its folders): a bar under the note's buttons, folding to a tab */
-.note-path {
+.crumb-bar {
   position: absolute;
   /* tucked a little under the buttons: no seam for the note to show through (iPhone's fractional pixels) */
   top: -6px;
   left: 0;
   right: 0;
-  height: calc(var(--note-path-h) + 6px);
+  height: calc(var(--crumb-bar-h) + 6px);
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -925,19 +925,19 @@ button.text {
     opacity 0.2s ease;
 }
 /* scrolled down the note: slid up under the buttons – over the note, so the note doesn't move */
-.note-path.away {
+.crumb-bar.away {
   transform: translateY(-100%);
   opacity: 0;
   pointer-events: none;
 }
 .editor {
-  --note-path-h: 38px;
+  --crumb-bar-h: 38px;
 }
 /* room at the top of the note for the bar over it */
-.editor:has(.note-path) .editor-scroll {
-  padding-top: var(--note-path-h);
+.editor:has(.crumb-bar) .editor-scroll {
+  padding-top: var(--crumb-bar-h);
   /* (what find scrolls to isn't left under it) */
-  scroll-padding-top: var(--note-path-h);
+  scroll-padding-top: var(--crumb-bar-h);
 }
 /* the find bar stays over the path sliding up under it */
 .find-bar {
@@ -945,7 +945,7 @@ button.text {
   z-index: 6;
 }
 /* the crumbs: in one line, never squeezed into each other – scrolled sideways when they don't fit */
-.note-path-crumbs {
+.crumb-bar-crumbs {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -959,31 +959,31 @@ button.text {
   /* fades at the edges where there's more */
   mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
 }
-.note-path-crumbs::-webkit-scrollbar {
+.crumb-bar-crumbs::-webkit-scrollbar {
   display: none;
 }
-.note-path-crumbs > *,
-.note-path-part > * {
+.crumb-bar-crumbs > *,
+.crumb-bar-part > * {
   flex: none;
 }
-.note-path-part {
+.crumb-bar-part {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   flex: none;
 }
-.note-path button,
-.note-path-here {
+.crumb-bar button,
+.crumb-bar-here {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
-.note-path-here {
+.crumb-bar-here {
   color: var(--text);
   padding: 2px 6px 2px 4px;
 }
 /* a long name: cut short (all of it on a long press / hover) */
-.note-path-name {
+.crumb-bar-name {
   display: inline-block;
   max-width: 160px;
   overflow: hidden;
@@ -991,16 +991,16 @@ button.text {
   text-overflow: ellipsis;
 }
 @media (max-width: 699px) {
-  .note-path-name {
+  .crumb-bar-name {
     max-width: 110px;
   }
 }
-.note-path-sep {
+.crumb-bar-sep {
   flex: none;
   opacity: 0.6;
 }
-.note-path button,
-.note-path-tab {
+.crumb-bar button,
+.crumb-bar-tab {
   background: none;
   border: 0;
   padding: 3px 5px;
@@ -1011,22 +1011,22 @@ button.text {
   cursor: pointer;
   min-height: 28px;
 }
-.note-path button:hover,
-.note-path-tab:hover {
+.crumb-bar button:hover,
+.crumb-bar-tab:hover {
   color: var(--text);
   background: var(--line);
 }
-.note-path .note-path-fold {
+.crumb-bar .crumb-bar-fold {
   flex: none;
   margin-left: 2px;
 }
 /* folded: a small tab hanging under the buttons, over the note */
-.note-path-hang {
+.crumb-bar-hang {
   position: relative;
   height: 0;
   z-index: 5;
 }
-.note-path-tab {
+.crumb-bar-tab {
   position: absolute;
   top: -1px;
   right: 12px;

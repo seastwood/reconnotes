@@ -65,12 +65,12 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
     watch.observe(el)
     return () => watch.disconnect()
   }, [open, noteId, folderId, title, path])
-  const sep = <ChevronRight size={12} className="note-path-sep" aria-hidden />
+  const sep = <ChevronRight size={12} className="crumb-bar-sep" aria-hidden />
   if (!open)
     return (
-      <div className="note-path-hang">
+      <div className="crumb-bar-hang">
         <button
-          className="note-path-tab"
+          className="crumb-bar-tab"
           title="Show where this note is"
           aria-label="Show where this note is"
           aria-expanded={false}
@@ -83,19 +83,19 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
     )
   return (
     // over the top of the note (which leaves room for it), so sliding away moves nothing under your finger
-    <div className="note-path-hang">
-      <nav ref={bar} className={`note-path${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
-        <div className="note-path-crumbs" ref={crumbs}>
+    <div className="crumb-bar-hang">
+      <nav ref={bar} className={`crumb-bar${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
+        <div className="crumb-bar-crumbs" ref={crumbs}>
           <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
             <Inbox size={13} aria-hidden /> All Notes
           </button>
           {sep}
           {path.length ? (
             path.map((f) => (
-              <span key={f.id} className="note-path-part">
+              <span key={f.id} className="crumb-bar-part">
                 <button title={`Show the folder “${f.name}”`} onClick={() => onShow({ kind: 'folder', folderId: f.id })}>
                   <Folder size={13} aria-hidden />{' '}
-                  <span className="note-path-name" title={f.name}>
+                  <span className="crumb-bar-name" title={f.name}>
                     {f.name}
                   </span>
                 </button>
@@ -103,18 +103,18 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
               </span>
             ))
           ) : (
-            <span className="note-path-part">
+            <span className="crumb-bar-part">
               <button title="Show the notes in no folder" onClick={() => onShow({ kind: 'unfiled' })}>
                 <FolderMinus size={13} aria-hidden /> Not in a folder
               </button>
               {sep}
             </span>
           )}
-          <span className="note-path-here" aria-current="page">
-            <FileText size={13} aria-hidden /> <span className="note-path-name">{title}</span>
+          <span className="crumb-bar-here" aria-current="page">
+            <FileText size={13} aria-hidden /> <span className="crumb-bar-name">{title}</span>
           </span>
         </div>
-        <button className="note-path-fold" title="Hide the path" aria-label="Hide the path" aria-expanded onClick={() => setOpen(false)}>
+        <button className="crumb-bar-fold" title="Hide the path" aria-label="Hide the path" aria-expanded onClick={() => setOpen(false)}>
           <ChevronUp size={14} aria-hidden />
         </button>
       </nav>
