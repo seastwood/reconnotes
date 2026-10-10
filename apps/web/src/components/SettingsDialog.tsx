@@ -6,6 +6,7 @@ import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
 import { TestBenchSection } from './AiHealth'
 import { BackupsSection } from './BackupsSection'
+import { SharingSection } from './SharingSection'
 import { OffsiteSection } from './OffsiteSection'
 import { ExportImportSection } from './ExportImportSection'
 import { DevicesSection } from './DevicesSection'
@@ -71,9 +72,9 @@ export const SETTINGS_TABS: {
   },
   {
     id: 'data',
-    label: 'Backups & export',
+    label: 'Sharing & backups',
     icon: Archive,
-    blurb: 'Backups of your library, offsite copies, and moving notes in and out.',
+    blurb: 'What’s shared with others, backups of your library, offsite copies, and moving notes in and out.',
   },
 ]
 const LAST_TAB = 'reconnotes.settingsTab'
@@ -324,6 +325,10 @@ export function SettingsDialog({ onClose, tab: initial }: { onClose: () => void;
         {tab === 'data' &&
           (connected ? (
             <>
+              <section>
+                <h3>Shared with others</h3>
+                <SharingSection />
+              </section>
               <section>
                 <h3>Backups</h3>
                 <BackupsSection key={key} />

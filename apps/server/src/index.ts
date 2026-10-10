@@ -85,6 +85,11 @@ ${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}
     app.secure.listen(config.httpsPort, config.host, () => log.info(`HTTPS on https://${config.host}:${config.httpsPort} (certificate: ${loadTls(config)?.file})`))
     app.secure.on('error', (err) => log.error(`HTTPS couldn't start on port ${config.httpsPort}: ${err.message}`))
   }
+  // shared notes and folders – and nothing else – on a port of their own (the one to open up for the people you share with)
+  if (config.sharePort) {
+    app.shareServer.listen(config.sharePort, config.host, () => log.info(`share links on http://${config.host}:${config.sharePort} (shared notes and folders only)`))
+    app.shareServer.on('error', (err) => log.error(`The share port ${config.sharePort} couldn't start: ${err.message} (set RECON_SHARE_PORT to another port, or 0 for none)`))
+  }
   app.server.listen(config.port, config.host, () => {
     log.info(`ReconNotes server ${VERSION} listening on http://${config.host}:${config.port}`)
     log.info(`data: ${config.dataDir}  backups: ${config.backupDir}`)

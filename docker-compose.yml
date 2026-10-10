@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "8787:8787"
+      # shared folders and notes only (see docs/setup/Sharing folders.md)
+      - "8790:8790"
       - "8443:8443"   # https, after: docker compose exec reconnotes node dist/index.js https-setup <address>
     env_file: .env
     environment:

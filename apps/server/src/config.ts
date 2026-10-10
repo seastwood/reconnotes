@@ -9,6 +9,8 @@ export interface Config {
   port: number
   /** HTTPS port, served when there's a certificate (see tls.ts) */
   httpsPort: number
+  sharePort: number
+  shareUrl: string | null
   /** your own certificate and key (PEM files); otherwise <data>/tls/server.crt from `https-setup` */
   tlsCert: string | null
   tlsKey: string | null
@@ -66,6 +68,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port: Number(env.RECON_PORT ?? env.PORT ?? 8787),
     httpsPort: Number(env.RECON_HTTPS_PORT ?? 8443),
+    /** the port that serves shared notes and folders, and nothing else (0: none) – see shareServer.ts */
+    sharePort: Number(env.RECON_SHARE_PORT ?? 8790),
+    /** the address share links are given with (e.g. https://notes-sydney.example.com); else this server's, on the share port */
+    shareUrl: env.RECON_SHARE_URL ? env.RECON_SHARE_URL.replace(/\/+$/, '') : null,
     tlsCert: env.RECON_TLS_CERT ? path.resolve(env.RECON_TLS_CERT) : null,
     tlsKey: env.RECON_TLS_KEY ? path.resolve(env.RECON_TLS_KEY) : null,
     host: env.RECON_HOST ?? '0.0.0.0',

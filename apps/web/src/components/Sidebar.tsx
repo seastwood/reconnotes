@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
 import { SearchResults, SearchSuggestions } from './SearchResults'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -28,6 +28,7 @@ import {
   Lock,
   LockOpen,
   SearchX,
+  Users,
 } from 'lucide-react'
 import {
   buildTree,
@@ -56,6 +57,8 @@ import { openDailyNote } from '../lib/daily'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 import { openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
+import { refreshShares, useShares } from '../lib/shares'
+import { ShareFolderDialog } from './ShareFolderDialog'
 
 export type View =
   | { kind: 'all' }
@@ -160,6 +163,15 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   /** asking for a folder's password */
   const [pw, setPw] = useState<{ folderId: string; mode: PasswordMode; then?: () => void } | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  // folders shared with others (marked, and shared from the folder's menu)
+  const [sharing, setSharing] = useState<string | null>(null)
+  const shareLinks = useShares((s) => s.shares)
+  const sharedWith = useMemo(() => {
+    const by = new Map<string, string[]>()
+    for (const l of shareLinks) if (l.folderId) by.set(l.folderId, [...(by.get(l.folderId) ?? []), l.name || 'a link'])
+    return by
+  }, [shareLinks])
+  useEffect(() => void refreshShares(), [])
   const offlineFolders = useOffline((s) => s.folders)
   const offlineProgress = useOffline((s) => s.progress)
   const menuAnchor = useRef<HTMLElement | null>(null)
@@ -343,6 +355,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 <CloudDownload size={13} />
               </span>
             )}
+            {sharedWith.has(f.id) && (
+              <span className="folder-flag shared" title={`Shared with ${sharedWith.get(f.id)!.join(', ')}`}>
+                <Users size={13} />
+              </span>
+            )}
             {f.noSearch && (
               <span className="folder-flag" title="Left out of search">
                 <SearchX size={13} />
@@ -401,6 +418,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 <button onClick={() => (setMenuFor(null), openAskChat({ folderId: f.id, title: f.name }))} title="A question answered from this folder’s notes (and its subfolders’) – even if it’s left out of search">
                   Ask this folder…
                 </button>
+                {isSyncConfigured() && !owner && (
+                  <button onClick={() => (setMenuFor(null), setSharing(f.id))} title="A read-only link to everything in this folder, for someone you choose">
+                    <Users size={14} /> {sharedWith.has(f.id) ? 'Sharing…' : 'Share folder…'}
+                  </button>
+                )}
                 {hasSource(f.id) && (
                   <button
                     onClick={() => {
@@ -665,6 +687,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         </div>
       </nav>
       )}
+      {sharing && <ShareFolderDialog folderId={sharing} name={ws.folders.find((x) => x.id === sharing)?.name ?? 'Folder'} onClose={() => setSharing(null)} />}
       {pw && (
         <PasswordDialog
           folderId={pw.folderId}

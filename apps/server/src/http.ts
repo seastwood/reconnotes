@@ -7,7 +7,7 @@ import http from 'node:http'
 import https from 'node:https'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
-import { WORKSPACE_DOC, getFolders, noteGroup, readFolder, noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
+import { WORKSPACE_DOC, folderRules, getFolders, noteGroup, readFolder, noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
@@ -33,7 +33,8 @@ import { listBackups, runBackup } from './backup'
 import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
 import type { Caller, Devices } from './devices'
-import { SHARE_HEADERS, Shares, drawingSvg, noteHas, sharePage, sharedNote } from './shares'
+import { Shares, type ShareRow } from './shares'
+import { serveShare } from './shareServer'
 import { importNotes, unpack } from './importNotes'
 import type { Jobs } from './jobs'
 import type { Notifier } from './notify'
@@ -1017,57 +1018,67 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- Share links (read-only, public) ---------------------------------------
-  const shareView = (noteId: string) => {
-    const row = shares.forNote(noteId)
-    return { shared: Boolean(row), path: row ? `/s/${row.id}` : null, createdAt: row?.createdAt ?? null }
+  /**
+   * The address links are given with: the one set in the app (or RECON_SHARE_URL), else this server's
+   * name as the device reached it, on the share port (or this port, when there's no share port).
+   */
+  const shareBase = (req: http.IncomingMessage) => {
+    const set = store.getSetting<string>('shareAddress') || config.shareUrl
+    if (set) return set.replace(/\/+$/, '')
+    if (!config.sharePort) return origin(req)
+    const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost').replace(/:\d+$/, '')
+    return `http://${host}:${config.sharePort}`
   }
-  route('GET', `/api/notes/${ID}/share`, (_req, res, [id]) => json(res, 200, shareView(id)))
-  route('POST', `/api/notes/${ID}/share`, (_req, res, [id]) => {
+  const shareJson = (req: http.IncomingMessage, r: ShareRow) => ({ ...r, url: `${shareBase(req)}/s/${r.id}` })
+  const shareView = (req: http.IncomingMessage, noteId: string) => {
+    const row = shares.forNote(noteId)
+    return { shared: Boolean(row), path: row ? `/s/${row.id}` : null, url: row ? `${shareBase(req)}/s/${row.id}` : null, createdAt: row?.createdAt ?? null }
+  }
+  route('GET', `/api/notes/${ID}/share`, (req, res, [id]) => json(res, 200, shareView(req, id)))
+  route('POST', `/api/notes/${ID}/share`, (req, res, [id]) => {
     if (!sync.getDoc(noteDocName(id))) throw new HttpError(409, 'This note hasn’t reached the server yet – try again once it has synced.')
     shares.share(id)
-    json(res, 200, shareView(id))
+    json(res, 200, shareView(req, id))
   })
-  route('DELETE', `/api/notes/${ID}/share`, (_req, res, [id]) => {
+  route('DELETE', `/api/notes/${ID}/share`, (req, res, [id]) => {
     shares.stop(id)
-    json(res, 200, shareView(id))
+    json(res, 200, shareView(req, id))
   })
-
-  /** Public pages for share links (no key needed). */
-  const servePublic = (res: http.ServerResponse, url: URL): boolean => {
-    const m = /^\/s\/([A-Za-z0-9_-]{16,40})(?:\/(a|d)\/([A-Za-z0-9]{8,64})(\.svg)?)?\/?$/.exec(url.pathname)
-    if (!m) return false
-    const shared = sharedNote(shares, sync, m[1])
-    const notFound = () => {
-      res.writeHead(404, { ...SHARE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' })
-      res.end('<!doctype html><meta charset="utf-8"><title>Not shared</title><p style="font:17px system-ui;margin:40px">This note isn’t shared any more.</p>')
-      return true
-    }
-    if (!shared) return notFound()
-    if (!m[2]) {
-      res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' })
-      res.end(sharePage(m[1], shared.title, shared.doc, shared.updatedAt))
-      return true
-    }
-    if (m[2] === 'd') {
-      if (!noteHas(shared.doc, 'drawing', m[3])) return notFound()
-      res.writeHead(200, { ...SHARE_HEADERS, 'Content-Type': 'image/svg+xml' })
-      res.end(drawingSvg(shared.doc, m[3], url.searchParams.has('overlay')))
-      return true
-    }
-    const att = noteHas(shared.doc, 'attachment', m[3]) ? store.getAttachment(m[3]) : null
-    if (!att || !store.hasBlob(att.id)) return notFound()
-    const inline = /^(image\/(png|jpeg|gif|webp|heic)|audio\/|video\/|application\/pdf)/.test(att.mime)
-    res.writeHead(200, {
-      ...SHARE_HEADERS,
-      // never let a shared file run as a page on this address
-      'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'",
-      'Content-Type': inline ? att.mime : 'application/octet-stream',
-      'Content-Length': att.size,
-      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(att.name || att.id)}`,
-    })
-    fs.createReadStream(store.blobPath(att.id)).pipe(res)
-    return true
+  // shared folders: a link per person, each with its own passcode (or none)
+  const passcode = (v: unknown): string | null => {
+    if (v === null || v === undefined || v === '') return null
+    if (typeof v !== 'string' || v.length < 4 || v.length > 200) throw new HttpError(400, 'A passcode needs at least 4 characters.')
+    return v
   }
+  route('GET', '/api/shares', (req, res) => json(res, 200, { shares: shares.all().map((r) => shareJson(req, r)), address: shareBase(req), port: config.sharePort, addressSet: Boolean(store.getSetting<string>('shareAddress') || config.shareUrl) }))
+  route('GET', `/api/folders/${ID}/shares`, (req, res, [id]) => json(res, 200, { shares: shares.forFolder(id).map((r) => shareJson(req, r)) }))
+  route('POST', `/api/folders/${ID}/shares`, async (req, res, [id]) => {
+    const b = await readJson<{ name?: string; passcode?: string | null }>(req)
+    const ws = sync.getDoc(WORKSPACE_DOC)
+    const all = ws ? [...getFolders(ws).values()].map(readFolder) : []
+    const folder = all.find((f) => f.id === id && !f.trashedAt)
+    if (!folder) throw new HttpError(404, 'This folder hasn’t reached the server yet – try again once it has synced.')
+    if (folderRules(all).get(id)?.lockedBy) throw new HttpError(409, 'A folder with a password (or in one) can’t be shared.')
+    json(res, 200, shareJson(req, shares.shareFolder(id, String(b.name ?? ''), passcode(b.passcode))))
+  })
+  route('PATCH', '/api/shares/([A-Za-z0-9_-]{16,40})', async (req, res, [id]) => {
+    if (!shares.get(id)) throw new HttpError(404, 'This link isn’t shared any more.')
+    const b = await readJson<{ name?: string; passcode?: string | null }>(req)
+    if (typeof b.name === 'string') shares.rename(id, b.name)
+    if ('passcode' in b) shares.setPasscode(id, passcode(b.passcode))
+    json(res, 200, shareJson(req, shares.get(id)!))
+  })
+  route('DELETE', '/api/shares/([A-Za-z0-9_-]{16,40})', (_req, res, [id]) => {
+    shares.revoke(id)
+    json(res, 200, { ok: true })
+  })
+  route('PUT', '/api/share-address', async (req, res) => {
+    const b = await readJson<{ address?: string | null }>(req)
+    const a = (b.address ?? '').trim().replace(/\/+$/, '')
+    if (a && !/^https?:\/\/[^\s/]+$/i.test(a)) throw new HttpError(400, 'An address like https://notes.example.com or http://192.168.1.20:8790')
+    store.setSetting('shareAddress', a || null)
+    json(res, 200, { address: shareBase(req) })
+  })
 
   route('GET', `/api/notes/${ID}/markdown`, (_req, res, [id]) => {
     const doc = sync.getDoc(noteDocName(id))
@@ -1108,13 +1119,14 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     // The web app may be served from a different origin (dev server, iOS app).
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-File-Name')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, POST, DELETE, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, POST, PATCH, DELETE, OPTIONS')
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
       return res.end()
     }
     try {
-      if (url.pathname.startsWith('/s/') && (req.method === 'GET' || req.method === 'HEAD') && servePublic(res, url)) return
+      // share links (also on the share port, which serves nothing else – shareServer.ts)
+      if (url.pathname.startsWith('/s/') && ['GET', 'HEAD', 'POST'].includes(req.method ?? '') && (await serveShare({ store, sync, shares }, req, res, url))) return
       // the private CA's certificate, to install on a device so it trusts this server's HTTPS (public: it's a certificate, not a secret)
       if (url.pathname === '/ca.crt' && (req.method === 'GET' || req.method === 'HEAD')) {
         const ca = caCertificate(config)
@@ -1189,5 +1201,5 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     secure?.closeAllConnections()
   }
 
-  return { server, secure, closeSockets }
+  return { server, secure, closeSockets, shares }
 }

@@ -10,5 +10,6 @@ These notes came with your ReconNotes server. They cover setting it up and conne
 4. [[AI agents]]: handwriting to text, summaries, search by meaning and transcription, with Ollama on your own GPU or Claude.
     - [[Speech to text with Speaches]]: Whisper on your own GPU, for accurate transcripts of recordings and meetings.
 5. [[Backups and offsite copies]]: what's backed up, restoring, and a second copy somewhere else.
+6. [[Sharing folders]]: a read-only link to a folder for someone else, on a port of its own that serves nothing but what you share.
 
 In each guide, `<server address>` means the address your devices reach the server at, like `192.168.1.20` or `10.8.0.1`.

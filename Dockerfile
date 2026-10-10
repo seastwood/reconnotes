@@ -30,6 +30,6 @@ COPY --from=build /src/apps/web/dist ./web
 # the setup guides, added as notes on first start
 COPY --from=build /src/docs/setup ./docs/setup
 VOLUME /data
-EXPOSE 8787 8443
+EXPOSE 8787 8443 8790
 USER node
 CMD ["node", "dist/index.js", "serve"]

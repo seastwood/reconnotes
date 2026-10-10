@@ -20,23 +20,66 @@ import type { SyncEngine } from './sync'
  * Read-only share links
  * =====================
  *
- * A link like https://notes.example.com/s/Xk3…  shows one note to anyone who
- * has it – no account – always as it is now. Only that note's own pictures,
- * recordings, files and drawings can be fetched through the link. Stopping
- * the share makes the link stop working at once.
+ * A link like https://notes.example.com/s/Xk3…  shows a note – or a whole
+ * folder, with its subfolders – to anyone who has it, with no account, always
+ * as it is now. Only the shared notes' own pictures, recordings, files and
+ * drawings can be fetched through the link. Stopping the share makes the link
+ * stop working at once.
  *
- * The page is built from the note's structure with every piece of text
+ * A folder is shared with someone ("Recipes" with Sydney): each person gets
+ * a link of their own, stopped on its own, optionally with a passcode (asked
+ * once on each of their devices). They're served on a port of their own as
+ * well (shareServer.ts), which can show shared things and nothing else.
+ *
+ * The pages are built from the notes' structure with every piece of text
  * escaped, and served with a Content-Security-Policy that allows no scripts,
  * so nothing in a note can run on the server's address.
  */
 
 export interface ShareRow {
   id: string
+  kind: 'note' | 'folder'
+  /** a note's link: the note ('' for a folder's) */
   noteId: string
+  /** a folder's link: the folder */
+  folderId: string | null
+  /** who it's for ("Sydney") */
+  name: string
+  hasPasscode: boolean
   createdAt: number
+  /** when the link was last opened */
+  lastSeenAt: number | null
 }
 
+interface Raw {
+  id: string
+  note_id: string
+  folder_id: string | null
+  name: string | null
+  pass_hash: string | null
+  created_at: number
+  last_seen_at: number | null
+}
+const COLUMNS = 'id, note_id, folder_id, name, pass_hash, created_at, last_seen_at'
+const row = (r: Raw): ShareRow => ({
+  id: r.id,
+  kind: r.folder_id ? 'folder' : 'note',
+  noteId: r.note_id,
+  folderId: r.folder_id,
+  name: r.name ?? '',
+  hasPasscode: Boolean(r.pass_hash),
+  createdAt: r.created_at,
+  lastSeenAt: r.last_seen_at,
+})
+
+const newId = () => crypto.randomBytes(16).toString('base64url')
+const hashPasscode = (passcode: string, salt: string) => crypto.scryptSync(passcode.normalize('NFKC'), salt, 32).toString('hex')
+
 export class Shares {
+  /** for the "already entered the passcode" cookie */
+  private secret: Buffer
+  private seen = new Map<string, number>()
+
   constructor(private store: Store) {
     store.db.exec(`
       CREATE TABLE IF NOT EXISTS shares (
@@ -47,50 +90,102 @@ export class Shares {
       );
       CREATE INDEX IF NOT EXISTS shares_note ON shares(note_id);
     `)
+    // folder links, who they're for, passcodes, when last opened (added later: to tables made before)
+    const have = new Set((store.db.prepare('PRAGMA table_info(shares)').all() as { name: string }[]).map((c) => c.name))
+    for (const [col, type] of [
+      ['folder_id', 'TEXT'],
+      ['name', 'TEXT'],
+      ['pass_hash', 'TEXT'],
+      ['pass_salt', 'TEXT'],
+      ['last_seen_at', 'INTEGER'],
+    ])
+      if (!have.has(col)) store.db.exec(`ALTER TABLE shares ADD COLUMN ${col} ${type}`)
+    store.db.exec('CREATE INDEX IF NOT EXISTS shares_folder ON shares(folder_id)')
+    let secret = store.getSetting<string>('shareSecret')
+    if (!secret) store.setSetting('shareSecret', (secret = crypto.randomBytes(32).toString('hex')))
+    this.secret = Buffer.from(secret, 'hex')
   }
 
   forNote(noteId: string): ShareRow | null {
-    const r = this.store.db.prepare('SELECT id, note_id, created_at FROM shares WHERE note_id = ? AND revoked_at IS NULL').get(noteId) as
-      | { id: string; note_id: string; created_at: number }
-      | undefined
-    return r ? { id: r.id, noteId: r.note_id, createdAt: r.created_at } : null
+    const r = this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE note_id = ? AND folder_id IS NULL AND revoked_at IS NULL`).get(noteId) as Raw | undefined
+    return r ? row(r) : null
+  }
+
+  forFolder(folderId: string): ShareRow[] {
+    return (this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE folder_id = ? AND revoked_at IS NULL ORDER BY created_at`).all(folderId) as Raw[]).map(row)
   }
 
   get(id: string): ShareRow | null {
-    const r = this.store.db.prepare('SELECT id, note_id, created_at FROM shares WHERE id = ? AND revoked_at IS NULL').get(id) as
-      | { id: string; note_id: string; created_at: number }
-      | undefined
-    return r ? { id: r.id, noteId: r.note_id, createdAt: r.created_at } : null
+    const r = this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE id = ? AND revoked_at IS NULL`).get(id) as Raw | undefined
+    return r ? row(r) : null
   }
 
   /** The note's link (made now if it has none). */
   share(noteId: string): ShareRow {
     const existing = this.forNote(noteId)
     if (existing) return existing
-    const row = { id: crypto.randomBytes(16).toString('base64url'), noteId, createdAt: Date.now() }
-    this.store.db.prepare('INSERT INTO shares (id, note_id, created_at) VALUES (?, ?, ?)').run(row.id, noteId, row.createdAt)
-    return row
+    const id = newId()
+    this.store.db.prepare('INSERT INTO shares (id, note_id, created_at) VALUES (?, ?, ?)').run(id, noteId, Date.now())
+    return this.get(id)!
+  }
+
+  /** A new link to the folder, for `name` (each person their own). */
+  shareFolder(folderId: string, name: string, passcode?: string | null): ShareRow {
+    const id = newId()
+    this.store.db.prepare('INSERT INTO shares (id, note_id, folder_id, name, created_at) VALUES (?, ?, ?, ?, ?)').run(id, '', folderId, name.trim().slice(0, 80), Date.now())
+    if (passcode) this.setPasscode(id, passcode)
+    return this.get(id)!
   }
 
   stop(noteId: string): boolean {
-    return this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE note_id = ? AND revoked_at IS NULL').run(Date.now(), noteId).changes > 0
+    return this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE note_id = ? AND folder_id IS NULL AND revoked_at IS NULL').run(Date.now(), noteId).changes > 0
+  }
+
+  /** Stop one link. */
+  revoke(id: string): boolean {
+    return this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(Date.now(), id).changes > 0
+  }
+
+  rename(id: string, name: string) {
+    this.store.db.prepare('UPDATE shares SET name = ? WHERE id = ?').run(name.trim().slice(0, 80), id)
+  }
+
+  /** A passcode to open the link (null: none). A new one asks again on every device. */
+  setPasscode(id: string, passcode: string | null) {
+    const salt = passcode ? crypto.randomBytes(16).toString('hex') : null
+    this.store.db.prepare('UPDATE shares SET pass_hash = ?, pass_salt = ? WHERE id = ?').run(passcode ? hashPasscode(passcode, salt!) : null, salt, id)
+  }
+
+  checkPasscode(id: string, passcode: string): boolean {
+    const r = this.store.db.prepare('SELECT pass_hash, pass_salt FROM shares WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null; pass_salt: string | null } | undefined
+    if (!r?.pass_hash || !r.pass_salt) return false
+    const got = Buffer.from(hashPasscode(passcode, r.pass_salt), 'hex')
+    return crypto.timingSafeEqual(got, Buffer.from(r.pass_hash, 'hex'))
+  }
+
+  /** What the "passcode entered" cookie holds for this link (changes when the passcode does). */
+  pass(id: string): string | null {
+    const r = this.store.db.prepare('SELECT pass_hash FROM shares WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null } | undefined
+    return r?.pass_hash ? crypto.createHmac('sha256', this.secret).update(`${id}|${r.pass_hash}`).digest('base64url') : null
+  }
+
+  /** Opened just now (written at most once a minute). */
+  opened(id: string) {
+    const now = Date.now()
+    if (now - (this.seen.get(id) ?? 0) < 60_000) return
+    this.seen.set(id, now)
+    this.store.db.prepare('UPDATE shares SET last_seen_at = ? WHERE id = ?').run(now, id)
   }
 
   all(): ShareRow[] {
-    return (
-      this.store.db.prepare('SELECT id, note_id, created_at FROM shares WHERE revoked_at IS NULL ORDER BY created_at DESC').all() as {
-        id: string
-        note_id: string
-        created_at: number
-      }[]
-    ).map((r) => ({ id: r.id, noteId: r.note_id, createdAt: r.created_at }))
+    return (this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE revoked_at IS NULL ORDER BY created_at DESC`).all() as Raw[]).map(row)
   }
 }
 
 /** The shared note, if the link is live and the note isn't deleted. */
 export function sharedNote(shares: Shares, sync: SyncEngine, id: string): { noteId: string; doc: Y.Doc; title: string; updatedAt: number } | null {
   const share = /^[A-Za-z0-9_-]{16,40}$/.test(id) ? shares.get(id) : null
-  if (!share) return null
+  if (!share || share.kind !== 'note') return null
   const meta = getNotes(sync.getDoc(WORKSPACE_DOC) ?? new Y.Doc()).get(share.noteId)
   if (!meta) return null
   const note = readNote(meta)
@@ -127,12 +222,16 @@ export function drawingSvg(doc: Y.Doc, drawingId: string, overlay = false): stri
   return overlay ? svg.replace(/<rect [^>]*\/>/, '') : svg
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 const safeHref = (h: string) => (/^(https?:|mailto:)/i.test(h.trim()) ? h.trim() : null)
 
-/** The shared page: the note's content as plain, script-free HTML. */
-export function sharePage(id: string, title: string, doc: Y.Doc, updatedAt: number): string {
-  const base = `/s/${id}`
+/**
+ * The shared page: the note's content as plain, script-free HTML. `base`: where its pictures and files
+ * are fetched (/s/<link>, or /s/<link>/n/<note> in a shared folder). `opts.noteHref`: a link to
+ * another note that's shared too (else it's shown as plain words); `opts.top`: a bar above it (the
+ * way back to the folder).
+ */
+export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: number, opts: { noteHref?: (noteId: string) => string | null; top?: string } = {}): string {
   const transcripts = getTranscripts(doc)
 
   const inline = (el: Y.XmlElement): string => {
@@ -154,7 +253,12 @@ export function sharePage(id: string, title: string, doc: Y.Doc, updatedAt: numb
         }
       } else if (child instanceof Y.XmlElement) {
         if (child.nodeName === 'hardBreak') s += '<br>'
-        else if (child.nodeName === 'noteLink') s += `<span class="link">${esc(String(child.getAttribute('label') || child.getAttribute('title') || 'note'))}</span>`
+        else if (child.nodeName === 'noteLink') {
+          const words = esc(String(child.getAttribute('label') || child.getAttribute('title') || 'note'))
+          // a link to a note that's shared as well: followed; to any other: just its words
+          const to = opts.noteHref?.(String(child.getAttribute('noteId') ?? ''))
+          s += to ? `<a href="${esc(to)}">${words}</a>` : `<span class="link">${words}</span>`
+        }
         else if (child.nodeName === 'dueDate') s += `<span class="due">📅 ${esc(String(child.getAttribute('date') ?? ''))}</span>`
         else s += inline(child)
       }
@@ -238,12 +342,20 @@ export function sharePage(id: string, title: string, doc: Y.Doc, updatedAt: numb
 
   const body = children(getContent(doc))
   const when = new Date(updatedAt || Date.now()).toUTCString()
+  return pageShell(
+    title,
+    `${opts.top ?? ''}<div class="meta">Shared from ReconNotes · updated ${esc(when)}</div><div class="note">${body}</div><footer>Read-only copy. It shows the note as it is now.</footer>`,
+  )
+}
+
+/** A shared page's frame: its styles (light and dark), no scripts. */
+export function pageShell(title: string, inner: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow"><title>${esc(title)}</title>
 <style>
-:root { color-scheme: light dark; --bg: #faf8f3; --text: #1d1d1f; --muted: #777; --line: #ddd8cc; --accent: #e0a800; }
-@media (prefers-color-scheme: dark) { :root { --bg: #161617; --text: #ececec; --muted: #9a9a9a; --line: #333; } }
+:root { color-scheme: light dark; --bg: #faf8f3; --text: #1d1d1f; --muted: #777; --line: #ddd8cc; --accent: #e0a800; --card: #fff; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161617; --text: #ececec; --muted: #9a9a9a; --line: #333; --card: #1f1f21; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
 main { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
@@ -271,8 +383,24 @@ th p, td p { margin: 0; }
 .due { font-size: 14px; padding: 1px 6px; border-radius: 6px; background: rgba(127,127,127,.15); }
 a { color: inherit; }
 footer { margin-top: 48px; color: var(--muted); font-size: 12px; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+.crumbs a { text-decoration: none; color: var(--text); }
+.crumbs a:hover { text-decoration: underline; }
+h1.folder { font-size: 28px; margin: 0 0 4px; }
+.list { list-style: none; padding: 0; margin: 18px 0; display: grid; gap: 8px; }
+.list li { min-width: 0; }
+.list a { display: block; overflow: hidden; text-decoration: none; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.list a:hover { border-color: var(--accent); }
+.list .t { font-weight: 600; }
+.list .s { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .d { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.empty { color: var(--muted); }
+form.pass { margin-top: 24px; display: grid; gap: 10px; max-width: 320px; }
+form.pass input { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+form.pass button { font: inherit; font-weight: 600; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--accent); color: #1d1d1f; }
+.error { color: #d92d20; }
 </style></head>
-<body><main><div class="meta">Shared from ReconNotes · updated ${esc(when)}</div><div class="note">${body}</div><footer>Read-only copy. It shows the note as it is now.</footer></main></body></html>`
+<body><main>${inner}</main></body></html>`
 }
 
 /** Headers for the shared page: no scripts, no framing, not indexed. */

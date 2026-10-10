@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { Copy, ExternalLink, Globe, Loader2, Share, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { settings } from '../lib/settings'
+import { refreshShares } from '../lib/shares'
 
 interface ShareState {
   shared: boolean
   path: string | null
+  /** the link, at the share address (the share port, or the address set for sharing) */
+  url?: string | null
 }
 
 /** Share a read-only link to this note (no account needed to view it). */
@@ -26,6 +29,7 @@ export function ShareDialog({ noteId, onClose }: { noteId: string; onClose: () =
     setError(null)
     try {
       setState(await api<ShareState>(method, `/api/notes/${noteId}/share`))
+      void refreshShares()
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -33,7 +37,7 @@ export function ShareDialog({ noteId, onClose }: { noteId: string; onClose: () =
     }
   }
 
-  const url = state?.path ? settings.get().serverUrl.replace(/\/$/, '') + state.path : ''
+  const url = state?.url ?? (state?.path ? settings.get().serverUrl.replace(/\/$/, '') + state.path : '')
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url)

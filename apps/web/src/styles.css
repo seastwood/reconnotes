@@ -4393,6 +4393,120 @@ a.button {
   color: var(--muted);
   margin-left: 2px;
 }
+.folder-flag.shared {
+  color: var(--accent-text);
+}
+
+/* sharing a folder: a link for each person */
+.share-folder-dialog header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.share-links {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+  display: grid;
+  gap: 10px;
+}
+.share-links > li {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.share-links .row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.share-link-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.share-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--active);
+  color: var(--accent-text);
+  margin-left: 6px;
+}
+.share-link-head .share-tag {
+  margin-left: 0;
+}
+.share-seen {
+  font-size: 12px;
+  color: var(--muted);
+}
+.share-link-head .share-seen {
+  margin-left: auto;
+}
+.share-new {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.share-new h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.share-new label,
+.share-address label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.share-new button[type='submit'] {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hint-inline {
+  font-weight: normal;
+  color: var(--muted);
+  font-size: 13px;
+}
+.share-address {
+  margin-top: 10px;
+}
+.share-address code {
+  word-break: break-all;
+}
+.share-overview {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 6px;
+}
+.share-overview li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.share-overview li > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.share-overview-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* follow-up questions under an answer */
 .ask-followup {

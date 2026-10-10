@@ -7,6 +7,7 @@ import { SyncEngine } from './sync'
 import { Ai } from './ai'
 import { AgentRegistry } from './agents'
 import { createHttpServer } from './http'
+import { createShareServer } from './shareServer'
 import { resumePendingAttachments } from './attachments'
 import { scheduleBackups } from './backup'
 import { startDigestSchedule } from './digest'
@@ -30,6 +31,8 @@ export interface App {
   server: http.Server
   /** HTTPS, when there's a certificate */
   secure: https.Server | null
+  /** the share port's server: shared notes and folders only (shareServer.ts) */
+  shareServer: http.Server
   close(): Promise<void>
 }
 
@@ -50,7 +53,8 @@ export function createApp(config: Config, opts: { backups?: boolean; guides?: bo
   registerJobHandlers(config, store, sync, ai, jobs, samples)
   const notifier = new Notifier(store, new Apns(store))
   jobs.onFinish = (job) => notifier.jobFinished(job, JOB_KINDS[job.kind] ?? 'Job')
-  const { server, secure, closeSockets } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
+  const { server, secure, closeSockets, shares } = createHttpServer(config, store, sync, ai, devices, jobs, notifier, samples)
+  const shareServer = createShareServer({ store, sync, shares })
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   sync.embedMissing()
@@ -70,12 +74,15 @@ export function createApp(config: Config, opts: { backups?: boolean; guides?: bo
     jobs,
     server,
     secure,
+    shareServer,
     async close() {
       stopBackups()
       stopDigest()
       await sync.destroy()
       const closed = new Promise<void>((resolve) => server.close(() => resolve()))
       secure?.close()
+      shareServer.close()
+      shareServer.closeAllConnections()
       closeSockets()
       await closed
       store.close()
