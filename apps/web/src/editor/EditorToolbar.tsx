@@ -1,4 +1,5 @@
 import { errorText } from '../lib/jobs'
+import { canIndentAt, indentAt } from './indent'
 import { useEffect, useRef, useState } from 'react'
 import { Popover } from '../components/Popover'
 import { useEditorState, type Editor } from '@tiptap/react'
@@ -128,10 +129,9 @@ const LISTS: { key: 'bullet' | 'numbered' | 'check'; label: string; icon: typeof
   { key: 'check', label: 'Checklist', icon: ListChecks },
 ]
 
-/** Indent (1) or outdent (-1) the list item at the cursor – bulleted, numbered or checklist. */
+/** Indent (1) or outdent (-1) what's at the cursor: a list item nests; other text moves a step. */
 export function indent(editor: Editor, dir: 1 | -1) {
-  const item = editor.isActive('taskItem') ? 'taskItem' : 'listItem'
-  return dir > 0 ? editor.chain().focus().sinkListItem(item).run() : editor.chain().focus().liftListItem(item).run()
+  return indentAt(editor, dir)
 }
 
 const LIST_TYPES = { bullet: 'bulletList', numbered: 'orderedList', check: 'taskList' } as const
@@ -210,8 +210,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       underline: e.isActive('underline'),
       strike: e.isActive('strike'),
       list: e.isActive('taskList') ? 'check' : e.isActive('orderedList') ? 'numbered' : e.isActive('bulletList') ? 'bullet' : null,
-      canIndent: e.can().sinkListItem('listItem') || e.can().sinkListItem('taskItem'),
-      canOutdent: e.can().liftListItem('listItem') || e.can().liftListItem('taskItem'),
+      canIndent: canIndentAt(e, 1),
+      canOutdent: canIndentAt(e, -1),
       table: e.isActive('table'),
       style: e.isActive('heading', { level: 1 })
         ? 'Title'
