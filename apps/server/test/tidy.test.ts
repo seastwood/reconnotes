@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { bustOutItems, fixBars, inCardOrder, isBoilerplate, joinAmountsToNames, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
+import { amountFromReading, bustOutItems, fixBars, inCardOrder, isBoilerplate, joinAmountsToNames, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
 import { guessKind, kindFromWords, kindIn, notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
@@ -243,6 +243,27 @@ BUST OUT Large pot, Salt, Pepper
     expect(md).not.toMatch(/BUST OUT|HelloFreshPics/)
   })
 
+  it('a column heading stuck on, calories, a step’s title repeated', async () => {
+    const id = 'photohead0000001'
+    app.store.putAttachment({ id, mime: 'image/png', name: 'front.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    const read = 'TAGINE\n2 PERSON | 4 PERSON\n1 | 1 | Yellow Onion\n1 | 1 | Lemon\nHelloCustom Calories: 1250\n4 COOK VEGGIES Heat a large drizzle of oil in a large pan.\nZester Small pot Kosher salt Butter'
+    reply = JSON.stringify({
+      name: 'Tagine',
+      ingredients: ['2 PERSON | 4 PERSON Yellow Onion', '1 | 1 Lemon', 'Calories: 1250'],
+      steps: [{ title: 'COOK VEGGIES', text: '4 COOK VEGGIES - Heat a large drizzle of oil in a large pan.' }],
+      notes: ["You'll need: Zester | Small pot, Kosher salt |, Butter (2 TBSP | 4 TBSP). From your pantry: Salt, Pepper, Oil, Butter."],
+    })
+    const r = await recipeFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: id, text: read }], null)
+    const md = text(r.noteId)
+    // (no amount from the AI for the onion: the one read with it)
+    expect(md).toContain('- [ ] 1 Yellow Onion\n- [ ] 1 Lemon\n')
+    expect(md).not.toMatch(/PERSON|1250/)
+    expect(md).toContain('1. COOK VEGGIES: Heat a large drizzle of oil in a large pan.')
+    expect(md).toContain('You’ll need: Zester, Small pot')
+    expect(md).toContain('From your pantry: Kosher salt, Butter (2 TBSP | 4 TBSP)')
+    expect(md).not.toContain('Salt, Pepper, Oil')
+  })
+
   it('marks an amount that wasn’t read, however it’s written', () => {
     const read = new Set(['10', '1/2', '4'])
     expect(markUnreadAmounts('½ cup broth', read)).toBe('½ cup broth')
@@ -267,6 +288,13 @@ describe('a meal-kit card’s lines', () => {
     expect(splitColumns('1 11 Jalapeño')).toEqual({ first: '1', other: '1', name: 'Jalapeño' })
     expect(fixBars('Lemon 111')).toBe('Lemon 1 | 1')
   })
+  it('an amount the AI left out, found with its name in what was read', () => {
+    const read = ['2 PERSON | 4 PERSON', '1 | 1 | Yellow Onion', '¼ oz | ¼ oz', 'Parsley', 'Lemon zest to taste']
+    expect(amountFromReading('Yellow Onion', read)).toBe('1 | 1 Yellow Onion')
+    expect(amountFromReading('Parsley', read)).toBe('¼ oz | ¼ oz Parsley')
+    expect(amountFromReading('Lemon', read)).toBe('Lemon')
+    expect(amountFromReading('2 Zucchini', read)).toBe('2 Zucchini')
+  })
   it('a grid’s amounts put back with their names', () => {
     expect(joinAmountsToNames(['1 | 1', 'Yellow Onion', '¼ Oz', 'Parsley', '1 Clove Garlic', ''])).toEqual(['1 | 1 Yellow Onion', '¼ Oz Parsley', '1 Clove Garlic'])
     expect(joinAmountsToNames(['2 TBSP', '1 Lemon'])).toEqual(['2 TBSP', '1 Lemon'])
@@ -284,6 +312,12 @@ describe('a meal-kit card’s lines', () => {
       'Olive oil (2 TBSP | 3 TBSP)',
     ])
     expect(bustOutItems('Toast the almonds')).toBeNull()
+    // the AI's own version: two columns with bars, and a pantry summary of its own
+    expect(
+      bustOutItems(
+        "You'll need: Zester | 2 Small bowls, Strainer | Large pan, Small pot |, Kosher salt |, Black pepper |, Cooking oil (1 TBSP | 1 TBSP) (1 tsp | 1 tsp), Olive oil (2 TBSP | 3 TBSP), Butter (2 TBSP | 4 TBSP). From your pantry: Salt, Pepper, Oil, Butter.",
+      ),
+    ).toEqual(['Zester', '2 Small bowls', 'Strainer', 'Large pan', 'Small pot', 'Kosher salt', 'Black pepper', 'Cooking oil (1 TBSP | 1 TBSP) (1 tsp | 1 tsp)', 'Olive oil (2 TBSP | 3 TBSP)', 'Butter (2 TBSP | 4 TBSP)'])
   })
 
   it('allergen notes out of the ingredients, stray marks off', () => {

@@ -63,7 +63,7 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 
 - Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
 - name: the recipe's title – the big name on the front with the line under it, if it has one (e.g. "Lemon Thyme Pork with Jasmine Rice", "Balsamic Tomato & Herb Chicken over Buttery Garlic Spaghetti"), not the time or calorie line. A letter missing where the card has a hole punched in it ("ALM ND", "TOM TO"): fill it in.
-- ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. An ingredient whose amount you can't read: just its name.
+- ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. Each ingredient has its own amount on the card (on a grid of pictures, the amount is printed with the name) – keep it with its name. An ingredient whose amount you can't read: just its name. Not ingredients: column headings ("2 PERSON | 4 PERSON"), calories.
 - A card often shows the ingredients as a grid of pictures, each with its amount on one line and its name on the next ("1 | 1" then "Yellow Onion"): put each amount with its own name, one ingredient per line – never two in one. Leave out what's only the other side of the card's options ("HelloCustom", calories for a swap).
 - Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
 - steps: in order, each with its title if it has one ("Cook the beef") and its text.
@@ -200,17 +200,56 @@ export function joinAmountsToNames(items: string[]): string[] {
   return out
 }
 
+/**
+ * An ingredient the AI gave without an amount ("Yellow Onion"), when what was read has one with it:
+ * on its line ("1 | 1 | Yellow Onion") or the line above ("1 | 1" then "Yellow Onion"). The
+ * ingredient as it was, otherwise.
+ */
+export function amountFromReading(item: string, readLines: string[]): string {
+  if (/[\d½⅓⅔¼¾⅛]/.test(item) || !/\p{L}{3}/u.test(item)) return item
+  const name = item.trim().toLowerCase()
+  const amounts = new RegExp(`(${AMOUNT}(?:\\s*\\|\\s*${AMOUNT})?)\\s*\\|?\\s*$`, 'i')
+  for (const [i, raw] of readLines.entries()) {
+    const line = raw.trim()
+    const at = line.toLowerCase().indexOf(name)
+    if (at < 0) continue
+    // just before the name, on its line
+    const before = fixBars(line.slice(0, at).trim())
+    const m = before && amounts.exec(before)
+    if (m && m.index === 0) return `${m[1].trim()} ${item.trim()}`
+    // the line above, if it's only an amount
+    const above = fixBars((readLines[i - 1] ?? '').trim())
+    if (above && amountOnly(above)) return `${above} ${item.trim()}`
+  }
+  return item
+}
+
 /** The card's own small print – not part of the recipe: social media, a phone number, packaging, the other side's options. */
 export const isBoilerplate = (t: string) =>
   /hellofresh(?:pics|\.com)|share your|@\w{3,}|\(\d{3}\)\s*\d{3}-\d{4}|sustainab|rest assured|if you chose to modify|flip side of this card|scan here|issues with your order|get social|www\.|\.com\b/i.test(t)
 
 /** A "Bust out" list as one note ("BUST OUT • Zester • 2 Small bowls • Kosher salt • Olive oil (2 TBSP | 3 TBSP)"): its items. */
 export function bustOutItems(t: string): string[] | null {
-  if (!/^\s*bust out\b/i.test(t)) return null
-  return t
-    .replace(/^\s*bust out\s*:?/i, '')
-    .split(/[•·]/)
-    .map((x) => tidyIngredient(x).text)
+  if (!/^\s*(?:bust out|you['’]ll need)\b/i.test(t)) return null
+  const list = t
+    .replace(/^\s*(?:bust out|you['’]ll need)\s*:?/i, '')
+    // (a summary the AI added of its own: "From your pantry: Salt, Pepper, Oil, Butter.")
+    .replace(/\.?\s*from your pantry\s*:.*$/i, '')
+  // split at •, a comma or a bar – but not inside brackets ("Cooking oil (1 TBSP | 1 TBSP)")
+  const items: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of list) {
+    if (ch === '(') depth++
+    if (ch === ')') depth = Math.max(0, depth - 1)
+    if (!depth && /[•·,|]/.test(ch)) {
+      items.push(cur)
+      cur = ''
+    } else cur += ch
+  }
+  items.push(cur)
+  return items
+    .map((x) => tidyIngredient(x.replace(/\.$/, '')).text)
     // (leftovers of icons read as text: "0 e")
     .filter((x) => /\p{L}{3}/u.test(x))
 }
@@ -302,13 +341,21 @@ export async function recipeFromPhotos(
   const kitchen: string[] = []
   const pantry: string[] = []
   const allergens = new Set<string>()
+  const readLines = all.split('\n')
   const ingredients = joinAmountsToNames(
-    (s.ingredients ?? []).map(str).map((t) => {
+    (s.ingredients ?? [])
+      .map(str)
+      // a column heading stuck on ("2 PERSON | 4 PERSON Yellow Onion"); calories (a swap's, on the card's side)
+      .map((t) => t.replace(/^\d+\s*(?:-\s*)?(?:person|people|servings?)\s*\|\s*\d+\s*(?:-\s*)?(?:person|people|servings?)\s*/i, ''))
+      .filter((t) => !/^calories\b|^\d+\s*(?:-\s*)?(?:person|people|servings?)\b.*\|/i.test(t))
+      .map((t) => {
       const x = tidyIngredient(t)
       x.allergens.forEach((a) => allergens.add(a))
       return x.text
     }),
   )
+    // no amount from the AI, but one with it in what was read: that one
+    .map((t) => amountFromReading(t, readLines))
     .filter(keep)
     .map((t) => {
       // amounts for 2 and 4 people side by side ("2 TBSP | 4 TBSP • Sour Cream", "Butter (1 TBSP | 2 TBSP)"): the first
@@ -327,6 +374,8 @@ export async function recipeFromPhotos(
   const steps = (s.steps ?? [])
     .map((x) => (typeof x === 'string' ? { title: '', text: str(x) } : { title: str((x as Record<string, unknown>)?.title), text: str((x as Record<string, unknown>)?.text) }))
     .filter((x) => keep(`${x.title} ${x.text}`.trim()))
+    // (the card's number and title repeated at the start of the text: "4 COOK VEGGIES - Heat…")
+    .map((x) => ({ ...x, text: x.title ? x.text.replace(new RegExp(`^\\d{0,2}\\s*${x.title.replace(/^\d+\s*/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:•]?\\s*`, 'i'), '') : x.text }))
     .map((x) => mark(x.title && !x.text.toLowerCase().startsWith(x.title.toLowerCase()) ? `${x.title}: ${x.text}` : x.text || x.title))
   const ordered = inCardOrder(steps)
   if (!ingredients.length && !ordered.length) throw new Error('No ingredients or steps could be found in the photos.')

@@ -153,6 +153,7 @@ const RECIPE_PAGE_PROMPT = `This is a photo of a page of a recipe (a meal-kit re
 
 - Keep every word, number, fraction and unit exactly as printed ("1 ½ tbsp", "10 oz", "2 | 4"). Don't round, convert or correct anything.
 - Ingredient amounts in columns for different numbers of people (e.g. a "2 people" and a "4 people" column): write each ingredient on its own line as "amount for the first | amount for the second | ingredient", and write the column headings first.
+- Ingredients shown as a grid of pictures, each with its amount and its name printed under it: write one line per ingredient, its own amount with its own name ("1 | 1 | Yellow Onion", "¼ oz | ¼ oz | Parsley") – going across each row of the grid. Never a row of amounts and then a row of names.
 - Keep numbered steps numbered, with their titles.
 - Leave out nothing that's text; don't describe the pictures. Write only the text.`
 
