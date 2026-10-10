@@ -122,6 +122,19 @@ const TAGS_KEY = '__tags'
 /** tags shown before "Show all" */
 const TOP_TAGS = 5
 
+/** A quick, smooth scroll (a quarter of a second, easing out) – quicker than the browser's own. */
+function scrollSmoothly(el: HTMLElement, to: number, ms = 260) {
+  const from = el.scrollTop
+  if (Math.abs(to - from) < 2) return
+  const start = performance.now()
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / ms)
+    el.scrollTop = from + (to - from) * (1 - Math.pow(1 - t, 3))
+    if (t < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
 export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands, onMoveFolder, search, onSearch, onOpenResult, activeNoteId }: Props) {
   // saved searches shown here (pin them in the search suggestions)
   const smart = useSavedSearches().filter((s) => s.pinned)
@@ -188,25 +201,33 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     return tags.filter(([t]) => top.has(t))
   }, [tags, allTags, view])
 
-  // the folder you're in, in view: when the folders show again (back on a phone) or it changes –
-  // or the folder it's in, when that's folded
+  // what you're looking at, in view – a folder (or the folder it's in, when that's folded), All
+  // Notes, Tasks… – when it changes (a quick, smooth scroll), or when the folders show again (back
+  // on a phone: straight there, the panel is sliding in)
   const folderList = useRef<HTMLElement>(null)
-  const shownFolder = view.kind === 'folder' ? view.folderId : null
+  const viewKey = view.kind === 'folder' ? `folder:${view.folderId}` : view.kind === 'tag' ? `tag:${view.tag}` : view.kind
   const searching = Boolean(search.trim())
+  const shownOnce = useRef(false)
   useLayoutEffect(() => {
     const list = folderList.current
-    if (!list || !shownFolder) return
-    const byId = new Map(ws.folders.map((f) => [f.id, f]))
+    if (!list) return
     let row: HTMLElement | null = null
-    for (let id: string | null = shownFolder, n = 0; id && !row && n < 50; id = byId.get(id)?.parentId ?? null, n++)
-      row = list.querySelector<HTMLElement>(`[data-folder="${CSS.escape(id)}"]`)
+    if (view.kind === 'folder') {
+      const byId = new Map(ws.folders.map((f) => [f.id, f]))
+      for (let id: string | null = view.folderId, n = 0; id && !row && n < 50; id = byId.get(id)?.parentId ?? null, n++)
+        row = list.querySelector<HTMLElement>(`[data-folder="${CSS.escape(id)}"]`)
+    } else row = list.querySelector<HTMLElement>('.folder-row.active')
+    const smooth = shownOnce.current
+    shownOnce.current = true
     if (!row) return
     const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
     // already in view: left where it is
     if (top >= list.scrollTop && top + row.offsetHeight <= list.scrollTop + list.clientHeight) return
-    list.scrollTop = Math.max(0, top - list.clientHeight / 3)
+    const to = Math.max(0, Math.min(list.scrollHeight - list.clientHeight, top - list.clientHeight / 3))
+    if (smooth) scrollSmoothly(list, to)
+    else list.scrollTop = to
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownFolder, searching, ws.loaded])
+  }, [viewKey, searching, ws.loaded])
 
   const toggle = (id: string) => {
     const next = { ...collapsed, [id]: !collapsed[id] }
