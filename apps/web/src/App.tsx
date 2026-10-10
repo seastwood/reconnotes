@@ -547,6 +547,11 @@ export function App() {
               onTogglePanels={narrow ? undefined : cyclePanels}
               fullScreen={!narrow && layout === 1}
               initialFind={findOnOpen?.noteId === nav.noteId ? findOnOpen : undefined}
+              onShowFolder={(view) => {
+                // out of the search results: the folders show, this one chosen, the note in its list
+                setSearch('')
+                showView(view)
+              }}
               onOpenTag={(tag) => {
                 setNav({ ...nav, view: { kind: 'tag', tag } })
                 if (narrow) setPane('list')

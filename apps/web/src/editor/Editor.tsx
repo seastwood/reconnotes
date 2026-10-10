@@ -37,6 +37,8 @@ import { ListenButtons } from './listenButtons'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
 import { RelatedNotes } from '../components/RelatedNotes'
+import { NotePath } from '../components/NotePath'
+import type { View } from '../components/Sidebar'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { ShareDialog } from '../components/ShareDialog'
@@ -60,9 +62,11 @@ interface Props {
   onOpenTag?: (tag: string) => void
   /** show the find bar with this text (a note opened from search results; `n` changes on every open) */
   initialFind?: { query: string; n: number }
+  /** show the folder the note is in (its path at the top) */
+  onShowFolder?: (view: View) => void
 }
 
-export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag }: Props) {
+export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = onOpenNote, onBack, onTogglePanels, fullScreen, initialFind, onOpenTag, onShowFolder }: Props) {
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
@@ -309,6 +313,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
+            {onShowFolder && <NotePath folderId={folderId} onShow={onShowFolder} />}
             {settingUp && (
               <MeetingSetup
                 noteId={noteId}

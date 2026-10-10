@@ -904,6 +904,50 @@ button.text {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* where the note is (its folders), above it */
+.note-path {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 12px 28px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.note-path ~ div > .note-content {
+  padding-top: 8px;
+}
+.note-path-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.note-path button {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-path button:hover {
+  color: var(--text);
+  background: var(--line);
+}
+@media (max-width: 699px) {
+  .note-path {
+    padding: 10px 16px 0;
+  }
+}
 .note-content {
   outline: none;
   max-width: 820px;
