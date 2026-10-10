@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { findTextFor } from '../lib/findText'
 import { ChevronLeft, ChevronRight, Repeat as RepeatIcon } from 'lucide-react'
 import { isoDate, occurrences, REPEAT_LABELS, type Repeat } from '@reconnotes/core'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
@@ -38,7 +39,7 @@ async function complete(noteId: string, dueId: string) {
 }
 
 /** Open items with a due date, across every note, soonest first. */
-export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null; onOpen: (noteId: string) => void }) {
+export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null; onOpen: (noteId: string, find?: string) => void }) {
   const ws = useWorkspace()
   const rows: Row[] = useMemo(
     () =>
@@ -84,7 +85,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
             <div className={`due-group-label${g.label === 'Overdue' ? ' overdue' : ''}`}>{g.label}</div>
             <ul>
               {items.map((r) => (
-                <li key={r.id} className={`note-row due-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
+                <li key={r.id} className={`note-row due-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId, findTextFor(r.text))}>
                   <input
                     type="checkbox"
                     aria-label="Mark done"
@@ -111,7 +112,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
 const WEEKDAYS = Array.from({ length: 7 }, (_, i) => new Date(2026, 9, 4 + i).toLocaleDateString(undefined, { weekday: 'narrow' }))
 
 /** A month at a time: each day shows what's due (repeating items on every date they come up). */
-function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId: string | null; onOpen: (noteId: string) => void }) {
+function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId: string | null; onOpen: (noteId: string, find?: string) => void }) {
   const today = isoDate(new Date())
   const [month, setMonth] = useState(() => {
     const d = new Date()
@@ -172,7 +173,7 @@ function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId
       <div className="cal-day-label">{formatDue(picked)}</div>
       <ul>
         {items.map((r) => (
-          <li key={`${r.id}-${picked}`} className={`note-row due-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId)}>
+          <li key={`${r.id}-${picked}`} className={`note-row due-row${r.noteId === activeNoteId ? ' active' : ''}`} onClick={() => onOpen(r.noteId, findTextFor(r.text))}>
             {r.date === picked ? (
               <input type="checkbox" aria-label="Mark done" onClick={(e) => e.stopPropagation()} onChange={() => void complete(r.noteId, r.id)} />
             ) : (

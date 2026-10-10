@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { findTextFor } from '../lib/findText'
 import { Repeat as RepeatIcon } from 'lucide-react'
 import { formatDue, daysUntil, REPEAT_LABELS, type Repeat } from '@reconnotes/core'
 import { apiUrl, authHeaders, isSyncConfigured } from '../lib/settings'
@@ -26,7 +27,7 @@ let last: { key: string; tasks: Task[] } | null = null
  * meeting action items, extracted to-dos), grouped by note. Tick them here.
  * Read by your server from the notes themselves.
  */
-export function TasksList({ activeNoteId, onOpen }: { activeNoteId: string | null; onOpen: (noteId: string) => void }) {
+export function TasksList({ activeNoteId, onOpen }: { activeNoteId: string | null; onOpen: (noteId: string, find?: string) => void }) {
   const [state, setStateRaw] = useState<'open' | 'done'>(() => safeLocalGet('reconnotes.tasksState', 'open'))
   const setState = (s: 'open' | 'done') => (setStateRaw(s), safeLocalSet('reconnotes.tasksState', s))
   const unlocked = useFolderAccess().unlockedIds.join(',')
@@ -122,7 +123,7 @@ export function TasksList({ activeNoteId, onOpen }: { activeNoteId: string | nul
           </div>
           <ul>
             {list.map((t) => (
-              <li key={`${t.i}|${t.text}`} className={`note-row due-row${t.done ? ' done' : ''}`} onClick={() => onOpen(t.noteId)}>
+              <li key={`${t.i}|${t.text}`} className={`note-row due-row${t.done ? ' done' : ''}`} onClick={() => onOpen(t.noteId, findTextFor(t.text))}>
                 <input type="checkbox" checked={t.done} aria-label={t.done ? 'Mark not done' : 'Mark done'} onClick={(e) => e.stopPropagation()} onChange={() => void toggle(t)} />
                 <div>
                   <div className="note-title">{t.text}</div>

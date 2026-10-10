@@ -39,7 +39,8 @@ import { loadRefs, openRefs, refsStore } from '../lib/refs'
 interface Props {
   view: View
   noteId: string | null
-  onOpen: (id: string) => void
+  /** `find`: where in the note to land (a due item's or a to-do's text) */
+  onOpen: (id: string, find?: string) => void
   onBack?: () => void
   /** show/hide the folders panel (iPad and desktop) */
   onToggleFolders?: () => void

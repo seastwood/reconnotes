@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core'
+import { findTextFor } from './findText'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { onWorkspaceChange, type WorkspaceSnapshot } from './workspace'
 import { settings } from './settings'
@@ -69,18 +70,19 @@ async function reschedule(ws: WorkspaceSnapshot) {
       title: i.text || 'Due today',
       body: `Due today · ${i.noteTitle}`,
       schedule: { at: i.at, allowWhileIdle: true },
-      extra: { noteId: i.noteId },
+      // (opening it lands on the item)
+      extra: { noteId: i.noteId, find: findTextFor(i.text) },
     })),
   })
   localStorage.setItem(KEY, JSON.stringify(items.map((i) => numId(i.id))))
 }
 
 /** Start keeping reminders in step with the notes; tapping one opens its note. */
-export function startReminders(openNote: (noteId: string) => void) {
+export function startReminders(openNote: (noteId: string, find?: string) => void) {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('LocalNotifications')) return
   void LocalNotifications.addListener('localNotificationActionPerformed', (e) => {
-    const id = (e.notification.extra as { noteId?: string } | undefined)?.noteId
-    if (id) openNote(id)
+    const extra = e.notification.extra as { noteId?: string; find?: string } | undefined
+    if (extra?.noteId) openNote(extra.noteId, extra.find)
   })
   const run = (ws: WorkspaceSnapshot) => {
     if (timer) clearTimeout(timer)

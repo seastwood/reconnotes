@@ -9,7 +9,7 @@ import { applyConnectData } from './connectLink'
  *   reconnotes://new[?text=…]  a new note (with that text)
  *   reconnotes://record        a new note, recording straight away
  *   reconnotes://scan          a new note, scanning straight away
- *   reconnotes://open?note=ID  open a note
+ *   reconnotes://open?note=ID[&find=…]  open a note (at that text)
  *   reconnotes://search?q=…    search
  *   reconnotes://connect?data= connect to a server (setup link)
  *
@@ -20,7 +20,7 @@ import { applyConnectData } from './connectLink'
 
 export type LinkAction =
   | { kind: 'new'; text?: string; then?: 'record' | 'scan' }
-  | { kind: 'open'; noteId: string }
+  | { kind: 'open'; noteId: string; find?: string }
   | { kind: 'search'; query: string }
 
 interface AppLinksPlugin {
@@ -66,7 +66,7 @@ export function parseLink(raw: string): LinkAction | 'connected' | null {
     case 'scan':
       return { kind: 'new', then: 'scan' }
     case 'open':
-      return p.get('note') ? { kind: 'open', noteId: p.get('note')! } : null
+      return p.get('note') ? { kind: 'open', noteId: p.get('note')!, find: p.get('find') ?? undefined } : null
     case 'search':
       return { kind: 'search', query: p.get('q') ?? '' }
     case 'connect':
@@ -95,10 +95,11 @@ export function startAppLinks(handle: (a: LinkAction) => void) {
   // web app: home-screen shortcuts open /#new, /#record, /#scan; calendar events link to /#note=ID
   const fromHash = () => {
     const m = /^#(new|record|scan)$/.exec(location.hash)
-    const note = /^#note=([a-z0-9]{8,64})$/.exec(location.hash)
+    // (#note=ID&find=… – a calendar event: land on its item)
+    const note = /^#note=([a-z0-9]{8,64})(?:&find=([^&]*))?$/.exec(location.hash)
     if (!m && !note) return
     history.replaceState(null, '', location.pathname + location.search)
-    run(note ? `reconnotes://open?note=${note[1]}` : `reconnotes://${m![1]}`)
+    run(note ? `reconnotes://open?note=${note[1]}${note[2] ? `&find=${note[2]}` : ''}` : `reconnotes://${m![1]}`)
   }
   fromHash()
   window.addEventListener('hashchange', fromHash)

@@ -116,8 +116,9 @@ export class Tasks {
         `DTSTART;VALUE=DATE:${day(t.due)}`,
         `DTEND;VALUE=DATE:${nextDay(t.due)}`,
         `SUMMARY:${esc(t.text)}`,
-        `DESCRIPTION:${esc(`From “${t.title || 'Untitled'}”${t.folder.length ? ` in ${t.folder.join(' › ')}` : ''}\nOpen it in the app: reconnotes://open?note=${t.noteId}`)}`,
-        `URL:${appUrl}/#note=${t.noteId}`,
+        `DESCRIPTION:${esc(`From “${t.title || 'Untitled'}”${t.folder.length ? ` in ${t.folder.join(' › ')}` : ''}\nOpen it in the app: reconnotes://open?note=${t.noteId}&find=${encodeURIComponent(findText(t.text))}`)}`,
+        // (opening it lands on the item in the note)
+        `URL:${appUrl}/#note=${t.noteId}&find=${encodeURIComponent(findText(t.text))}`,
         ...(t.repeat ? [`RRULE:${RRULE[t.repeat]}`] : []),
         'TRANSP:TRANSPARENT',
         'END:VEVENT',
@@ -176,4 +177,21 @@ function dueIdAt(doc: Y.Doc, i: number): string | null {
   }
   walk(getContent(doc))
   return hit ? own(hit) : null
+}
+
+/** What to look for in a note to land on an item: its first words, without its due date, ▶ links or marks. */
+export function findText(text: string): string {
+  const plain = text
+    .replace(/\s*\[▶[^\]]*\]\(listen:[^)]*\)/g, '')
+    .replace(/\s*!\d{4}-\d{2}-\d{2}/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  let out = ''
+  for (const w of plain.split(' ')) {
+    if (`${out} ${w}`.trim().length > 48) break
+    out = `${out} ${w}`.trim()
+  }
+  return out || plain.slice(0, 48)
 }

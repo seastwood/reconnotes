@@ -177,12 +177,15 @@ export function App() {
   }, [ws, nav.noteId])
 
   // iOS app: reminders for due items; tapping one opens its note
-  const openFromReminder = useRef<(id: string) => void>(() => undefined)
-  openFromReminder.current = (id) => {
+  const openFromReminder = useRef<(id: string, find?: string) => void>(() => undefined)
+  openFromReminder.current = (id, find) => {
+    // (at the item it's about, when it says – a due item's text)
+    const q = find?.trim()
+    setFindOnOpen((f) => (q ? { noteId: id, query: q, n: (f?.n ?? 0) + 1 } : null))
     setNav({ ...nav, noteId: id })
     setPane('note')
   }
-  useEffect(() => startReminders((id) => openFromReminder.current(id)), [])
+  useEffect(() => startReminders((id, find) => openFromReminder.current(id, find)), [])
   // iOS app: a recording still running (the page was reloaded) shows again
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => resumeRecording(nav.noteId), [])
@@ -193,7 +196,7 @@ export function App() {
   // widget, Siri / Shortcuts and home-screen shortcuts: new note, record, scan…
   const onLink = useRef<(a: LinkAction) => void>(() => undefined)
   onLink.current = (a) => {
-    if (a.kind === 'open') return openFromReminder.current(a.noteId)
+    if (a.kind === 'open') return openFromReminder.current(a.noteId, a.find)
     if (a.kind === 'search') return showSearch(a.query)
     const id = createNote(workspaceDoc, { folderId: nav.view.kind === 'folder' ? nav.view.folderId : null })
     if (a.text) {
