@@ -349,14 +349,10 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
             key={n.id}
             id={n.id}
             className={`note-row${n.id === noteId && !selecting ? ' active' : ''}${dropAt === n.id ? ' drop-before' : ''}`}
-            pinned={n.pinned}
             selecting={selecting}
             selected={selected.has(n.id)}
             draggable={view.kind !== 'trash'}
             onClick={(e) => clickRow(e, n)}
-            onPin={() => pinNotes([n.id], !n.pinned)}
-            onMove={() => onMoveNote(n.id)}
-            onDelete={() => (view.kind === 'trash' ? confirm('Delete this note permanently?') && deleteNoteForever(workspaceDoc, n.id) : trashNotes([n.id]))}
             liProps={{
               onDragStart: (e) => setDrag(e, { kind: 'note', id: n.id, ids: selected.has(n.id) && selected.size > 1 ? ids : undefined }),
               onDragOver: (e) => {

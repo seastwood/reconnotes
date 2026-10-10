@@ -72,13 +72,13 @@ function useTheme() {
 
 /**
  * Horizontal swipes with a finger: in from the left screen edge (→ onLeftEdge),
- * in from the right edge (→ onRightEdge), or leftwards starting on a side panel
- * (→ onClose). Pencil and mouse are ignored, and so are mostly-vertical moves
- * (scrolling).
+ * in from the right edge (→ onRightEdge), leftwards starting on a side panel
+ * (→ onClose), or rightwards starting on one (→ onOpen). Pencil and mouse are
+ * ignored, and so are mostly-vertical moves (scrolling).
  */
-function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void) {
-  const handlers = useRef({ onLeftEdge, onRightEdge, onClose })
-  handlers.current = { onLeftEdge, onRightEdge, onClose }
+function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void, onOpen: () => void) {
+  const handlers = useRef({ onLeftEdge, onRightEdge, onClose, onOpen })
+  handlers.current = { onLeftEdge, onRightEdge, onClose, onOpen }
   useEffect(() => {
     const EDGE = 28
     let start: { x: number; y: number; fromEdge: boolean; fromRight: boolean; onPanel: boolean; t: number } | null = null
@@ -96,7 +96,7 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
         y: t.clientY,
         fromEdge: t.clientX <= EDGE,
         fromRight: t.clientX >= window.innerWidth - EDGE,
-        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"], .swipe-row'),
+        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]'),
         t: Date.now(),
       }
       if (!start.fromEdge && !start.fromRight && !start.onPanel) start = null
@@ -112,6 +112,7 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
         if (start.fromEdge && dx > 0) handlers.current.onLeftEdge()
         else if (start.fromRight && dx < 0) handlers.current.onRightEdge()
         else if (start.onPanel && dx < 0) handlers.current.onClose()
+        else if (start.onPanel && dx > 0) handlers.current.onOpen()
       }
       start = null
     }
@@ -363,8 +364,9 @@ export function App() {
   }
   /**
    * Swipe in from the left edge: show the notes, then (swiping again) the
-   * folders. Swipe left on a panel to hide them again. Phones: the edge swipe
-   * goes back a screen.
+   * folders – or swipe right on the notes list. Swipe left on a panel to hide
+   * them again. Phones: the edge swipe (or a swipe right on the list) goes back
+   * a screen.
    */
   const openNext = () => {
     if (narrow) setPane(pane === 'note' && !(fromSearch && search.trim()) ? 'list' : 'folders')
@@ -388,6 +390,7 @@ export function App() {
       if (noteShown) step('forward')
     },
     closeOne,
+    openNext,
   )
 
   /** Notes list's sidebar button: show/hide the folders. */
