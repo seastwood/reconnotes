@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, Camera, ChefHat, Globe, Loader2, Sparkles, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, Camera, ChefHat, FileText, Globe, Loader2, Sparkles, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
@@ -11,7 +11,7 @@ import { scanDocument, scannerAvailable } from '../lib/scanner'
 import { rotateImage, uprightPhoto } from '../lib/rotate'
 
 export type ImportTab = 'web' | 'photos'
-export type PhotoKind = 'auto' | 'recipe' | 'handwriting' | 'printed' | 'directions'
+export type PhotoKind = 'auto' | 'general' | 'recipe' | 'handwriting' | 'printed' | 'directions'
 
 /** What photos of pages can be, and what each becomes. */
 const PHOTO_KINDS: { kind: PhotoKind; icon: LucideIcon; label: string; examples: string; becomes: string }[] = [
@@ -20,7 +20,14 @@ const PHOTO_KINDS: { kind: PhotoKind; icon: LucideIcon; label: string; examples:
     icon: Sparkles,
     label: 'Auto',
     examples: 'Works out what they are',
-    becomes: 'Reads the photos and works out whether they’re a recipe, handwriting, a printed page or directions – then sets them out that way. If it guesses wrong, you can make it again as the right kind.',
+    becomes: 'Reads the photos and works out whether they’re a recipe, handwriting, a printed page or directions – then sets them out that way (or as a general note, if they’re none of those). If it guesses wrong, you can make it again as the right kind.',
+  },
+  {
+    kind: 'general',
+    icon: FileText,
+    label: 'General note',
+    examples: 'Just the text, as it is',
+    becomes: 'Whatever’s on the pages – printed or handwritten – as a plain note: the text in order, with headings and lists where the pages have them. Nothing set out as a recipe or steps.',
   },
   {
     kind: 'recipe',
@@ -362,7 +369,7 @@ export function WebImportDialog({
                   type="button"
                   role="radio"
                   aria-checked={kind === k}
-                  className={`photo-kind${kind === k ? ' on' : ''}${k === 'auto' ? ' wide' : ''}`}
+                  className={`photo-kind${kind === k ? ' on' : ''}`}
                   onClick={() => setKind(k)}
                 >
                   <Icon size={20} aria-hidden />

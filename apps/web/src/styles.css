@@ -4625,6 +4625,9 @@ a.button {
 /* Import a web page */
 .web-import-dialog {
   width: min(480px, 100%);
+  /* its top stays put as it grows or shrinks (switching tabs, adding photos): only the bottom moves */
+  align-self: start;
+  margin-top: min(8vh, 64px);
 }
 .web-import-dialog h2 {
   display: flex;
@@ -6145,6 +6148,15 @@ a.button {
   padding: 7px 8px;
   white-space: nowrap;
 }
+.import-tabs button svg {
+  flex-shrink: 0;
+}
+@media (max-width: 420px) {
+  .import-tabs button {
+    font-size: 14px;
+    padding: 7px 4px;
+  }
+}
 .import-tabs button.on {
   background: var(--paper);
   color: var(--text);
@@ -6170,9 +6182,6 @@ a.button {
   background: none;
   color: var(--text);
   min-width: 0;
-}
-.photo-kind.wide {
-  grid-column: 1 / -1;
 }
 .photo-guess-kinds {
   display: flex;

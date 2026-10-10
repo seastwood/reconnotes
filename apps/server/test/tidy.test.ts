@@ -285,6 +285,15 @@ describe('a note from photos of pages', () => {
     expect((getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString().match(/<image /g) ?? []).length).toBe(2)
   })
 
+  it('a general note: the text laid out plainly', async () => {
+    const a = photo('gen1')
+    reply = '# Whiteboard\n\n- Ship the release on Friday\n- Ask Pat about the budget'
+    const r = await notesFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: a, text: 'Whiteboard\n- Ship the release on Friday\n- Ask Pat about the budget' }], 'general', null)
+    expect(prompts.at(-1)).toContain('plain Markdown note')
+    expect(r.asRead).toBe(false)
+    expect(text(r.noteId)).toMatch(/^# Whiteboard\n[\s\S]*- Ask Pat about the budget/)
+  })
+
   it('a layout that changes the words: kept as read', async () => {
     const a = photo('book1')
     reply = '# Chapter One\n\nIt was a dark and stormy night, and the wind howled terribly across the moors.'
@@ -309,13 +318,15 @@ describe('photos whose kind is worked out (Auto)', () => {
     expect(kindIn('recipe or printed')).toBeNull()
     expect(kindIn('no idea')).toBeNull()
   })
-  it('otherwise the AI says, from the text (printed when it can’t tell)', async () => {
+  it('otherwise the AI says, from the text (a general note when it can’t tell)', async () => {
     const id = 'guessphoto000001'
     app.store.putAttachment({ id, mime: 'image/png', name: 'p.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
     reply = 'HANDWRITING'
     expect(await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Call mum about Sunday\nbuy stamps')).toEqual({ kind: 'handwriting', by: 'the text' })
     expect(prompts.at(-1)).toContain('Call mum about Sunday')
     reply = 'not sure'
-    expect((await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Chapter one')).kind).toBe('printed')
+    expect((await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Chapter one')).kind).toBe('general')
+    reply = 'OTHER'
+    expect((await guessKind(app.store, app.ai, [{ attachmentId: id }], 'Parking permit 2026')).kind).toBe('general')
   })
 })

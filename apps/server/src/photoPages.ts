@@ -19,10 +19,10 @@ import { createPhotoNote, numbersIn, words, type PhotoPage } from './photoRecipe
  * text is kept as read instead – just with its lines joined back up.
  */
 
-export type PageKind = 'handwriting' | 'printed' | 'directions'
-export const PAGE_KINDS: PageKind[] = ['handwriting', 'printed', 'directions']
+export type PageKind = 'general' | 'handwriting' | 'printed' | 'directions'
+export const PAGE_KINDS: PageKind[] = ['general', 'handwriting', 'printed', 'directions']
 
-const TITLES: Record<PageKind, string> = { handwriting: 'Handwritten notes', printed: 'Pages', directions: 'Directions' }
+const TITLES: Record<PageKind, string> = { general: 'Note from photos', handwriting: 'Handwritten notes', printed: 'Pages', directions: 'Directions' }
 
 const COMMON = `- Keep every word and number exactly as read. Don't reword, summarise, correct, translate or add anything – only lay it out.
 - Begin with a "# " title: the page's own title if it has one, otherwise a few of its own first words.
@@ -30,6 +30,11 @@ const COMMON = `- Keep every word and number exactly as read. Don't reword, summ
 - Output only the Markdown.`
 
 const ARRANGE: Record<Exclude<PageKind, 'handwriting'>, string> = {
+  general: `Below is the text read from photos (of anything: a page, a sign, a whiteboard, a form, a note – printed or handwritten), page by page. Lay it out as a plain Markdown note:
+
+- Join lines that were only broken by the width of the page back into paragraphs.
+- Headings, lists, checkboxes and tables only where the text already has them. Don't turn it into anything else (no recipe, no steps, no summary).
+${COMMON}`,
   printed: `Below is the text read from photos of printed pages (a book, a magazine, a letter, a manual), page by page. Lay it out as Markdown:
 
 - Join lines that were only broken by the width of the page back into paragraphs; join a word hyphenated across two lines.
@@ -112,7 +117,8 @@ export async function notesFromPhotos(
       reportProgress(`Reading photo ${k + 1} of ${pages.length}…`)
       const data = fs.readFileSync(store.blobPath(att.id))
       // handwriting: your handwriting readers (with your words); print: the "Pictures" readers
-      const r = kind === 'handwriting' ? await ai.transcribePhoto(data, att.mime, { format: false }) : await ai.readPrintedPage(data, att.mime)
+      // (anything: whatever's written or printed in it)
+      const r = kind === 'handwriting' || kind === 'general' ? await ai.transcribePhoto(data, att.mime, { format: false }) : await ai.readPrintedPage(data, att.mime)
       text = r.text.trim()
       reader = r.agent
     } else reader ||= 'Apple text recognition (on the phone)'
@@ -171,11 +177,12 @@ const GUESS = (text: string) => `What are these photos of? Answer with one word:
 RECIPE – a recipe (a meal-kit card, a cookbook page: ingredients and cooking steps)
 HANDWRITING – handwritten notes, a letter or a notebook page (written by hand, not printed)
 DIRECTIONS – directions or a route (a trail guide, turn-by-turn instructions, how to get somewhere)
-PRINTED – any other printed page (a book, a magazine, a letter, a manual)
+PRINTED – a printed page of text (a book, a magazine, a letter, a manual)
+OTHER – anything else, or a mix
 ${text.trim() ? `\nThe text read from them begins:\n${text.slice(0, 1500)}\n` : ''}
 Reply with only the word.`
 
-const WORDS: Record<string, PhotoKind> = { RECIPE: 'recipe', HANDWRITING: 'handwriting', DIRECTIONS: 'directions', PRINTED: 'printed' }
+const WORDS: Record<string, PhotoKind> = { RECIPE: 'recipe', HANDWRITING: 'handwriting', DIRECTIONS: 'directions', PRINTED: 'printed', OTHER: 'general' }
 /** The kind named in a model's reply ("RECIPE", "It's a recipe."), if it names one. */
 export function kindIn(reply: string): PhotoKind | null {
   const t = reply.replace(/<think>[\s\S]*?<\/think>/g, '').toUpperCase()
@@ -198,7 +205,7 @@ export function kindFromWords(text: string): PhotoKind | null {
 /**
  * Photos of pages whose kind wasn't chosen: what they are. The words first (a recipe and a route are
  * plain from them); otherwise a "Pictures" model looks at the first photo (it can tell handwriting
- * from print) or, without one, the AI reads the text. Printed, when it can't tell.
+ * from print) or, without one, the AI reads the text. A general note, when it can't tell.
  */
 export async function guessKind(store: Store, ai: Ai, pages: PhotoPage[], text: string): Promise<{ kind: PhotoKind; by: string }> {
   const plain = kindFromWords(text)
@@ -216,7 +223,7 @@ export async function guessKind(store: Store, ai: Ai, pages: PhotoPage[], text: 
   } catch (e) {
     if (jobSignal()?.aborted) throw e
   }
-  return { kind: 'printed', by: 'a default' }
+  return { kind: 'general', by: 'a default' }
 }
 
 /** Photos read here (the ones the phone didn't read): their text, for working out what they are. */
