@@ -5461,3 +5461,37 @@ a.button {
   color: var(--text);
   font-size: 15px;
 }
+
+/* Settings › Prompts */
+.prompt-editor {
+  margin: 12px 0 16px;
+}
+.prompt-editor .prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.prompt-editor .prompt-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.prompt-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.prompt-editor.changed textarea {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+}
+.prompt-editor .row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.meeting-knobs {
+  margin-bottom: 8px;
+}

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { PROMPTS, listPrompts, setPrompt } from './prompts'
 import { fixTranscripts } from './transcriptFix'
 import { forgetVoice, knownVoices } from './voices'
 import fs from 'node:fs'
@@ -592,6 +593,15 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const { from, to } = await readJson<{ from: string; to: string }>(req)
     ai.vocabulary?.forget(String(from), String(to))
     json(res, 200, ai.vocabulary?.get())
+  })
+
+  // --- the prompts you can change (and reset) --------------------------------
+  route('GET', '/api/ai/prompts', (_req, res) => json(res, 200, { prompts: listPrompts() }))
+  route('PUT', '/api/ai/prompts', async (req, res) => {
+    const { key, value } = await readJson<{ key: string; value: string | null }>(req)
+    if (!PROMPTS.some((p) => p.key === key)) throw new HttpError(404, 'no such prompt')
+    setPrompt(key, typeof value === 'string' ? value : null)
+    json(res, 200, { prompts: listPrompts() })
   })
 
   // --- a word speech-to-text misheard, fixed by you ---------------------------

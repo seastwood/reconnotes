@@ -120,6 +120,10 @@ export interface AiSettings {
   autoAudio: boolean
   /** the language recordings are in ("en"), told to speech-to-text; '' – it guesses */
   speechLanguage: string
+  /** meeting notes: how many minutes of talk each part of a long meeting is (4–20) */
+  meetingPartMinutes: number
+  /** meeting notes: reason before writing (better, slower) – or answer straight away */
+  meetingThink: boolean
   /**
    * Speaker labels: how alike two stretches of speech must be to count as one person
    * (0.5–1.3). Higher: fewer voices; lower: more.
@@ -1314,7 +1318,7 @@ export class AgentRegistry {
   settings(): AiSettings {
     const s = this.store.getSetting<Partial<AiSettings>>(SETTINGS_KEY) ?? {}
     const routing = { handwriting: [], format: [], images: [], pdf: [], compile: [], ask: [], audio: [], embed: [], ...(s.routing ?? {}) } as Record<AiTask, string[]>
-    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true, speechLanguage: s.speechLanguage ?? '', speakerThreshold: s.speakerThreshold ?? SPEAKER_THRESHOLD }
+    return { routing, autoHandwriting: s.autoHandwriting ?? true, autoImageText: s.autoImageText ?? true, autoAudio: s.autoAudio ?? true, speechLanguage: s.speechLanguage ?? '', meetingPartMinutes: s.meetingPartMinutes ?? 8, meetingThink: s.meetingThink ?? true, speakerThreshold: s.speakerThreshold ?? SPEAKER_THRESHOLD }
   }
 
   get(id: string): AgentConfig | undefined {
@@ -1369,6 +1373,9 @@ export class AgentRegistry {
     if (typeof patch.autoImageText === 'boolean') s.autoImageText = patch.autoImageText
     if (typeof patch.autoAudio === 'boolean') s.autoAudio = patch.autoAudio
     if (typeof patch.speechLanguage === 'string' && /^([a-z]{2,3})?$/.test(patch.speechLanguage)) s.speechLanguage = patch.speechLanguage
+    if (typeof patch.meetingPartMinutes === 'number' && Number.isFinite(patch.meetingPartMinutes))
+      s.meetingPartMinutes = Math.round(Math.min(20, Math.max(4, patch.meetingPartMinutes)))
+    if (typeof patch.meetingThink === 'boolean') s.meetingThink = patch.meetingThink
     if (typeof patch.speakerThreshold === 'number' && Number.isFinite(patch.speakerThreshold))
       s.speakerThreshold = Math.round(Math.min(1.3, Math.max(0.5, patch.speakerThreshold)) * 100) / 100
     this.store.setSetting(SETTINGS_KEY, s)

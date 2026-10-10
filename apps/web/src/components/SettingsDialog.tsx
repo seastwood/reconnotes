@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, Bell, Bot, PenTool, RefreshCw, ScanText, SlidersHorizontal, X, type LucideIcon } from 'lucide-react'
+import { Archive, Bell, Bot, PenTool, RefreshCw, ScanText, ScrollText, SlidersHorizontal, X, type LucideIcon } from 'lucide-react'
+import { PromptsSection } from './PromptsSection'
 import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib/settings'
 import { serverInfo } from '../lib/ai'
 import { AiAgentsSection } from './AiAgentsSection'
@@ -18,7 +19,7 @@ import { deviceSpeechAvailable } from '../lib/speech'
  * Settings: a page of its own, in categories – a list down the side on a wide screen, tabs along
  * the top on a phone. The category you were last in opens next time.
  */
-export type SettingsTab = 'general' | 'sync' | 'ai' | 'recognition' | 'pencil' | 'notifications' | 'data'
+export type SettingsTab = 'general' | 'sync' | 'ai' | 'prompts' | 'recognition' | 'pencil' | 'notifications' | 'data'
 
 export const SETTINGS_TABS: {
   id: SettingsTab
@@ -43,6 +44,12 @@ export const SETTINGS_TABS: {
     label: 'AI agents',
     icon: Bot,
     blurb: 'The models your server uses, and which one does what.',
+  },
+  {
+    id: 'prompts',
+    label: 'Prompts',
+    icon: ScrollText,
+    blurb: 'What the AI is told for each kind of job – change it, or put it back to the default.',
   },
   {
     id: 'recognition',
@@ -172,6 +179,8 @@ export function SettingsDialog({ onClose, tab: initial }: { onClose: () => void;
           ) : (
             needsServer('AI agents are set up on your server')
           ))}
+
+        {tab === 'prompts' && (connected ? <PromptsSection key={key} /> : needsServer('The prompts are kept on your server'))}
 
         {tab === 'recognition' && (
           <>

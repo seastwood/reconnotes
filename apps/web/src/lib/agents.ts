@@ -35,6 +35,10 @@ export interface AiSettings {
   autoAudio: boolean
   /** the language recordings are in ("en"); '' – speech-to-text guesses */
   speechLanguage: string
+  /** meeting notes: minutes of talk per part of a long meeting (4–20) */
+  meetingPartMinutes: number
+  /** meeting notes: reason before writing (better, slower) */
+  meetingThink: boolean
   /** speaker labels: how alike two voices must be to count as one person (0.5–1) */
   speakerThreshold: number
 }
@@ -131,6 +135,22 @@ export const vocabApi = {
 export const transcriptApi = {
   fix: (attachmentId: string, from: string, to: string, everywhere: boolean) =>
     call<{ recordings: number; places: number }>('POST', '/api/ai/transcript-fix', { attachmentId, from, to, everywhere }),
+}
+
+/** A prompt you can change (Settings › Prompts): its default, what it is now, and whether you changed it. */
+export interface EditablePrompt {
+  key: string
+  group: string
+  label: string
+  help: string
+  default: string
+  value: string
+  changed: boolean
+}
+export const promptsApi = {
+  list: () => call<{ prompts: EditablePrompt[] }>('GET', '/api/ai/prompts'),
+  /** null: back to the default */
+  set: (key: string, value: string | null) => call<{ prompts: EditablePrompt[] }>('PUT', '/api/ai/prompts', { key, value }),
 }
 
 /** The people whose voices are recognised in new recordings (learned when you name a voice). */

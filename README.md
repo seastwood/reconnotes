@@ -278,6 +278,13 @@ each turn is labelled, you name the voices with a tap, and the meeting notes say
 A voice you've named is recognised in later recordings and named by itself; voices heard for only
 a few seconds are folded into whoever was speaking around them.
 
+**Settings › Prompts** shows what the AI is told for each kind of job, and lets you change it: the
+parts of the meeting-notes prompt that decide what the notes say (what counts as a decision, an open
+question, an action item), and your own standing instructions for meeting notes, handwriting,
+pictures and PDFs, summaries, to-dos, clean-up and Ask (e.g. "We are FRC team 1234"). Each has
+**Reset to default**. Also there: how long each part of a long meeting is, and whether the model
+thinks before writing (better) or answers straight away (faster).
+
 **Each top-level folder keeps to itself.** Voices you name, the people offered in a meeting's setup
 and the words you fix in transcripts are learned per top-level folder (with its subfolders): people
 from your *Work* folder are never looked for, offered or spelled in, say, a *Robotics* folder's

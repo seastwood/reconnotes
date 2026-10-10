@@ -813,3 +813,33 @@ describe('groups – a note’s top-level folder – don’t learn from each oth
     expect((await api('GET', '/api/voices?note=notegroupwork001')).voices).toMatchObject([{ name: 'Paul', groupName: 'Work' }])
   })
 })
+
+describe('prompts you can change', () => {
+  it('are used once changed, and go back to the default on reset', async () => {
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    const list = (await api('GET', '/api/ai/prompts')).prompts as { key: string; value: string; default: string; changed: boolean }[]
+    const decisions = list.find((p) => p.key === 'meeting.decisions')!
+    expect(decisions.changed).toBe(false)
+    expect(decisions.value).toBe(decisions.default)
+    // changed: the meeting prompt says it, and your standing instructions are added
+    await api('PUT', '/api/ai/prompts', { key: 'meeting.decisions', value: 'only what the boss said yes to' })
+    await api('PUT', '/api/ai/prompts', { key: 'extra.meeting', value: 'We are FRC team 1234.' })
+    prompts.length = 0
+    await app.ai.meetingNotes('', 'Doug will order the parts by Friday. Okay, do it.', 'Friday 9 October 2026')
+    expect(prompts[0]).toContain('## Decisions\n- only what the boss said yes to')
+    expect(prompts[0]).toContain('Standing instructions from the user (always follow them): We are FRC team 1234.')
+    expect((await api('GET', '/api/ai/prompts')).prompts.find((p: { key: string }) => p.key === 'meeting.decisions').changed).toBe(true)
+    // reset: the default again
+    await api('PUT', '/api/ai/prompts', { key: 'meeting.decisions', value: null })
+    await api('PUT', '/api/ai/prompts', { key: 'extra.meeting', value: '' })
+    prompts.length = 0
+    await app.ai.meetingNotes('', 'Doug will order the parts by Friday. Okay, do it.', 'Friday 9 October 2026')
+    expect(prompts[0]).toContain(`## Decisions\n- ${decisions.default}`)
+    expect(prompts[0]).not.toContain('Standing instructions')
+    // the meeting settings: kept within bounds
+    app.ai.agents.updateSettings({ meetingPartMinutes: 99, meetingThink: false })
+    expect(app.ai.agents.settings()).toMatchObject({ meetingPartMinutes: 20, meetingThink: false })
+    app.ai.agents.updateSettings({ meetingPartMinutes: 8, meetingThink: true })
+  })
+})

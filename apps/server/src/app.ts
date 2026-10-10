@@ -1,4 +1,5 @@
 import type http from 'node:http'
+import { usePromptStore } from './prompts'
 import type https from 'node:https'
 import type { Config } from './config'
 import { Store } from './store'
@@ -38,6 +39,8 @@ export function createApp(config: Config, opts: { backups?: boolean; guides?: bo
   }
   const store = new Store(config.dataDir)
   const ai = new Ai(new AgentRegistry(store, config), config, store)
+  // the prompts you changed (Settings › Prompts)
+  usePromptStore(store)
   const devices = new Devices(store, config.token)
   const sync = new SyncEngine(config, store, ai, devices)
   const jobs = new Jobs(store)

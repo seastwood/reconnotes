@@ -1,4 +1,5 @@
 import { Resvg } from '@resvg/resvg-js'
+import { promptText, standing } from './prompts'
 import { cosine, cutAt, isMeant, likeness, pointText, stretches, topicCuts, type Embed, type Stretch } from './meetingMeaning'
 import { stem, telling } from './listen'
 import { extraInstructions, isRedo, jobSignal, withExtra } from './jobs'
@@ -134,6 +135,8 @@ Text:
 `,
 } as const
 export type NoteAction = keyof typeof NOTE_ACTION_PROMPTS
+/** your standing instructions for a note action (Settings › Prompts) */
+const standingFor = (action: NoteAction) => standing(action === 'summary' ? 'summarise' : action === 'todos' ? 'todos' : 'clean')
 
 /** Second pass: tidy OCR output into well-structured Markdown. */
 const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritten notes{IMAGE}. Clean it up:
@@ -237,7 +240,7 @@ export class Ai {
     const task = action === 'clean' && this.agents.available('format') ? 'format' : 'compile'
     const limit = action === 'clean' ? Math.min(8192, Math.ceil(markdown.length / 2) + 512) : 1500
     const { result, agent } = await this.agents.run(task, async (backend) => {
-      const raw = await backend.generate([{ text: withExtra(NOTE_ACTION_PROMPTS[action], 'start') + markdown.slice(0, 60_000) }], limit)
+      const raw = await backend.generate([{ text: withExtra(NOTE_ACTION_PROMPTS[action] + standingFor(action), 'start') + markdown.slice(0, 60_000) }], limit)
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
     log.info(`note action "${action}" via "${agent.name}" (${markdown.length} → ${result.length} chars)`)
@@ -262,20 +265,23 @@ export class Ai {
     // the transcript read by meaning (an embedding model, where there is one): parts cut where the
     // talk changes subject, and points worded differently from what was said still recognised
     const meaning = await this.readByMeaning(said)
-    const parts = meetingPartsByTopic(said, PART_CHARS, meaning) ?? meetingParts(said, PART_CHARS)
+    // how long a part is (Settings › Prompts: minutes of talk, ~875 characters a minute) and whether to reason first
+    const { meetingPartMinutes, meetingThink } = this.agents.settings()
+    const partChars = Math.round(meetingPartMinutes * 875) || PART_CHARS
+    const parts = meetingPartsByTopic(said, partChars, meaning) ?? meetingParts(said, partChars)
     const layout = `Use exactly this Markdown layout:
 
 ## Summary
-- **A short name for the topic**: one bullet per topic discussed, in the order it came up, each with the details that were said (numbers, names, dates, places, reasons) – and, where ideas changed during the discussion, how it went (what was suggested first, what it ended up as). Plain sentences: no "Topic:", "Outcome:" or "Who:" labels. Two different subjects are two bullets – never one bullet joining unrelated things ("Air freshener & compost").
+- ${promptText('meeting.summary')}
 
 ## Decisions
-- each thing that was actually settled: the final outcome only (leave this section out if nothing was settled)
+- ${promptText('meeting.decisions')}
 
 ## Open questions
-- each real question left open: what's still to be decided or found out, said as that ("Where does the water meter box go – the middle of the lot, or 8 ft off the fence?"). Most topics have none: a topic that was only talked about isn't an open question, and "unresolved", "no decision made" or "no task assigned" isn't one either. Leave this section out if there are none.
+- ${promptText('meeting.open')}
 
 ## Action items
-- [ ] each task someone took on or was given, written as a task in your own words (who, if said – then what to do, and when, if said), never a quote of what was said. A task is also what someone said they or "we" will do: "I'll get a quote for the trade-in", "let's make space for the dumpster Tuesday", "we're servicing the sweeper this morning". Not every topic is a task: something only talked about ("the toilet's acting up") isn't one unless someone said it would be done. One task per item: three things to do are three items.
+- [ ] ${promptText('meeting.actions')}
 
 If no task was said, write "- [ ] No action items" under that heading.`
     const length =
@@ -284,11 +290,7 @@ If no task was said, write "- [ ] No action items" under that heading.`
         : 'A short recording gets short notes: one summary bullet is fine. If nothing was decided or assigned, say so.'
     // what a small model gets wrong most: taking every idea floated for a decision
     const reasoning = `How to tell what was decided:
-- A suggestion ("we could…", "what if…", "another thought is…", "maybe…") is not a decision. A decision is what people agreed on and the talk moved on from ("yep", "done", "let's do that", "you got it", or it was simply acted on).
-- People change their minds: when a later idea replaces an earlier one, only the last one agreed on is the decision. The earlier ideas belong in the Summary ("first suggested X; settled on Y"), never in Decisions or Action items.
-- A task taken back later ("load the crate… actually, no, don't load it up") is not a task.
-- Small talk is not part of the meeting: lunch, food, jokes, banter, who's coming in late. Leave it out of every section.
-- When something wasn't settled, or someone is to find something out, it's an open question (with who looks into it, if said).`
+${promptText('meeting.reasoning')}${standing('meeting')}`
     const attendees = (who.attendees ?? []).filter(Boolean)
     const speakers =
       (who.voices ?? 0) >= 2
@@ -372,7 +374,7 @@ ${parts[i]}
             how.push(`Part ${i + 1}: read before – reused`)
           } else {
             // reasoning first: who suggested what, what replaced it, what was agreed
-            const raw = await ask(`Part ${i + 1}`, [{ text: prompt }], 1500, { think: true })
+            const raw = await ask(`Part ${i + 1}`, [{ text: prompt }], 1500, { think: meetingThink })
             t = collapseRepeats(unwrapModelOutput(raw)).trim()
             if (t) this.saveReading(key, t)
           }
@@ -398,7 +400,7 @@ ${partNotes.join('\n\n')}
       }
       // putting a long meeting together takes thinking: room for it, so it isn't cut off and asked
       // again without (a much weaker answer)
-      const raw = await ask('Final notes', [{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: true, thinkRoom: parts.length > 1 ? 6144 : undefined })
+      const raw = await ask('Final notes', [{ text: withExtra(body) }], parts.length > 1 ? 3000 : 2000, { think: meetingThink, thinkRoom: parts.length > 1 ? 6144 : undefined })
       const rawOut = raw
       // every topic the parts found is in the Summary, even if putting them together dropped it –
       // then all of it checked against what was said
@@ -501,7 +503,7 @@ ${partNotes.join('\n\n')}
   async ask(prompt: string, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
     // its own agents ("Ask your notes"), else the ones that compile notes
     const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) => {
-      const gen = () => backend.generate([{ text: withExtra(prompt) }], 1000)
+      const gen = () => backend.generate([{ text: withExtra(prompt + standing('ask')) }], 1000)
       const raw = await (onText ? streaming(onText, gen) : gen())
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
@@ -584,7 +586,8 @@ ${partNotes.join('\n\n')}
           ? knownOcrPrompt(agent.model)!
           : opts.line
             ? agent.prompt.trim() || LINE_PROMPT
-            : this.withVocab(agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : HANDWRITING_PROMPT))) + (extra ? `\n\nAdditional instructions from the user: ${extra}` : ''),
+            : this.withVocab(agent.prompt.trim() || (opts.photo ? PHOTO_PROMPT : HANDWRITING_PROMPT)) + standing(opts.photo ? 'pictures' : 'handwriting')) +
+          (extra ? `\n\nAdditional instructions from the user: ${extra}` : ''),
         opts.photo ? SHORT_PHOTO_PROMPT : SHORT_HANDWRITING_PROMPT,
       ]),
     ]
@@ -745,7 +748,7 @@ ${partNotes.join('\n\n')}
           FORMAT_PROMPT.replace('{IMAGE}', agent.vision && image ? ' (the original image is attached)' : '').replace(
             '{SOURCE}',
             agent.vision && image ? 'the image' : 'common sense',
-          ) + (this.vocabulary?.hint() ? `(${this.vocabulary.hint()})\n\n` : '') + (extraInstructions() ? `(Additional instructions from the user – follow these: ${extraInstructions()})\n\n` : '') + text
+          ) + (standing('clean') ? `(${standing('clean').trim()})\n\n` : '') + (this.vocabulary?.hint() ? `(${this.vocabulary.hint()})\n\n` : '') + (extraInstructions() ? `(Additional instructions from the user – follow these: ${extraInstructions()})\n\n` : '') + text
         // The tidied text should be about as long as the input; leave some room for Markdown.
         const limit = Math.min(8192, Math.ceil(text.length / 2) + 512)
         return backend.generate(agent.vision && image ? [{ image, mime }, { text: prompt }] : [{ text: prompt }], limit)
@@ -785,7 +788,7 @@ ${partNotes.join('\n\n')}
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)
     const { result } = await this.agents.run('images', (backend) =>
-      backend.generate([{ image: fit.data, mime: fit.mime }, { text: IMAGE_TEXT_PROMPT }], 4000),
+      backend.generate([{ image: fit.data, mime: fit.mime }, { text: IMAGE_TEXT_PROMPT + standing('pictures') }], 4000),
     )
     return result
   }
@@ -797,7 +800,7 @@ ${partNotes.join('\n\n')}
         [
           { pdf: data },
           {
-            text: 'Extract the full text of this document for a search index, including text in tables, charts and figures. Output only the text.',
+            text: 'Extract the full text of this document for a search index, including text in tables, charts and figures. Output only the text.' + standing('pictures'),
           },
         ],
         32000,
