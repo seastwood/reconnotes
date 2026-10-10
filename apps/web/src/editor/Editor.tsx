@@ -313,7 +313,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
-            {onShowFolder && <NotePath folderId={folderId} onShow={onShowFolder} />}
+            {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
             {settingUp && (
               <MeetingSetup
                 noteId={noteId}

@@ -925,6 +925,27 @@ button.text {
   gap: 4px;
   min-width: 0;
 }
+.note-path button,
+.note-path-here {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.note-path-here {
+  color: var(--text);
+  min-width: 0;
+  padding: 2px 4px;
+}
+.note-path-name {
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.note-path-sep {
+  flex: none;
+  opacity: 0.6;
+}
 .note-path button {
   background: none;
   border: 0;
