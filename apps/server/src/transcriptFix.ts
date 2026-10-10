@@ -2,7 +2,7 @@ import { encodeWordTimes, parseWordTimes } from '@reconnotes/core'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Vocabulary } from './vocabulary'
-import { setWordTimes, wordTimes } from './attachments'
+import { groupOfAttachment, setWordTimes, wordTimes } from './attachments'
 import { heardPattern as pattern, replaceHeard } from './vocabulary'
 
 export { replaceHeard }
@@ -42,8 +42,12 @@ export function fixTranscripts(
   vocab: Vocabulary | null,
   opts: { attachmentId: string; from: string; to: string; everywhere: boolean },
 ): { recordings: number; places: number } {
+  // "every recording": every recording in the same group (top-level folder) – not another group's
+  const group = groupOfAttachment(store, sync, opts.attachmentId)
   const ids = opts.everywhere
-    ? (store.db.prepare("SELECT id FROM attachments WHERE text IS NOT NULL AND text_status = 'done' AND (mime LIKE 'audio/%' OR mime LIKE 'video/%' OR id = ?)").all(opts.attachmentId) as { id: string }[]).map((r) => r.id)
+    ? (store.db.prepare("SELECT id FROM attachments WHERE text IS NOT NULL AND text_status = 'done' AND (mime LIKE 'audio/%' OR mime LIKE 'video/%' OR id = ?)").all(opts.attachmentId) as { id: string }[])
+        .map((r) => r.id)
+        .filter((id) => id === opts.attachmentId || groupOfAttachment(store, sync, id) === group)
     : [opts.attachmentId]
   let recordings = 0
   let places = 0
@@ -60,6 +64,6 @@ export function fixTranscripts(
     recordings++
     places += r.count
   }
-  vocab?.learn(opts.from.trim(), opts.to.trim(), true)
+  vocab?.learn(opts.from.trim(), opts.to.trim(), true, group)
   return { recordings, places }
 }

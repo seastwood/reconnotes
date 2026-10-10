@@ -50,18 +50,20 @@ export const meetingSetup = new Store<{ noteId: string | null }>({ noteId: null 
 export const meetingStart = new Store<{ noteId: string | null }>({ noteId: null })
 
 const RECENT = 'reconnotes.recentAttendees'
-/** People from your recent meetings (one tap to add them again). */
-export function recentAttendees(): string[] {
+/** (kept per group – a note's top-level folder – so work people aren't offered at robotics meetings) */
+const recentKey = (group: string) => (group ? `${RECENT}:${group}` : RECENT)
+/** People from your recent meetings in this group – its top-level folder (one tap to add them again). */
+export function recentAttendees(group = ''): string[] {
   try {
-    const v = JSON.parse(localStorage.getItem(RECENT) ?? '[]') as unknown
+    const v = JSON.parse(localStorage.getItem(recentKey(group)) ?? '[]') as unknown
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 24) : []
   } catch {
     return []
   }
 }
-function rememberAttendees(names: string[]) {
+function rememberAttendees(names: string[], group = '') {
   try {
-    localStorage.setItem(RECENT, JSON.stringify([...new Set([...names, ...recentAttendees()])].slice(0, 24)))
+    localStorage.setItem(recentKey(group), JSON.stringify([...new Set([...names, ...recentAttendees(group)])].slice(0, 24)))
   } catch {
     /* private mode */
   }
@@ -102,7 +104,7 @@ export function setPeopleCount(doc: Y.Doc, count: number) {
   })
 }
 
-export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees: string[]; count?: number; agenda: string[] }) {
+export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees: string[]; count?: number; agenda: string[]; group?: string }) {
   const content = getContent(doc)
   doc.transact(() => {
     const kids = content.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement)
@@ -133,7 +135,7 @@ export function applyMeetingSetup(doc: Y.Doc, setup: { title?: string; attendees
       content.insert(at, [block('heading', 'Agenda', { level: 2 }), list])
     }
   })
-  if (setup.attendees.length) rememberAttendees(setup.attendees)
+  if (setup.attendees.length) rememberAttendees(setup.attendees, setup.group)
 }
 
 /** "Seth, Jesse and Paul" → the names. */

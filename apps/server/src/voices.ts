@@ -25,7 +25,13 @@ interface Sample {
   speaker: number
   vec: number[]
   at: number
+  /** the group (top-level folder) the recording was in: voices are only recognised within it */
+  group?: string
 }
+
+/** a recording's group (its note's top-level folder; '' outside any): for samples kept before groups */
+export type GroupOf = (attachmentId: string) => string
+const groupOfSample = (s: Sample, groupOf: GroupOf) => s.group ?? groupOf(s.att)
 
 const PRINTS = 'voiceprints'
 /** the last few recordings a person was named in: their voice as it sounds lately */
@@ -52,7 +58,7 @@ const prints = (store: Store) => store.getSetting<Record<string, Sample[]>>(PRIN
  * You named (or renamed, or un-named) a voice in a recording: that's who it sounds like. A voice
  * named wrongly before is taken back from that name.
  */
-export function learnVoice(store: Store, attachmentId: string, speaker: number, name: string): boolean {
+export function learnVoice(store: Store, attachmentId: string, speaker: number, name: string, group = ''): boolean {
   const all = prints(store)
   for (const n of Object.keys(all)) {
     all[n] = all[n].filter((s) => !(s.att === attachmentId && s.speaker === speaker))
@@ -61,18 +67,25 @@ export function learnVoice(store: Store, attachmentId: string, speaker: number, 
   const vec = recordingVoices(store, attachmentId)?.[speaker]
   const who = name.trim()
   if (vec && who && !/^speaker \d+$/i.test(who)) {
-    all[who] = [{ att: attachmentId, speaker, vec, at: Date.now() }, ...(all[who] ?? [])].slice(0, SAMPLES_PER_NAME)
+    const mine = (all[who] ?? []).filter((x) => (x.group ?? '') === group || x.group === undefined)
+    const others = (all[who] ?? []).filter((x) => !mine.includes(x))
+    all[who] = [{ att: attachmentId, speaker, vec, at: Date.now(), group }, ...mine].slice(0, SAMPLES_PER_NAME).concat(others)
   }
   store.setSetting(PRINTS, all)
   return Boolean(vec && who)
 }
 
-/** The people a recording's voices sound like: speaker number → name (each name once). */
-export function recogniseVoices(store: Store, voices: Voices): Record<number, string> {
-  const people = Object.entries(prints(store)).map(([name, samples]) => {
+/**
+ * The people a recording's voices sound like: speaker number → name (each name once) – only people
+ * named in the same group (a work folder's voices are never looked for in a robotics folder).
+ */
+export function recogniseVoices(store: Store, voices: Voices, group = '', groupOf: GroupOf = () => ''): Record<number, string> {
+  const people = Object.entries(prints(store)).flatMap(([name, all]) => {
+    const samples = all.filter((x) => groupOfSample(x, groupOf) === group)
+    if (!samples.length) return []
     // their voice: the average of how they've sounded
     const sum = samples[0].vec.map((_, i) => samples.reduce((s, x) => s + (x.vec[i] ?? 0), 0))
-    return { name, vec: unit(sum) }
+    return [{ name, vec: unit(sum) }]
   })
   if (!people.length) return {}
   const pairs: { speaker: number; name: string; score: number }[] = []
@@ -93,17 +106,25 @@ export function recogniseVoices(store: Store, voices: Voices): Record<number, st
   return out
 }
 
-/** The people whose voices are known, with how many recordings each was named in. */
-export function knownVoices(store: Store): { name: string; recordings: number }[] {
-  return Object.entries(prints(store))
-    .map(([name, s]) => ({ name, recordings: s.length }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+/** The people whose voices are known – per group – with how many recordings each was named in. */
+export function knownVoices(store: Store, groupOf: GroupOf = () => '', only?: string): { name: string; group: string; recordings: number }[] {
+  const out: { name: string; group: string; recordings: number }[] = []
+  for (const [name, samples] of Object.entries(prints(store))) {
+    const by = new Map<string, number>()
+    for (const x of samples) by.set(groupOfSample(x, groupOf), (by.get(groupOfSample(x, groupOf)) ?? 0) + 1)
+    for (const [group, recordings] of by) if (only === undefined || group === only) out.push({ name, group, recordings })
+  }
+  return out.sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name))
 }
 
-/** Forget someone's voice (it's no longer recognised; names already given stay). */
-export function forgetVoice(store: Store, name: string) {
+/** Forget someone's voice in a group (it's no longer recognised there; names already given stay). */
+export function forgetVoice(store: Store, name: string, group?: string, groupOf: GroupOf = () => '') {
   const all = prints(store)
-  delete all[name]
+  if (group === undefined) delete all[name]
+  else {
+    all[name] = (all[name] ?? []).filter((x) => groupOfSample(x, groupOf) !== group)
+    if (!all[name].length) delete all[name]
+  }
   store.setSetting(PRINTS, all)
 }
 

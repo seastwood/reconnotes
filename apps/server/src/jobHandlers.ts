@@ -34,7 +34,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askNotes } from './ask'
-import { attendeesFor, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
+import { attendeesFor, groupOfAttachment, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
 import { reportProgress } from './jobs'
@@ -340,7 +340,8 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
         // named in other recordings), where the service says what each one sounds like
         if (segments && Object.keys(voices).length) {
           setRecordingVoices(store, att.id, voices)
-          const names = recogniseVoices(store, voices)
+          // (only people named in this recording's group: its note's top-level folder)
+          const names = recogniseVoices(store, voices, groupOfAttachment(store, sync, att.id), (a) => groupOfAttachment(store, sync, a))
           const json = Object.keys(names).length ? JSON.stringify(names) : null
           setSeenNames(store, att.id, Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v])))
           for (const noteId of store.notesReferencing(att.id)) {
@@ -467,7 +468,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     if (ai.agents.available('audio') && !onDevice) {
       if (!store.hasBlob(att.id)) throw new Error("This recording hasn't reached the server yet – try again once it has synced.")
       const people = attendeesFor(store, sync, att.id)
-      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, people)
+      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, people, groupOfAttachment(store, sync, att.id))
       setHeardWith(store, att.id, people)
       text = r.text
       by = r.agent
@@ -721,7 +722,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     else if (serverHears && att && store.hasBlob(att.id)) {
       reportProgress('Transcribing the recording…')
       try {
-        const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees)
+        const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees, groupOfAttachment(store, sync, att.id))
         transcript = r.text
         agent = r.agent
         times = r.words
@@ -740,7 +741,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     }
     if (!transcript) {
       if (!att || !store.hasBlob(att.id)) throw new Error("The recording hasn't reached the server yet – try again once it has synced.")
-      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees)
+      const r = await ai.transcribeAudio(fs.readFileSync(store.blobPath(att.id)), att.mime, att.name, attendees, groupOfAttachment(store, sync, att.id))
       transcript = r.text
       agent = r.agent
       times = r.words

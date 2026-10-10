@@ -8,6 +8,7 @@ import {
   rereadAll,
   vocabApi,
   voicesApi,
+  type KnownVoice,
   type Vocab,
   agentsApi,
   type Agent,
@@ -343,7 +344,7 @@ function SpeakerLabelsSetting({ value, onSave }: { value: number; onSave: (v: nu
 
 /** The people whose voices are recognised in new recordings, learned when you name a voice. */
 function KnownVoices() {
-  const [voices, setVoices] = useState<{ name: string; recordings: number }[] | null>(null)
+  const [voices, setVoices] = useState<KnownVoice[] | null>(null)
   useEffect(() => {
     void voicesApi
       .list()
@@ -356,20 +357,24 @@ function KnownVoices() {
       <h3>Voices it knows</h3>
       <p className="hint">
         When you name a speaker in a recording (tap “Speaker 2” in its transcript), what they sound like is kept under that name – the next recording names them by
-        itself. Needs the current speaker-label service (deploy/diarize.py).
+        itself. Each top-level folder keeps its own: people named in your work folder are only looked for in work meetings, never in another folder's. Needs the
+        current speaker-label service (deploy/diarize.py).
       </p>
       {voices.length ? (
         <ul className="learned">
           {voices.map((v) => (
-            <li key={v.name}>
+            <li key={`${v.group}|${v.name}`}>
               <span>
-                <b>{v.name}</b> <span className="muted">– named in {v.recordings === 1 ? '1 recording' : `${v.recordings} recordings`}</span>
+                <b>{v.name}</b>{' '}
+                <span className="muted">
+                  – {v.groupName ? `in ${v.groupName}` : 'outside folders'}, named in {v.recordings === 1 ? '1 recording' : `${v.recordings} recordings`}
+                </span>
               </span>
               <button
                 className="icon"
                 aria-label={`Forget ${v.name}’s voice`}
                 title="Forget this voice"
-                onClick={() => confirm(`Forget ${v.name}’s voice? Recordings keep the names they have.`) && void voicesApi.forget(v.name).then((r) => setVoices(r.voices))}
+                onClick={() => confirm(`Forget ${v.name}’s voice? Recordings keep the names they have.`) && void voicesApi.forget(v.name, v.group).then((r) => setVoices(r.voices))}
               >
                 ✕
               </button>

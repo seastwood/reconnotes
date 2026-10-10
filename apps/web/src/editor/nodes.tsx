@@ -9,7 +9,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
-import { attendeeCount, attendeeNames, getNotes, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
+import { attendeeCount, attendeeNames, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
@@ -389,10 +389,12 @@ function SpeakerNamer({
   anchor,
   names,
   doc,
+  noteId,
   attachmentId,
   onClose,
 }: {
   speaker: number
+  noteId: string
   anchor: HTMLElement
   names: Record<number, string>
   doc: Y.Doc
@@ -402,7 +404,7 @@ function SpeakerNamer({
   const ref = useRef<HTMLElement | null>(anchor)
   ref.current = anchor
   // the attendees, and people whose voices are known from other recordings
-  const known = useKnownVoices()
+  const known = useKnownVoices(noteId)
   const attendees = useMemo(() => [...new Set([...attendeeNames(noteToMarkdown(doc)), ...known])], [doc, known])
   const set = (name: string | null) => {
     const next: Record<number, string> = { ...names }
@@ -410,7 +412,9 @@ function SpeakerNamer({
     else delete next[speaker]
     getTranscripts(doc).set(speakerNamesKey(attachmentId), JSON.stringify(next))
     // a new name is a voice the server learns: offered next time too
-    if (name?.trim() && knownVoiceNames && !knownVoiceNames.includes(name.trim())) knownVoiceNames = [...knownVoiceNames, name.trim()]
+    const group = noteGroup(workspaceDoc, noteId)
+    const known = knownVoiceNames.get(group)
+    if (name?.trim() && known && !known.includes(name.trim())) knownVoiceNames.set(group, [...known, name.trim()])
     onClose()
   }
   const taken = new Set(Object.entries(names).filter(([k]) => Number(k) !== speaker).map(([, v]) => v))
@@ -436,17 +440,25 @@ function SpeakerNamer({
   )
 }
 
-/** Names of the people whose voices are known (fetched once a session; refreshed on naming). */
-let knownVoiceNames: string[] | null = null
-function useKnownVoices(): string[] {
-  const [names, setNames] = useState<string[]>(knownVoiceNames ?? [])
+/**
+ * Names of the people whose voices are known in this note's group – its top-level folder (fetched
+ * once a session per group; added to on naming). A work folder's people aren't offered in another.
+ */
+const knownVoiceNames = new Map<string, string[]>()
+function useKnownVoices(noteId: string): string[] {
+  const group = noteGroup(workspaceDoc, noteId)
+  const [names, setNames] = useState<string[]>(knownVoiceNames.get(group) ?? [])
   useEffect(() => {
-    if (knownVoiceNames || !isSyncConfigured()) return
+    if (knownVoiceNames.has(group) || !isSyncConfigured()) return
     void voicesApi
-      .list()
-      .then((r) => setNames((knownVoiceNames = r.voices.map((v) => v.name))))
+      .list(noteId)
+      .then((r) => {
+        const list = r.voices.map((v) => v.name)
+        knownVoiceNames.set(group, list)
+        setNames(list)
+      })
       .catch(() => {})
-  }, [])
+  }, [group, noteId])
   return names
 }
 
@@ -820,6 +832,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
               anchor={naming.anchor}
               names={names}
               doc={ctx.doc}
+              noteId={ctx.noteId}
               attachmentId={node.attrs.attachmentId}
               onClose={() => setNaming(null)}
             />

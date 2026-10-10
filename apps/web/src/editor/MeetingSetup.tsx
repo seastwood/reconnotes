@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import type * as Y from 'yjs'
 import { Mic, Users, X } from 'lucide-react'
+import { noteGroup } from '@reconnotes/core'
+import { workspaceDoc } from '../lib/workspace'
 import { applyMeetingSetup, meetingSetup, meetingStart, recentAttendees, splitNames } from '../lib/meeting'
 
 /**
@@ -15,14 +17,16 @@ export function MeetingSetup({ noteId, doc, title, onStart }: { noteId: string; 
   const [agenda, setAgenda] = useState('')
   // how many people (no time to name them all): 0 – not said
   const [count, setCount] = useState(0)
-  const recent = useMemo(recentAttendees, [])
+  // the meeting's group (its note's top-level folder): only people from meetings in it are offered
+  const group = useMemo(() => noteGroup(workspaceDoc, noteId), [noteId])
+  const recent = useMemo(() => recentAttendees(group), [group])
   const chosen = splitNames(people)
   // never fewer than the names given
   const shown = Math.max(count, chosen.length)
   const add = (n: string) => setPeople((p) => (splitNames(p).includes(n) ? p : [...splitNames(p), n].join(', ')))
   const close = () => meetingSetup.set({ noteId: null })
   const start = (withSetup: boolean) => {
-    if (withSetup) applyMeetingSetup(doc, { title: name, attendees: chosen, count: shown, agenda: agenda.split('\n') })
+    if (withSetup) applyMeetingSetup(doc, { title: name, attendees: chosen, count: shown, agenda: agenda.split('\n'), group })
     close()
     // the recording (and what you write) goes under Notes, after the setup
     onStart?.()

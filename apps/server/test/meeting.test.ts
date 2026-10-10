@@ -758,3 +758,58 @@ describe('a long meeting read by meaning (with an embedding model)', () => {
     }
   })
 })
+
+describe('groups – a note’s top-level folder – don’t learn from each other', () => {
+  it('voices named at work aren’t looked for in robotics; words fixed at work aren’t fixed there', async () => {
+    const { createFolder } = await import('@reconnotes/core')
+    const { groupOfAttachment } = await import('../src/attachments')
+    const { learnVoice, recogniseVoices, setRecordingVoices, knownVoices } = await import('../src/voices')
+    let work = ''
+    let robotics = ''
+    let team = ''
+    await app.sync.change(WORKSPACE_DOC, (ws) => {
+      work = createFolder(ws, { name: 'Work' })
+      robotics = createFolder(ws, { name: 'Robotics' })
+      // a subfolder belongs to its top-level folder's group
+      team = createFolder(ws, { name: 'Team 1234', parentId: robotics })
+      createNote(ws, { id: 'notegroupwork001', title: 'Shop meeting', folderId: work })
+      createNote(ws, { id: 'notegrouprobo001', title: 'Build meeting', folderId: team })
+    })
+    const rec = async (noteId: string, att: string, text: string) => {
+      app.store.putAttachment({ id: att, mime: 'audio/mp4', name: 'r.m4a', size: 1, created_at: Date.now() }, Buffer.from('x'), 'skipped')
+      app.store.setAttachmentText(att, text, 'done')
+      await app.sync.change(noteDocName(noteId), (doc) => {
+        const el = new Y.XmlElement('audio')
+        el.setAttribute('attachmentId', att)
+        getContent(doc).insert(0, [el])
+      })
+    }
+    await rec('notegroupwork001', 'groupaudiowork01', 'Summet does the sprinklers.')
+    await rec('notegrouprobo001', 'groupaudiorobo01', 'The Summet bracket is loose.')
+    const groupOf = (a: string) => groupOfAttachment(app.store, app.sync, a)
+    expect(groupOf('groupaudiowork01')).toBe(work)
+    expect(groupOf('groupaudiorobo01')).toBe(robotics)
+
+    // Paul named at work…
+    const paul = [0.9, 0.3, 0.1]
+    setRecordingVoices(app.store, 'groupaudiowork01', { 0: paul })
+    learnVoice(app.store, 'groupaudiowork01', 0, 'Paul', work)
+    // …is recognised at work, and not at robotics – even a voice just like his
+    expect(recogniseVoices(app.store, { 0: paul }, work, groupOf)).toEqual({ 0: 'Paul' })
+    expect(recogniseVoices(app.store, { 0: paul }, robotics, groupOf)).toEqual({})
+    expect(knownVoices(app.store, groupOf, robotics)).toEqual([])
+    expect(knownVoices(app.store, groupOf, work).map((v) => v.name)).toEqual(['Paul'])
+
+    // a word fixed at work, "in every recording": every work recording – not robotics ones
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    expect(await api('POST', '/api/ai/transcript-fix', { attachmentId: 'groupaudiowork01', from: 'Summet', to: 'Summit', everywhere: true })).toEqual({ recordings: 1, places: 1 })
+    expect(app.store.getAttachment('groupaudiorobo01')?.text).toBe('The Summet bracket is loose.')
+    expect(app.ai.vocabulary!.heardFixes(work)).toContainEqual(['Summet', 'Summit'])
+    expect(app.ai.vocabulary!.heardFixes(robotics)).not.toContainEqual(['Summet', 'Summit'])
+    expect(app.ai.vocabulary!.speechPrompt([], robotics)).not.toContain('Summit')
+    // the voices list, per note's group
+    expect((await api('GET', '/api/voices?note=notegrouprobo001')).voices).toEqual([])
+    expect((await api('GET', '/api/voices?note=notegroupwork001')).voices).toMatchObject([{ name: 'Paul', groupName: 'Work' }])
+  })
+})

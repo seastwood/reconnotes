@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { attendeeNames, encodeWordTimes, encodeSpeakers, noteDocName, noteToMarkdown, parseSpeakers, type SpeakerSegment } from '@reconnotes/core'
+import { WORKSPACE_DOC, noteGroup, attendeeNames, encodeWordTimes, encodeSpeakers, noteDocName, noteToMarkdown, parseSpeakers, type SpeakerSegment } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store, AttachmentRow } from './store'
 import type { SyncEngine } from './sync'
@@ -33,7 +33,7 @@ export async function processAttachment(config: Config, store: Store, ai: Ai, sy
     else {
       // the people on its note's "Attendees:" line: Whisper spells them right
       const people = attendeesFor(store, sync, att.id)
-      const r = await ai.transcribeAudio(data, att.mime, att.name, people)
+      const r = await ai.transcribeAudio(data, att.mime, att.name, people, groupOfAttachment(store, sync, att.id))
       setHeardWith(store, att.id, people)
       text = r.text
       setTranscribedBy(store, att.id, r.agent)
@@ -130,6 +130,16 @@ export function speakersThreshold(store: Store, attachmentId: string): number | 
 }
 export function speakerSegments(store: Store, attachmentId: string): SpeakerSegment[] | null {
   return parseSpeakers(store.getSetting<string | null>(`speakers:${attachmentId}`) ?? null)
+}
+
+/**
+ * The group a recording belongs to: the top-level folder of the note it's in ('' outside any
+ * folder). Voices, people and fixed words learned in one group aren't used in another.
+ */
+export function groupOfAttachment(store: Store, sync: SyncEngine, attachmentId: string): string {
+  const ws = sync.getDoc(WORKSPACE_DOC)
+  const noteId = store.notesReferencing(attachmentId)[0]
+  return ws && noteId ? noteGroup(ws, noteId) : ''
 }
 
 /** The people listed on the "Attendees:" line of the note(s) a recording is in. */

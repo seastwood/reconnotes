@@ -26,6 +26,7 @@ import type { Jobs } from './jobs'
 import type { MeaningIndex } from './semantic'
 import { corrections } from './vocabulary'
 import { learnVoice, recordingVoices, seenNames, setSeenNames } from './voices'
+import { groupOfAttachment } from './attachments'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -187,7 +188,7 @@ export class SyncEngine {
         const now = names[sp] ?? ''
         if (now === (seen[sp] ?? '')) continue
         changed = true
-        if (learnVoice(this.store, id, sp, now) && now) log.info(`learned a voice: ${now}`)
+        if (learnVoice(this.store, id, sp, now, groupOfAttachment(this.store, this, id)) && now) log.info(`learned a voice: ${now}`)
       }
       if (changed) setSeenNames(this.store, id, Object.fromEntries(Object.entries(names).map(([k, v]) => [String(k), v])))
     }

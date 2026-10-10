@@ -134,9 +134,17 @@ export const transcriptApi = {
 }
 
 /** The people whose voices are recognised in new recordings (learned when you name a voice). */
+/** (each in a group – a top-level folder, `groupName` – and recognised only within it) */
+export interface KnownVoice {
+  name: string
+  group: string
+  groupName: string
+  recordings: number
+}
 export const voicesApi = {
-  list: () => call<{ voices: { name: string; recordings: number }[] }>('GET', '/api/voices'),
-  forget: (name: string) => call<{ voices: { name: string; recordings: number }[] }>('POST', '/api/voices/forget', { name }),
+  /** `noteId`: only the people known in that note's group */
+  list: (noteId?: string) => call<{ voices: KnownVoice[] }>('GET', `/api/voices${noteId ? `?note=${encodeURIComponent(noteId)}` : ''}`),
+  forget: (name: string, group: string) => call<{ voices: KnownVoice[] }>('POST', '/api/voices/forget', { name, group }),
 }
 
 export interface AiHealth {

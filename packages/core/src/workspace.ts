@@ -401,3 +401,23 @@ export function foldersNamedIn(query: string, folders: FolderData[]): { ids: Set
   }
   return { ids, rest: q.replace(/\s+/g, ' ').trim() }
 }
+
+/**
+ * The group a note belongs to: its top-level folder ('' outside any folder). Meetings in one group
+ * don't learn from another's – the voices named, the people suggested, the words fixed in a work
+ * folder stay out of a robotics folder.
+ */
+export function noteGroup(ws: Y.Doc, noteId: string): string {
+  const m = getNotes(ws).get(noteId)
+  if (!m) return ''
+  const folders = getFolders(ws)
+  let id = readNote(m).folderId
+  let top = ''
+  const seen = new Set<string>()
+  while (id && folders.has(id) && !seen.has(id)) {
+    seen.add(id)
+    top = id
+    id = readFolder(folders.get(id)!).parentId
+  }
+  return top
+}

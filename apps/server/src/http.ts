@@ -6,7 +6,7 @@ import http from 'node:http'
 import https from 'node:https'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
-import { noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
+import { WORKSPACE_DOC, getFolders, noteGroup, readFolder, noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
@@ -27,7 +27,7 @@ import {
   type AiSettings,
   warmOllama,
 } from './agents'
-import { initialTextStatus, queueAttachment, retryAttachments, attendeesFor } from './attachments'
+import { initialTextStatus, queueAttachment, retryAttachments, attendeesFor, groupOfAttachment } from './attachments'
 import { listBackups, runBackup } from './backup'
 import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
@@ -394,7 +394,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     const data = fs.readFileSync(store.blobPath(att.id))
     const { text, agent } = await jobs.run(
       { kind: 'transcribe', title: att.name || 'Recording', device: deviceName(req) },
-      () => ai.transcribeAudio(data, att.mime, att.name, attendeesFor(store, sync, att.id)),
+      () => ai.transcribeAudio(data, att.mime, att.name, attendeesFor(store, sync, att.id), groupOfAttachment(store, sync, att.id)),
       (r) => ({ result: { text: r.text.slice(0, 1500) }, agent: r.agent }),
     )
     store.setAttachmentText(att.id, text, 'done')
@@ -606,11 +606,23 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
 
   // --- voices recognised across recordings ------------------------------------
-  route('GET', '/api/voices', (_req, res) => json(res, 200, { voices: knownVoices(store) }))
+  // per group (a note's top-level folder): ?note=<id> – just that note's group
+  const groupOf = (att: string) => groupOfAttachment(store, sync, att)
+  const groupName = (g: string) => {
+    const ws = sync.getDoc(WORKSPACE_DOC)
+    const f = g && ws ? getFolders(ws).get(g) : undefined
+    return f ? readFolder(f).name : ''
+  }
+  const voicesList = (only?: string) => knownVoices(store, groupOf, only).map((v) => ({ ...v, groupName: groupName(v.group) }))
+  route('GET', '/api/voices', (_req, res, _p, url) => {
+    const note = url.searchParams.get('note')
+    const ws = sync.getDoc(WORKSPACE_DOC)
+    json(res, 200, { voices: voicesList(note && ws ? noteGroup(ws, note) : undefined) })
+  })
   route('POST', '/api/voices/forget', async (req, res) => {
-    const { name } = await readJson<{ name: string }>(req)
-    forgetVoice(store, String(name ?? ''))
-    json(res, 200, { voices: knownVoices(store) })
+    const { name, group } = await readJson<{ name: string; group?: string }>(req)
+    forgetVoice(store, String(name ?? ''), typeof group === 'string' ? group : undefined, groupOf)
+    json(res, 200, { voices: voicesList() })
   })
 
   // --- is the AI working? ----------------------------------------------------

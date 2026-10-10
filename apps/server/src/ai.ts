@@ -511,11 +511,12 @@ ${partNotes.join('\n\n')}
 
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
   /** `names`: people who'll be heard (a meeting's attendees) – spelled right */
-  async transcribeAudio(data: Buffer, mime: string, filename: string, names: string[] = []): Promise<{ text: string; agent: string; words?: { word: string; start: number; end: number }[] }> {
+  /** `group`: the recording's group (top-level folder) – only its fixed words are used */
+  async transcribeAudio(data: Buffer, mime: string, filename: string, names: string[] = [], group = ''): Promise<{ text: string; agent: string; words?: { word: string; start: number; end: number }[] }> {
     const { result, agent } = await this.agents.run('audio', async (backend, agent) => {
       if (!backend.transcribe)
         throw new Error(`${agent.name} can't transcribe audio – use a Wyoming (Home Assistant) or OpenAI-compatible speech-to-text server, e.g. Whisper`)
-      const prompt = (this.vocabulary ? this.vocabulary.speechPrompt(names) : names.length ? `${names.join(', ')}.` : '') || undefined
+      const prompt = (this.vocabulary ? this.vocabulary.speechPrompt(names, group) : names.length ? `${names.join(', ')}.` : '') || undefined
       // with each word's time, where the server gives it (to follow along as it plays)
       const language = this.agents.settings().speechLanguage || undefined
       const once = async () =>
@@ -536,7 +537,7 @@ ${partNotes.join('\n\n')}
         rememberSpeechNeedsRoom(agent)
       }
       // words you've fixed in transcripts before ("Summet" → "Summit"): fixed in this one too
-      const fixed = fixHeard(collapseRepeats(r.text), r.words, this.vocabulary?.heardFixes() ?? [])
+      const fixed = fixHeard(collapseRepeats(r.text), r.words, this.vocabulary?.heardFixes(group) ?? [])
       return { text: fixed.text, words: fixed.words }
     })
     log.info(`transcribed ${Math.round(data.length / 1024)} KB of audio via "${agent.name}" (${result.text.length} chars${result.words ? `, ${result.words.length} timed words` : ''})`)

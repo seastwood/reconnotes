@@ -19,6 +19,8 @@ export interface Learned {
   at: number
   /** misheard by speech-to-text (fixed in a transcript): fixed in new transcripts as they come */
   heard?: boolean
+  /** …in this group's recordings (its top-level folder; '' outside any): not in another group's */
+  group?: string
 }
 
 interface Saved {
@@ -52,22 +54,23 @@ export class Vocabulary {
   }
 
   /** Remember that the AI read `from` where you meant `to` (`heard`: speech-to-text misheard it). */
-  learn(from: string, to: string, heard = false) {
+  learn(from: string, to: string, heard = false, group?: string) {
     const s = this.load()
-    const hit = s.learned.find((l) => l.from.toLowerCase() === from.toLowerCase() && l.to === to)
+    const hit = s.learned.find((l) => l.from.toLowerCase() === from.toLowerCase() && l.to === to && (l.group ?? '') === (group ?? ''))
     if (hit) {
       hit.count++
       hit.at = Date.now()
       if (heard) hit.heard = true
-    } else s.learned.push({ from, to, count: 1, at: Date.now(), ...(heard ? { heard } : {}) })
+    } else s.learned.push({ from, to, count: 1, at: Date.now(), ...(heard ? { heard } : {}), ...(group !== undefined ? { group } : {}) })
     s.learned.sort((a, b) => b.at - a.at)
     this.store.setSetting(KEY, { ...s, learned: s.learned.slice(0, MAX_LEARNED) })
   }
 
   /** What speech-to-text has misheard before (you fixed it in a transcript): [from, to]. */
-  heardFixes(): [string, string][] {
+  /** (`group`: a recording's group – its own fixes, and the ones from before groups; not another group's) */
+  heardFixes(group = ''): [string, string][] {
     return this.load()
-      .learned.filter((l) => l.heard)
+      .learned.filter((l) => l.heard && (l.group === undefined || l.group === group))
       .map((l) => [l.from, l.to])
   }
 
@@ -77,9 +80,11 @@ export class Vocabulary {
    * it then spells them like that. Short: Whisper only reads the last ~220 tokens of it.
    */
   /** `extra`: names for this one recording (a meeting's attendees) – first, so they're never cut off */
-  speechPrompt(extra: string[] = []): string {
+  speechPrompt(extra: string[] = [], group = ''): string {
     const s = this.load()
-    const words = [...new Set([...extra.map((w) => w.trim()).filter(Boolean), ...s.learned.map((l) => l.to), ...s.words])].filter((w) => w.length <= 30)
+    // (a misheard word fixed in another group's recordings isn't this one's)
+    const learned = s.learned.filter((l) => !l.heard || l.group === undefined || l.group === group)
+    const words = [...new Set([...extra.map((w) => w.trim()).filter(Boolean), ...learned.map((l) => l.to), ...s.words])].filter((w) => w.length <= 30)
     let out = ''
     for (const w of words) {
       if (out.length + w.length + 2 > 600) break

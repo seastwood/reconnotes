@@ -278,6 +278,11 @@ each turn is labelled, you name the voices with a tap, and the meeting notes say
 A voice you've named is recognised in later recordings and named by itself; voices heard for only
 a few seconds are folded into whoever was speaking around them.
 
+**Each top-level folder keeps to itself.** Voices you name, the people offered in a meeting's setup
+and the words you fix in transcripts are learned per top-level folder (with its subfolders): people
+from your *Work* folder are never looked for, offered or spelled in, say, a *Robotics* folder's
+meetings. Notes outside any folder share their own.
+
 A self-hosted Whisper server next to ReconNotes. Without Docker (e.g. in an LXC container), follow
 [`docs/setup/Speech to text with Speaches.md`](docs/setup/Speech%20to%20text%20with%20Speaches.md),
 which includes fixes for the usual GPU-library problems. With Docker (uses the GPU if Docker has access to it):
