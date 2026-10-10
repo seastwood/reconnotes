@@ -300,3 +300,88 @@ export function pictureLines(data: Buffer, mime: string): PictureLine[] | null {
     return { png: cropPng(bmp, box, Math.max(6, box.h * 0.25), only), bullet: l.bullet, level: l.level }
   })
 }
+
+// ---------------------------------------------------------------------------
+// Which way up a photo of a page is
+// ---------------------------------------------------------------------------
+
+/**
+ * Does the text in this photo run up or down the page (the photo is on its side)? From the letters'
+ * shapes alone: in a line of print, each letter's nearest neighbour is beside it (letters sit closer
+ * than lines), so on a page on its side, the nearest neighbours are above and below. null: can't
+ * tell (too few letters – a photo of food, a blank page).
+ */
+export function textRunsSideways(data: Buffer, mime: string): boolean | null {
+  const img = decodeImage(data, mime, 1200)
+  if (!img) return null
+  const boxes = inkBoxes(binarize(img))
+    .map((b) => b.box)
+    // letter-sized blobs only (not pictures, rules or specks)
+    .filter((b) => b.w >= 3 && b.h >= 3 && b.w <= 40 && b.h <= 40)
+  if (boxes.length < 60) return null
+  // a sample is enough (and keeps it quick)
+  const step = Math.max(1, Math.floor(boxes.length / 1500))
+  const pts = boxes.filter((_, i) => i % step === 0).map((b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2, s: Math.max(b.w, b.h) }))
+  let across = 0
+  let down = 0
+  for (const p of pts) {
+    let best = Infinity
+    let dx = 0
+    let dy = 0
+    for (const q of pts) {
+      if (q === p) continue
+      const ddx = q.x - p.x
+      const ddy = q.y - p.y
+      const d = ddx * ddx + ddy * ddy
+      if (d < best) {
+        best = d
+        dx = ddx
+        dy = ddy
+      }
+    }
+    // a neighbour in the same word (within a couple of letters), clearly one way or the other
+    if (Math.sqrt(best) > p.s * 2.5) continue
+    if (Math.abs(dx) > Math.abs(dy) * 1.5) across++
+    else if (Math.abs(dy) > Math.abs(dx) * 1.5) down++
+  }
+  if (across + down < 40) return null
+  if (down > across * 1.6) return true
+  if (across > down * 1.6) return false
+  return null
+}
+
+/** The picture turned clockwise by quarter turns, as a JPEG (or a PNG, without the canvas library), at most `max` px. */
+export async function rotatePicture(data: Buffer, mime: string, quarters: number, max = 2400): Promise<{ data: Buffer; mime: string } | null> {
+  const q = ((quarters % 4) + 4) % 4
+  const size = imageSize(data)
+  if (!size) return null
+  const scale = Math.min(1, max / Math.max(size.width, size.height))
+  const w = Math.max(1, Math.round(size.width * scale))
+  const h = Math.max(1, Math.round(size.height * scale))
+  const side = q % 2 === 1
+  const W = side ? h : w
+  const H = side ? w : h
+  const napi = await import('@napi-rs/canvas').catch(() => null)
+  if (napi) {
+    try {
+      const img = await napi.loadImage(data)
+      const canvas = napi.createCanvas(W, H)
+      const ctx = canvas.getContext('2d')
+      ctx.translate(W / 2, H / 2)
+      ctx.rotate((q * Math.PI) / 2)
+      ctx.drawImage(img, -w / 2, -h / 2, w, h)
+      return { data: await canvas.encode('jpeg', 88), mime: 'image/jpeg' }
+    } catch {
+      /* fall back to the SVG renderer */
+    }
+  }
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}">` +
+    `<g transform="translate(${W / 2} ${H / 2}) rotate(${q * 90}) translate(${-w / 2} ${-h / 2})">` +
+    `<image width="${w}" height="${h}" preserveAspectRatio="none" xlink:href="data:${mime};base64,${data.toString('base64')}"/></g></svg>`
+  try {
+    return { data: new Resvg(svg, { background: '#ffffff' }).render().asPng(), mime: 'image/png' }
+  } catch {
+    return null
+  }
+}

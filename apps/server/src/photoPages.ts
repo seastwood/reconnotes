@@ -3,6 +3,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import { jobSignal, reportProgress } from './jobs'
+import { uprightPages } from './photoUpright'
 import { createPhotoNote, numbersIn, words, type PhotoPage } from './photoRecipe'
 
 /**
@@ -106,6 +107,8 @@ export async function notesFromPhotos(
   folderId: string | null,
 ): Promise<{ noteId: string; title: string; asRead: boolean; agent: string }> {
   if (!pages.length) throw new Error('No photos to read.')
+  // the ones the phone didn't read (a browser): turned the right way up here first
+  pages = await uprightPages(store, ai, pages)
   // 1. each page's text
   const texts: string[] = []
   let reader = ''
@@ -228,6 +231,7 @@ export async function guessKind(store: Store, ai: Ai, pages: PhotoPage[], text: 
 
 /** Photos read here (the ones the phone didn't read): their text, for working out what they are. */
 export async function readForGuess(store: Store, ai: Ai, pages: PhotoPage[]): Promise<{ pages: PhotoPage[]; agent: string }> {
+  pages = await uprightPages(store, ai, pages)
   let agent = ''
   const out: PhotoPage[] = []
   for (const [k, p] of pages.entries()) {

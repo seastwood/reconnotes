@@ -259,6 +259,9 @@ describe('a meal-kit card’s lines', () => {
     expect(tidyIngredient('¼ Oz Oz').text).toBe('¼ Oz')
     expect(tidyIngredient('1 Jalapeño').text).toBe('1 Jalapeño')
     expect(tidyIngredient('Crème fraîche').text).toBe('Crème fraîche')
+    expect(tidyIngredient('Yellow Onion | Yellow Onion').text).toBe('Yellow Onion')
+    expect(tidyIngredient('Hot Sauce |').text).toBe('Hot Sauce')
+    expect(tidyIngredient('½ oz Parsley | ¼ oz Parsley').text).toBe('½ oz Parsley | ¼ oz Parsley')
   })
   it('the same amount for both columns, the bar read as a 1', () => {
     expect(splitColumns('1 11 Jalapeño')).toEqual({ first: '1', other: '1', name: 'Jalapeño' })
@@ -315,6 +318,9 @@ describe('a meal-kit card’s lines', () => {
     expect(titleCase('Lemon Thyme Pork')).toBe('Lemon Thyme Pork')
   })
   it('two amounts with the bar not read', () => {
+    expect(splitColumns('½ oz Parsley | ¼ oz Parsley')).toEqual({ first: '½ oz', other: '¼ oz', name: 'Parsley' })
+    expect(splitColumns('1 Clove Garlic | 2 Cloves Garlic')).toEqual({ first: '1 Clove', other: '2 Cloves', name: 'Garlic' })
+    expect(splitColumns('1 Lemon | 2 Limes')).toBeNull()
     expect(splitColumns('Italian Seasoning 1 TBSP 1 TBSP')).toEqual({ first: '1 TBSP', other: '1 TBSP', name: 'Italian Seasoning' })
     expect(splitColumns('Bake 2 cups 350 degrees')).toBeNull()
   })

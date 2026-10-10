@@ -7,6 +7,7 @@ import type { Ai } from './ai'
 import { reportProgress } from './jobs'
 import { markdownToNodes } from './importNotes'
 import { recipeCard, type Recipe } from './recipe'
+import { uprightPages } from './photoUpright'
 
 /**
  * A recipe from photos
@@ -117,6 +118,9 @@ export function splitColumns(raw: string): { first: string; other: string; name:
   // after the name, as in a card's table: "Jasmine Rice ½ Cup | 1 Cup"
   m = new RegExp(`^(.*?\\p{L}.*?)\\s+(${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\s*$`, 'iu').exec(t)
   if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/\s*[•·:–-]\s*$/, '').trim() }
+  // the whole ingredient written for each column: "½ oz Parsley | ¼ oz Parsley", "1 Clove Garlic | 2 Cloves Garlic"
+  m = new RegExp(`^(${AMOUNT})\\s+(.+?)\\s*\\|\\s*(${AMOUNT})\\s+(.+)$`, 'iu').exec(t)
+  if (m && m[2].replace(/s\b/gi, '').toLowerCase() === m[4].replace(/s\b/gi, '').toLowerCase()) return { first: m[1].trim(), other: m[3].trim(), name: m[2].trim() }
   // the bar not read at all, between two amounts with units: "Italian Seasoning 1 TBSP 1 TBSP"
   m = new RegExp(`^(.*?\\p{L}.*?)\\s+(${UNIT_AMOUNT})\\s+(${UNIT_AMOUNT})\\s*$`, 'iu').exec(t)
   if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/\s*[•·:–-]\s*$/, '').trim() }
@@ -169,6 +173,9 @@ export function tidyIngredient(raw: string): { text: string; allergens: string[]
     .replace(/^(?![AI]\s)[B-HJ-Z]\s+(?=\p{Lu})/u, '')
     .replace(/\s+[a-z]$/, '')
     .replace(/\s*[•·]\s*$/, '')
+    // a bar left at the end ("Hot Sauce |"), a name either side of one ("Yellow Onion | Yellow Onion")
+    .replace(/\s*\|\s*$/, '')
+    .replace(/^(.+?)\s*\|\s*\1$/i, '$1')
     // a unit twice ("¼ Oz Oz": the second column's amount lost)
     .replace(/\b(tbsps?|tsps?|oz|cups?|cloves?|lbs?)\s+\1\b/gi, '$1')
     .replace(/\s{2,}/g, ' ')
@@ -246,6 +253,8 @@ export async function recipeFromPhotos(
   folderId: string | null,
 ): Promise<{ noteId: string; title: string; left: string[]; unsure: number; agent: string }> {
   if (!pages.length) throw new Error('No photos to read.')
+  // the ones the phone didn't read (a browser): turned the right way up here first
+  pages = await uprightPages(store, ai, pages)
   // 1. each page's text
   const texts: string[] = []
   let reader = ''

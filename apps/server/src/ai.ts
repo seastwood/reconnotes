@@ -836,6 +836,16 @@ ${partNotes.join('\n\n')}
     return result
   }
 
+  /** A few lines of a photo's text (to tell which way round it reads best): quick, short. */
+  async readSnippet(data: Buffer, mime: string): Promise<string> {
+    if (!isAiImage(mime)) return ''
+    const fit = fitForAi(data, mime, 1200)
+    const { result } = await this.agents.run(this.agents.available('images') ? 'images' : 'handwriting', (backend) =>
+      backend.generate([{ image: fit.data, mime: fit.mime }, { text: 'Transcribe the first few lines of text in this image, exactly as written. Output only the text.' }], 160),
+    )
+    return result
+  }
+
   private async readPage(data: Buffer, mime: string, prompt: string): Promise<{ text: string; agent: string }> {
     if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
     const fit = fitForAi(data, mime)
