@@ -175,9 +175,12 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               </p>
             )}
             <label className="check">
-              <input type="checkbox" checked={recipeArticle} onChange={(e) => setRecipeArticle(e.target.checked)} /> Recipe pages: keep the rest of the article
+              <input type="checkbox" checked={recipeArticle} onChange={(e) => setRecipeArticle(e.target.checked)} /> Recipes: keep the rest of the page too
             </label>
-            <p className="hint">A recipe page becomes a recipe card – ingredients as a checklist, numbered steps.{recipeArticle ? ' The article’s tips follow it.' : ' Just the card.'}</p>
+            <p className="hint">
+              A recipe is set out neatly at the top of the note – servings and times, the ingredients as a checklist, the steps numbered.
+              {recipeArticle ? ' Below it: everything else the page says (tips, variations…).' : ' Only that – the rest of the page is left out.'}
+            </p>
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel
