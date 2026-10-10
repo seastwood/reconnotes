@@ -907,14 +907,15 @@ button.text {
 /* where the note is (its folders): a bar under the note's buttons, folding to a tab */
 .note-path {
   position: absolute;
-  top: 0;
+  /* tucked a little under the buttons: no seam for the note to show through (iPhone's fractional pixels) */
+  top: -6px;
   left: 0;
   right: 0;
-  height: var(--note-path-h);
+  height: calc(var(--note-path-h) + 6px);
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  padding: 0 4px 0 10px;
+  padding: 6px 4px 0 10px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   color: var(--muted);
@@ -1027,7 +1028,7 @@ button.text {
 }
 .note-path-tab {
   position: absolute;
-  top: 0;
+  top: -1px;
   right: 12px;
   display: inline-flex;
   align-items: center;
