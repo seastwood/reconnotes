@@ -1797,6 +1797,88 @@ button.link {
 .move-row svg {
   color: var(--accent-text);
 }
+/* saving an Ask answer as a note: the folder chosen, and the one suggested */
+.move-row.chosen {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 8px;
+}
+.move-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-row-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--accent-text);
+}
+.move-row .move-row-check {
+  color: var(--accent-text);
+}
+.save-note-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.save-note-dialog .move-row {
+  width: 100%;
+}
+.save-note-dialog .move-list {
+  max-height: 45vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px;
+}
+.save-note-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.save-note-field input {
+  font-size: 16px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+.save-note-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+.save-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.save-note-actions button.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #1c1c1e;
+  font-weight: 600;
+}
+.ask-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 13px;
+}
 
 /* ------------------------------------------------------------ AI agents */
 .dialog {

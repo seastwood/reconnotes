@@ -44,10 +44,12 @@ function linkNotes(node: JSONContent, titles: Map<string, string>): JSONContent[
     const out: JSONContent[] = []
     let last = 0
     for (const m of node.text.matchAll(/\[\[([^\]|#\n]+)(?:\|([^\]\n]+))?\]\]/g)) {
-      const id = titles.get(m[1].trim().toLowerCase())
+      // [[id:<note id>|label]]: that note, whatever its title (Ask's sources)
+      const byId = /^id:([a-z0-9]{8,64})$/i.exec(m[1].trim())
+      const id = byId ? byId[1] : titles.get(m[1].trim().toLowerCase())
       if (!id) continue
       if (m.index! > last) out.push({ ...node, text: node.text.slice(last, m.index) })
-      out.push({ type: 'noteLink', attrs: { noteId: id, title: (m[2] ?? m[1]).trim() } })
+      out.push({ type: 'noteLink', attrs: { noteId: id, title: (m[2] ?? (byId ? 'Note' : m[1])).trim() } })
       last = m.index! + m[0].length
     }
     if (!out.length) return [node]

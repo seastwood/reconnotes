@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ChevronLeft, History, Loader2, MessageCircleQuestion, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, ChevronLeft, FilePlus2, History, Loader2, MessageCircleQuestion, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { useStore } from '../lib/store'
@@ -9,6 +9,8 @@ import { askChat, chatKey, closeAskChat, hideAskChat, showAskChat, type AskChatT
 import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
 import { ReferencesBar } from './References'
+import { SaveAsNoteDialog } from './SaveAsNoteDialog'
+import type { TurnToSave } from '../lib/askToNote'
 
 /**
  * "Ask about this note" (and "Ask this folder"): a chat window of its own,
@@ -168,6 +170,21 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
       input: j.input,
     }).catch((e) => setError((e as Error).message))
 
+  // saving an answer (or the whole chat) as a note
+  const [saving, setSaving] = useState<TurnToSave[] | null>(null)
+  const doneLive: TurnToSave[] = live
+    .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
+    .map((j) => {
+      const r = j.result as unknown as AskResult
+      return { question: String(j.input.question), answer: r.answer, sources: r.sources }
+    })
+  const allTurns: TurnToSave[] = [...saved.map((t) => ({ question: t.question, answer: t.answer, sources: t.sources })), ...doneLive]
+  const saveButton = (t: TurnToSave) => (
+    <button className="text ask-save" onClick={() => setSaving([t])}>
+      <FilePlus2 size={14} /> Save as note
+    </button>
+  )
+
   /** a source: the note, at the line with the answer – the chat steps aside */
   const go = (noteId: string, find?: string) => {
     hideAskChat()
@@ -207,6 +224,15 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           </span>
           <span className="ask-chat-name">{target.title || 'Untitled'}</span>
         </div>
+        <button
+          className="icon"
+          aria-label="Save the chat as a note"
+          title="Save the chat as a note"
+          onClick={() => setSaving(allTurns)}
+          disabled={showList || !allTurns.length}
+        >
+          <FilePlus2 size={19} />
+        </button>
         <button
           className={`icon${listOpen ? ' active' : ''}`}
           aria-label="Chats about this note"
@@ -256,7 +282,8 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           <div className="ask-chat-empty">
             <MessageCircleQuestion size={34} />
             <p>
-              Ask anything about {target.folderId ? 'the notes in this folder' : 'this note'}. The answer comes only from {target.folderId ? 'them' : 'it (and the notes it also reads)'}, and
+              Ask anything about {target.all ? 'your notes' : target.folderId ? 'the notes in this folder' : 'this note'}. The answer comes only from{' '}
+              {target.all ? 'them' : target.folderId ? 'them' : 'it (and the notes it also reads)'}, and
               each source takes you to the spot it came from.
             </p>
             <p className="hint">Your chats are kept here – come back to them any time.</p>
@@ -271,6 +298,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                 </div>
                 <div className="ask-chat-a ask-panel">
                   <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read }} onOpen={go} />
+                  {saveButton({ question: t.question, answer: t.answer, sources: t.sources })}
                 </div>
               </div>
             ))}
@@ -279,6 +307,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                 <div className="ask-chat-q">{String(j.input.question)}</div>
                 <div className="ask-chat-a ask-panel">
                   <Turn job={j} onRetry={() => retry(j)} onOpen={go} />
+                  {j.status === 'done' && typeof j.result?.answer === 'string' && saveButton(doneLive.find((t) => t.question === String(j.input.question))!)}
                 </div>
               </div>
             ))}
@@ -294,6 +323,14 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
         error={error}
         onSend={send}
       />
+      {saving && (
+        <SaveAsNoteDialog
+          turns={saving}
+          about={target.all ? {} : target.folderId ? { folderId: target.folderId } : { noteId: target.noteId }}
+          onClose={() => setSaving(null)}
+          onOpen={(id) => go(id)}
+        />
+      )}
     </div>,
     document.body,
   )
