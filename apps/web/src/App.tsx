@@ -19,7 +19,7 @@ import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
 import { LockedScreen } from './components/LockedScreen'
-import { WebImportDialog } from './components/WebImportDialog'
+import { WebImportDialog, type ImportTab, type PhotoKind } from './components/WebImportDialog'
 import { AskChatHost } from './components/AskChat'
 import { ReferencesHost } from './components/References'
 import { useFolderAccess } from './lib/folderLock'
@@ -155,7 +155,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState<boolean | SettingsTab>(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   /** Import a web page (from ⌘K): the folder it goes in */
-  const [webImport, setWebImport] = useState<{ folderId: string | null } | null>(null)
+  const [webImport, setWebImport] = useState<{ folderId: string | null; startOn?: { tab: ImportTab; kind?: PhotoKind } } | null>(null)
   const [tourOpen, setTourOpen] = useState(shouldShowTour)
   const [moving, setMoving] = useState<MoveTarget | null>(null)
 
@@ -443,8 +443,9 @@ export function App() {
       ...listNotes(workspaceDoc)
         .filter((n) => n.template && !n.trashedAt)
         .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
-      { id: 'web-import', label: 'Import a web page…', section: N, keywords: 'website url guide manual article download save link', run: () => setWebImport({ folderId: folderNow() }) },
-      { id: 'recipe-photos', label: 'Recipe from photos…', section: N, keywords: 'hello fresh meal kit card cookbook scan picture camera', run: () => setWebImport({ folderId: folderNow() }) },
+      { id: 'web-import', label: 'Import a web page…', section: N, keywords: 'website url guide manual article download save link', run: () => setWebImport({ folderId: folderNow(), startOn: { tab: 'web' } }) },
+      { id: 'recipe-photos', label: 'Recipe from photos…', section: N, keywords: 'hello fresh meal kit card cookbook scan picture camera', run: () => setWebImport({ folderId: folderNow(), startOn: { tab: 'photos', kind: 'recipe' } }) },
+      { id: 'photo-pages', label: 'Import photos of pages…', section: N, keywords: 'handwriting book page printed directions trail hike route scan picture camera ocr', run: () => setWebImport({ folderId: folderNow(), startOn: { tab: 'photos' } }) },
       { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
       { id: 'unfiled', label: 'Not in a folder', section: G, run: () => a().showView({ kind: 'unfiled' }) },
       { id: 'jobs', label: 'Jobs (AI and processing)', section: G, keywords: 'queue ai running tasks progress', run: () => a().showView({ kind: 'jobs' }) },
@@ -604,7 +605,7 @@ export function App() {
       <AskChatHost onOpen={followLink} />
       <ReferencesHost onOpen={followLink} />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen('sync')} />}
-      {webImport && <WebImportDialog folderId={webImport.folderId} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
+      {webImport && <WebImportDialog folderId={webImport.folderId} startOn={webImport.startOn} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
       {paletteOpen && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}

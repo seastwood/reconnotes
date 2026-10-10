@@ -6109,14 +6109,82 @@ a.button {
   background: var(--accent);
 }
 
-/* a recipe from photos: its pages, in order */
-.recipe-photos {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
+/* Import: a web page or PDF | photos of pages */
+.import-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--panel);
+  margin-bottom: 4px;
 }
-.recipe-photos .hint svg {
-  vertical-align: -2px;
+.import-tabs button {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  padding: 7px 8px;
+  white-space: nowrap;
+}
+.import-tabs button.on {
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+/* what's in the photos: a recipe, handwriting, a printed page, directions */
+.photo-kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.photo-kind {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  min-width: 0;
+}
+.photo-kind svg {
+  grid-row: 1 / 3;
+  color: var(--muted);
+}
+.photo-kind span {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.photo-kind.on {
+  border-color: var(--accent);
+  background: var(--active);
+}
+.photo-kind.on svg {
   color: var(--accent-text);
+}
+.photo-pick {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+}
+.photo-pick button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .photo-pages {
   display: flex;

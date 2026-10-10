@@ -1,13 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChefHat, Globe, Loader2, Plus, RotateCw, X } from 'lucide-react'
+import { BookOpen, Camera, ChefHat, Globe, Loader2, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
-import { recognizeImageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
+import { preferServerOcr, recognizeImageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
 import { scanDocument, scannerAvailable } from '../lib/scanner'
 import { rotateImage, uprightPhoto } from '../lib/rotate'
+
+export type ImportTab = 'web' | 'photos'
+export type PhotoKind = 'recipe' | 'handwriting' | 'printed' | 'directions'
+
+/** What photos of pages can be, and what each becomes. */
+const PHOTO_KINDS: { kind: PhotoKind; icon: LucideIcon; label: string; examples: string; becomes: string }[] = [
+  {
+    kind: 'recipe',
+    icon: ChefHat,
+    label: 'Recipe',
+    examples: 'A meal-kit card, a cookbook page',
+    becomes: 'Set out like a recipe from a website: servings and times, the ingredients to tick off, the steps numbered – and cook mode. The first photo is the recipe’s picture.',
+  },
+  {
+    kind: 'handwriting',
+    icon: PenLine,
+    label: 'Handwriting',
+    examples: 'Notes, a notebook, a letter',
+    becomes: 'Your writing read and laid out – headings, lists and checkboxes where you wrote them.',
+  },
+  {
+    kind: 'printed',
+    icon: BookOpen,
+    label: 'Printed page',
+    examples: 'A book, a magazine, a manual',
+    becomes: 'The text as printed, its lines joined back into paragraphs – page numbers and running headers left out.',
+  },
+  {
+    kind: 'directions',
+    icon: Signpost,
+    label: 'Directions',
+    examples: 'A trail guide, a route, instructions',
+    becomes: 'The directions as numbered steps, in order across the pages – every distance, landmark and warning kept.',
+  },
+]
 
 /**
  * Import a web page: a guide, manual or article becomes a note – its text,
@@ -15,8 +50,30 @@ import { rotateImage, uprightPhoto } from '../lib/rotate'
  * rest of the guide", one note per page in a folder of its own. A PDF is
  * one note too, unless it's asked to be split at its chapters. The server
  * does the work (as a job), so it carries on if this is closed.
+ *
+ * Or photos of pages (the second tab), as what they are: a recipe, handwriting,
+ * a printed page, directions – each set out its own way.
  */
-export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: { folderId: string | null; onClose: () => void; onOpen: (noteId: string) => void; initialUrl?: string }) {
+export function WebImportDialog({
+  folderId,
+  onClose,
+  onOpen,
+  initialUrl = '',
+  startOn,
+}: {
+  folderId: string | null
+  onClose: () => void
+  onOpen: (noteId: string) => void
+  initialUrl?: string
+  /** open on this tab (and, for photos, this kind) instead of the one used last */
+  startOn?: { tab: ImportTab; kind?: PhotoKind }
+}) {
+  // the tab and the kind of photos: as last time, unless asked for
+  const [tab, setTabState] = useState<ImportTab>(() => startOn?.tab ?? (initialUrl ? 'web' : safeLocalGet<ImportTab>('reconnotes.importTab', 'web')))
+  const setTab = (t: ImportTab) => (setTabState(t), safeLocalSet('reconnotes.importTab', t))
+  const [kind, setKindState] = useState<PhotoKind>(() => startOn?.kind ?? safeLocalGet<PhotoKind>('reconnotes.importPhotoKind', 'recipe'))
+  const setKind = (k: PhotoKind) => (setKindState(k), safeLocalSet('reconnotes.importPhotoKind', k))
+  const kindInfo = PHOTO_KINDS.find((k) => k.kind === kind) ?? PHOTO_KINDS[0]
   const [url, setUrl] = useState(initialUrl)
   const [follow, setFollow] = useState(false)
   const [maxPages, setMaxPages] = useState(50)
@@ -55,6 +112,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
   // a recipe on paper (a meal-kit card's front and back, cookbook pages): photos of it, in page order
   // each photo as it'll be sent: turned the right way up (automatically where this device can read it,
   // or with its ↻ button), and what was read in it that way round
+  const MAX_PHOTOS = kind === 'recipe' ? 12 : 30
   type Photo = { key: number; name: string; blob: Blob; url: string; text?: string; turning?: boolean }
   const [photos, setPhotos] = useState<Photo[]>([])
   const nextKey = useRef(0)
@@ -64,7 +122,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
     const added: Photo[] = files
       .filter((f) => f.type.startsWith('image/'))
       .map((f) => ({ key: nextKey.current++, name: f.name, blob: f, url: URL.createObjectURL(f), turning: true }))
-    setPhotos((p) => [...p, ...added].slice(0, 12))
+    setPhotos((p) => [...p, ...added].slice(0, MAX_PHOTOS))
     // the right way up: read every way round on this device (where it can), the best kept
     for (const p of added)
       void uprightPhoto(p.blob)
@@ -85,7 +143,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
   previews.current = photos.map((p) => p.url)
   useEffect(() => () => previews.current.forEach((u) => URL.revokeObjectURL(u)), [])
   const [reading, setReading] = useState(false)
-  const startRecipe = async () => {
+  const startPhotos = async () => {
     setError(null)
     setReading(true)
     try {
@@ -95,11 +153,16 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
         const name = p.blob instanceof File ? p.name : p.name.replace(/\.\w+$/, '') + (p.blob.type === 'image/png' ? '.png' : '.jpg')
         const attachmentId = await addAttachment(p.blob, name)
         // read on this device where it can (Apple's text recognition: quick, and very good at print) – already, when it was turned upright
-        const text = p.text ?? (useDeviceOcr() ? await recognizeImageOnDevice(p.blob).catch(() => '') : '')
+        // (handwriting, when your server's readers are set to go first: read there)
+        const device = useDeviceOcr() && !(kind === 'handwriting' && preferServerOcr())
+        const text = device ? (p.text ?? (await recognizeImageOnDevice(p.blob).catch(() => ''))) : ''
         pages.push({ attachmentId, ...(text.trim() ? { text } : {}) })
       }
       await flushUploads()
-      const j = await submitJob({ kind: 'recipe-photos', title: 'Recipe from photos', input: { photos: pages, folderId } })
+      const j =
+        kind === 'recipe'
+          ? await submitJob({ kind: 'recipe-photos', title: 'Recipe from photos', input: { photos: pages, folderId } })
+          : await submitJob({ kind: 'photo-pages', title: `${kindInfo.label} from photos`, input: { photos: pages, kind, folderId } })
       setJobId(j.id)
     } catch (e) {
       setError((e as Error).message)
@@ -136,8 +199,11 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
       return ''
     }
   })()
-  const result = job?.status === 'done' ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[]; title?: string; left?: string[]; unsure?: number } | null) : null
-  const fromPhotos = job?.kind === 'recipe-photos'
+  const result =
+    job?.status === 'done'
+      ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[]; title?: string; left?: string[]; unsure?: number; asRead?: boolean } | null)
+      : null
+  const fromPhotos = job?.kind === 'recipe-photos' || job?.kind === 'photo-pages'
   const busy = Boolean(job && !isFinished(job))
 
   return createPortal(
@@ -145,20 +211,30 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
       <form
         className="dialog web-import-dialog"
         role="dialog"
-        aria-label="Import a web page"
+        aria-label="Import"
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault()
-          if (!jobId) void start()
+          if (!jobId && tab === 'web') void start()
         }}
       >
         <h2>
-          <Globe size={18} /> Import a web page, PDF or recipe
+          {tab === 'web' ? <Globe size={18} /> : <Camera size={18} />} Import
         </h2>
         {!isSyncConfigured() ? (
-          <p className="hint">Importing web pages is done by your ReconNotes server – connect one in Settings.</p>
+          <p className="hint">Importing is done by your ReconNotes server – connect one in Settings.</p>
         ) : !jobId ? (
           <>
+            <div className="import-tabs" role="tablist" aria-label="What to import">
+              <button type="button" role="tab" aria-selected={tab === 'web'} className={tab === 'web' ? 'on' : ''} onClick={() => setTab('web')}>
+                <Globe size={15} /> Web page or PDF
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'photos'} className={tab === 'photos' ? 'on' : ''} onClick={() => setTab('photos')}>
+                <Camera size={15} /> Photos of pages
+              </button>
+            </div>
+            {tab === 'web' ? (
+            <>
             <p className="hint">
               A guide, manual or article becomes a note, as it was on the page: headings, lists, tables, code, links and every picture (downloaded,
               so it stays even if the site changes). The site’s menus, banners and footers are left out. Later, “Check for updates” in its menu brings
@@ -241,71 +317,87 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               A recipe is set out neatly at the top of the note – servings and times, the ingredients as a checklist, the steps numbered.
               {recipeArticle ? ' Below it: everything else the page says (tips, variations…).' : ' Only that – the rest of the page is left out.'}
             </p>
-            <div className="recipe-photos">
-              <p className="hint">
-                <ChefHat size={14} /> A recipe on paper – a meal-kit card, a cookbook page?{' '}
-                <button type="button" className="text" onClick={() => photoInput.current?.click()}>
-                  Choose photos of it
-                </button>
-                {scannerAvailable() && (
-                  <>
-                    {' '}
-                    or{' '}
-                    <button type="button" className="text" onClick={() => void scanDocument().then(addPhotos).catch(() => {})}>
-                      scan the pages
-                    </button>
-                  </>
-                )}{' '}
-                – front and back, or every page – and it becomes a recipe like one from a website.
-              </p>
-              <input
-                ref={photoInput}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                onChange={(e) => {
-                  addPhotos(Array.from(e.target.files ?? []))
-                  e.target.value = ''
-                }}
-              />
-              {photos.length > 0 && (
-                <>
-                  <div className="photo-pages">
-                    {photos.map((p, i) => (
-                      <figure key={p.key}>
-                        <img src={p.url} alt={`Page ${i + 1}`} />
-                        <figcaption>{p.turning ? 'Straightening…' : `Page ${i + 1}`}</figcaption>
-                        <button type="button" className="icon photo-remove" aria-label={`Remove page ${i + 1}`} onClick={() => setPhotos((all) => all.filter((x) => x.key !== p.key))}>
-                          <X size={14} />
-                        </button>
-                        <button type="button" className="icon photo-turn" aria-label={`Turn page ${i + 1} a quarter`} title="Turn it the right way up" disabled={p.turning} onClick={() => void turn(p)}>
-                          {p.turning ? <Loader2 size={14} className="spin" /> : <RotateCw size={14} />}
-                        </button>
-                      </figure>
-                    ))}
-                    <button type="button" className="photo-add" onClick={() => photoInput.current?.click()} aria-label="Add more photos">
-                      <Plus size={22} />
-                    </button>
-                  </div>
-                  <p className="hint">In page order, the right way up (↻ turns one) – the first one is the recipe’s picture. Nothing is made up: what isn’t on the pages is left out, and an amount the AI isn’t sure of is marked to check.</p>
-                </>
-              )}
-            </div>
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel
               </button>
-              {photos.length > 0 ? (
-                <button type="button" className="primary" disabled={reading || photos.some((p) => p.turning)} onClick={() => void startRecipe()}>
-                  {reading ? <Loader2 size={15} className="spin" /> : <ChefHat size={15} />} Make the recipe
-                </button>
-              ) : (
-                <button type="submit" className="primary" disabled={!url.trim()}>
-                  Import
-                </button>
-              )}
+              <button type="submit" className="primary" disabled={!url.trim()}>
+                Import
+              </button>
             </div>
+            </>
+            ) : (
+            <>
+            <div className="photo-kinds" role="radiogroup" aria-label="What’s in the photos?">
+              {PHOTO_KINDS.map(({ kind: k, icon: Icon, label, examples }) => (
+                <button key={k} type="button" role="radio" aria-checked={kind === k} className={`photo-kind${kind === k ? ' on' : ''}`} onClick={() => setKind(k)}>
+                  <Icon size={20} aria-hidden />
+                  <strong>{label}</strong>
+                  <span>{examples}</span>
+                </button>
+              ))}
+            </div>
+            <p className="hint">{kindInfo.becomes}</p>
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                addPhotos(Array.from(e.target.files ?? []))
+                e.target.value = ''
+              }}
+            />
+            {photos.length === 0 ? (
+              <div className="photo-pick">
+                <button type="button" onClick={() => photoInput.current?.click()}>
+                  <Camera size={16} /> Choose photos
+                </button>
+                {scannerAvailable() && (
+                  <button type="button" onClick={() => void scanDocument().then(addPhotos).catch(() => {})}>
+                    <ScanLine size={16} /> Scan pages
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="photo-pages">
+                  {photos.map((p, i) => (
+                    <figure key={p.key}>
+                      <img src={p.url} alt={`Page ${i + 1}`} />
+                      <figcaption>{p.turning ? 'Straightening…' : `Page ${i + 1}`}</figcaption>
+                      <button type="button" className="icon photo-remove" aria-label={`Remove page ${i + 1}`} onClick={() => setPhotos((all) => all.filter((x) => x.key !== p.key))}>
+                        <X size={14} />
+                      </button>
+                      <button type="button" className="icon photo-turn" aria-label={`Turn page ${i + 1} a quarter`} title="Turn it the right way up" disabled={p.turning} onClick={() => void turn(p)}>
+                        {p.turning ? <Loader2 size={14} className="spin" /> : <RotateCw size={14} />}
+                      </button>
+                    </figure>
+                  ))}
+                  {photos.length < MAX_PHOTOS && (
+                    <button type="button" className="photo-add" onClick={() => photoInput.current?.click()} aria-label="Add more photos">
+                      <Plus size={22} />
+                    </button>
+                  )}
+                </div>
+                <p className="hint">
+                  In page order, the right way up (↻ turns one). Nothing is made up: the words are kept as they were read
+                  {kind === 'recipe' ? ', and an amount the AI isn’t sure of is marked to check' : ' – if the AI’s layout changes them, the text is kept as read'}. The photos are kept in the note.
+                </p>
+              </>
+            )}
+            {error && <p className="error-text">{error}</p>}
+            <div className="row">
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="primary" disabled={!photos.length || reading || photos.some((p) => p.turning)} onClick={() => void startPhotos()}>
+                {reading ? <Loader2 size={15} className="spin" /> : <kindInfo.icon size={15} />} {kind === 'recipe' ? 'Make the recipe' : 'Make the note'}
+              </button>
+            </div>
+            </>
+            )}
           </>
         ) : (
           <>
@@ -318,7 +410,11 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
             {job?.status === 'failed' && <p className="error-text">{job.error ?? 'Couldn’t import it.'}</p>}
             {result && fromPhotos && (
               <>
-                <p>✅ {result.title ?? 'The recipe'} – set out from {photos.length || 'the'} photo{photos.length === 1 ? '' : 's'}.</p>
+                <p>
+                  ✅ {result.title ?? (job?.kind === 'recipe-photos' ? 'The recipe' : 'The note')} – {job?.kind === 'recipe-photos' ? 'set out' : 'made'} from {photos.length || 'the'} photo
+                  {photos.length === 1 ? '' : 's'}.
+                </p>
+                {result.asRead && <p className="hint">Kept as it was read: the AI’s layout changed some of the words, so it wasn’t used.</p>}
                 {!!result.unsure && (
                   <p className="hint">
                     {result.unsure} amount{result.unsure === 1 ? '' : 's'} weren’t found in what was read: they’re underlined with dots – check them against the photos.

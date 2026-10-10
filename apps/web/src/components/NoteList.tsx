@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { ArrowUpDown, ChevronLeft, Copy, Globe, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -310,8 +310,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
               </>
             )}
             {view.kind !== 'templates' && (
-              <button className="icon" onClick={() => setWebImport(true)} aria-label="Import a web page" title="Import a web page – a guide, manual or article, with its pictures">
-                <Globe size={19} />
+              <button className="icon" onClick={() => setWebImport(true)} aria-label="Import" title="Import a web page, a PDF, or photos of pages (a recipe, handwriting, a book, directions)">
+                <Import size={19} />
               </button>
             )}
             {view.kind !== 'templates' && (

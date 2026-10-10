@@ -13,6 +13,7 @@ import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
 import { isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
+import { notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
 let dir: string
@@ -203,5 +204,60 @@ describe('a meal-kit card’s lines', () => {
   it('equipment isn’t an ingredient', () => {
     for (const t of ['Large pan', 'Paper towels', 'Baking sheet', 'Small pot', 'Mixing bowl']) expect(isEquipment(t), t).toBe(true)
     for (const t of ['Zucchini', 'Kosher salt', 'Black pepper', '1 pot of stock', 'Lemon']) expect(isEquipment(t), t).toBe(false)
+  })
+})
+
+describe('a note from photos of pages', () => {
+  const photo = (n: string) => {
+    const id = `pg${n}00000000000000`.slice(0, 16)
+    app.store.putAttachment({ id, mime: 'image/png', name: `${n}.png`, size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    return id
+  }
+
+  it('joins lines broken by the page back into paragraphs', () => {
+    expect(reflow('The trail begins at the north\nparking lot and climbs steadily\nthrough the pines.\n\n- Water\n- Map')).toBe(
+      'The trail begins at the north parking lot and climbs steadily through the pines.\n\n- Water\n- Map',
+    )
+    expect(reflow('a hyphen-\nated word')).toBe('a hyphenated word')
+    expect(reflow('Milk\nEggs')).toBe('Milk\nEggs')
+  })
+
+  it('takes the layout only when the words are the same', () => {
+    const read = 'Turn left at the big oak.\nWalk 0.5 miles to the creek.'
+    expect(sameWords(read, '# Turn left\n\n1. Turn left at the big oak.\n2. Walk 0.5 miles to the creek.')).toBe(true)
+    // a number changed, a sentence dropped, words added
+    expect(sameWords(read, '1. Turn left at the big oak.\n2. Walk 0.7 miles to the creek.')).toBe(false)
+    expect(sameWords(read, '1. Turn left at the big oak.')).toBe(false)
+    expect(sameWords(read, '1. Turn left at the big oak, a lovely ancient tree loved by visitors and squirrels alike.\n2. Walk 0.5 miles to the creek.')).toBe(false)
+  })
+
+  it('directions over two pages: numbered in order, the photos kept', async () => {
+    const a = photo('dir1')
+    const b = photo('dir2')
+    const p1 = 'Cedar Falls Loop\nDistance: 3.2 miles\nFrom the trailhead kiosk, take the\nright fork. Cross the footbridge.'
+    const p2 = 'At the junction turn left onto the\nRidge Trail. Follow it 1.1 miles to the falls.'
+    reply = '# Cedar Falls Loop\n\n- Distance: 3.2 miles\n\n1. From the trailhead kiosk, take the right fork.\n2. Cross the footbridge.\n3. At the junction turn left onto the Ridge Trail.\n4. Follow it 1.1 miles to the falls.'
+    const r = await notesFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: a, text: p1 }, { attachmentId: b, text: p2 }], 'directions', null)
+    expect(prompts.at(-1)).toContain('directions')
+    expect(prompts.at(-1)).toContain('--- Page 2 ---')
+    expect(r.title).toBe('Cedar Falls Loop')
+    expect(r.asRead).toBe(false)
+    const md = text(r.noteId)
+    expect(md).toMatch(/^# Cedar Falls Loop\n/)
+    expect(md.match(/# Cedar Falls Loop/g)).toHaveLength(1)
+    expect(md).toContain('4. Follow it 1.1 miles to the falls.')
+    expect(md).toContain('## The original')
+    expect((getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString().match(/<image /g) ?? []).length).toBe(2)
+  })
+
+  it('a layout that changes the words: kept as read', async () => {
+    const a = photo('book1')
+    reply = '# Chapter One\n\nIt was a dark and stormy night, and the wind howled terribly across the moors.'
+    const r = await notesFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: a, text: 'It was a bright cold day in April, and\nthe clocks were striking thirteen.' }], 'printed', null)
+    expect(r.asRead).toBe(true)
+    const md = text(r.noteId)
+    expect(md).toContain('It was a bright cold day in April, and the clocks were striking thirteen.')
+    expect(md).not.toContain('stormy')
+    expect(md).toContain('kept as read')
   })
 })

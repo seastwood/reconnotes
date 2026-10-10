@@ -30,11 +30,11 @@ export interface PhotoPage {
 }
 
 const esc = (s: string) => s.replace(/([\\`*_[\]<>|~!#])/g, '\\$1')
-const words = (t: string) => (t.toLowerCase().match(/[\p{L}]{3,}/gu) ?? []).map((w) => w.replace(/(?:es|s)$/, ''))
+export const words = (t: string) => (t.toLowerCase().match(/[\p{L}]{3,}/gu) ?? []).map((w) => w.replace(/(?:es|s)$/, ''))
 
 const FRACTIONS: Record<string, string> = { '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4', '⅛': '1/8' }
 /** the numbers in a text, every way they could be written (½ is 1/2, 1 ½ is 1½) */
-function numbersIn(t: string): Set<string> {
+export function numbersIn(t: string): Set<string> {
   const out = new Set<string>()
   const norm = t.replace(/[½⅓⅔¼¾⅛]/g, (f) => ` ${FRACTIONS[f]}`)
   for (const m of norm.matchAll(/\d+(?:[.,]\d+)?(?:\/\d+)?/g)) out.add(m[0].replace(',', '.'))
@@ -228,8 +228,14 @@ export async function recipeFromPhotos(
     ...(unsure ? ['', `*Amounts with a dotted underline weren’t found in what was read – check them against the photos.*`] : []),
     ...(pages.length > 1 ? ['', '## The original', '', ...pages.slice(1).map((_, i) => `![Page ${i + 2}](rnphoto-${i + 1})\n`)] : []),
   ].join('\n')
+  const noteId = await createPhotoNote(store, sync, md, pages, folderId, name)
+  return { noteId, title: name, left, unsure, agent: [reader, agent].filter(Boolean).join(' + ') }
+}
+
+/** A note made from photos: its Markdown, where "rnphoto-N" is the Nth photo. */
+export async function createPhotoNote(store: Store, sync: SyncEngine, md: string, pages: PhotoPage[], folderId: string | null, title: string): Promise<string> {
   const noteId = newId()
-  await sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: noteId, folderId, title: name }))
+  await sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: noteId, folderId, title }))
   await sync.change(noteDocName(noteId), (doc) => {
     const nodes = markdownToNodes(md, {
       attach: (href) => {
@@ -246,5 +252,5 @@ export async function recipeFromPhotos(
     const ex = extractNote(doc)
     await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
   }
-  return { noteId, title: name, left, unsure, agent: [reader, agent].filter(Boolean).join(' + ') }
+  return noteId
 }
