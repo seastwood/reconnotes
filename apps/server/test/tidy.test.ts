@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { fixBars, inCardOrder, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
+import { bustOutItems, fixBars, inCardOrder, isBoilerplate, joinAmountsToNames, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
 import { guessKind, kindFromWords, kindIn, notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
@@ -208,6 +208,41 @@ BUST OUT Large pot, Salt, Pepper
     expect(md).not.toContain('Contains')
   })
 
+  it('a card with a grid of pictures, swaps on its side and small print', async () => {
+    const id = 'photogrid0000001'
+    app.store.putAttachment({ id, mime: 'image/png', name: 'front.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    const read = [
+      'APRICOT, ALMOND & CHICKPEA TAGINE',
+      'INGREDIENTS 2 PERSON | 4 PERSON',
+      '1 | 1',
+      'Yellow Onion',
+      '¼ oz | ¼ oz',
+      'Parsley',
+      'HelloCustom Ground Beef Calories: 1250 Ground Turkey Calories: 1190',
+      'PREP: 10 MIN | COOK: 30 MIN | CALORIES: 930',
+      '1 PREP Wash and dry produce. Halve, peel, and dice onion.',
+      'BUST OUT Zester 2 Small bowls Kosher salt Olive oil (2 TBSP | 3 TBSP)',
+      'GET SOCIAL Share your #HelloFreshPics with us @HelloFresh',
+    ].join('\n')
+    reply = JSON.stringify({
+      name: 'Apricot, Almond & Chickpea Tagine',
+      servings: '2',
+      ingredients: ['ن/٦', '1 | 1', 'Yellow Onion', '¼ Oz Oz', 'Parsley'],
+      steps: [{ title: 'Prep', text: 'Wash and dry produce. Halve, peel, and dice onion.' }],
+      notes: ['BUST OUT • Zester • 2 Small bowls • Kosher salt • Olive oil (2 TBSP | 3 TBSP)', 'GET SOCIAL Share your #HelloFreshPics with us @HelloFresh'],
+      nutrition: [['Calories', '1250'], ['Calories', '1190'], ['Calories', '930']],
+    })
+    const r = await recipeFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: id, text: read }], null)
+    const md = text(r.noteId)
+    expect(md).toContain('- [ ] 1 Yellow Onion\n- [ ] ¼ Oz Parsley\n')
+    expect(md).not.toContain('ن')
+    expect(md).toMatch(/Calories: 930(?!.*Calories)/s)
+    expect(md).not.toContain('1250')
+    expect(md).toContain('You’ll need: Zester, 2 Small bowls')
+    expect(md).toContain('From your pantry: Kosher salt, Olive oil (2 TBSP | 3 TBSP)')
+    expect(md).not.toMatch(/BUST OUT|HelloFreshPics/)
+  })
+
   it('marks an amount that wasn’t read, however it’s written', () => {
     const read = new Set(['10', '1/2', '4'])
     expect(markUnreadAmounts('½ cup broth', read)).toBe('½ cup broth')
@@ -216,6 +251,38 @@ BUST OUT Large pot, Salt, Pepper
 })
 
 describe('a meal-kit card’s lines', () => {
+  it('pictures read as letters, badges and stray marks off; a unit not twice', () => {
+    expect(tidyIngredient('ن/٦').text).toBe('')
+    expect(tidyIngredient('© Ground Beef**').text).toBe('Ground Beef**')
+    expect(tidyIngredient('C Ground Beef is fully cooked').text).toBe('Ground Beef is fully cooked')
+    expect(tidyIngredient('A Pinch of Salt').text).toBe('A Pinch of Salt')
+    expect(tidyIngredient('¼ Oz Oz').text).toBe('¼ Oz')
+    expect(tidyIngredient('1 Jalapeño').text).toBe('1 Jalapeño')
+    expect(tidyIngredient('Crème fraîche').text).toBe('Crème fraîche')
+  })
+  it('the same amount for both columns, the bar read as a 1', () => {
+    expect(splitColumns('1 11 Jalapeño')).toEqual({ first: '1', other: '1', name: 'Jalapeño' })
+    expect(fixBars('Lemon 111')).toBe('Lemon 1 | 1')
+  })
+  it('a grid’s amounts put back with their names', () => {
+    expect(joinAmountsToNames(['1 | 1', 'Yellow Onion', '¼ Oz', 'Parsley', '1 Clove Garlic', ''])).toEqual(['1 | 1 Yellow Onion', '¼ Oz Parsley', '1 Clove Garlic'])
+    expect(joinAmountsToNames(['2 TBSP', '1 Lemon'])).toEqual(['2 TBSP', '1 Lemon'])
+  })
+  it('the card’s small print, and its “Bust out” list', () => {
+    expect(isBoilerplate('GET SOCIAL Share your #HelloFreshPics with us @HelloFresh (646) 846-3663 HelloFresh.com')).toBe(true)
+    expect(isBoilerplate('In our ongoing effort toward sustainability, we’re working on reducing plastic')).toBe(true)
+    expect(isBoilerplate('HelloCustom If you chose to modify your meal, follow the instructions on the flip side of this card.')).toBe(true)
+    expect(isBoilerplate('Ground Beef is fully cooked when internal temperature reaches 160°.')).toBe(false)
+    expect(bustOutItems('BUST OUT • Zester • 2 Small bowls • Kosher salt • Cooking oil (1 TBSP | 1 TBSP) 0 e • Olive oil (2 TBSP | 3 TBSP)')).toEqual([
+      'Zester',
+      '2 Small bowls',
+      'Kosher salt',
+      'Cooking oil (1 TBSP | 1 TBSP) 0 e',
+      'Olive oil (2 TBSP | 3 TBSP)',
+    ])
+    expect(bustOutItems('Toast the almonds')).toBeNull()
+  })
+
   it('allergen notes out of the ingredients, stray marks off', () => {
     expect(tidyIngredient('2 TBSP Contains: Milk Butter Garlic Herb')).toEqual({ text: '2 TBSP Butter Garlic Herb', allergens: ['Milk'] })
     expect(tidyIngredient('(Contains: Eggs, Potato Buns')).toEqual({ text: 'Potato Buns', allergens: ['Eggs'] })

@@ -63,6 +63,7 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 - Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
 - name: the recipe's title – the big name on the front with the line under it, if it has one (e.g. "Lemon Thyme Pork with Jasmine Rice", "Balsamic Tomato & Herb Chicken over Buttery Garlic Spaghetti"), not the time or calorie line. A letter missing where the card has a hole punched in it ("ALM ND", "TOM TO"): fill it in.
 - ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. An ingredient whose amount you can't read: just its name.
+- A card often shows the ingredients as a grid of pictures, each with its amount on one line and its name on the next ("1 | 1" then "Yellow Onion"): put each amount with its own name, one ingredient per line – never two in one. Leave out what's only the other side of the card's options ("HelloCustom", calories for a swap).
 - Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
 - steps: in order, each with its title if it has one ("Cook the beef") and its text.
 - notes: what else matters – what you'll need (pans, tools), what you bring from home (salt, oil, butter), tips. Never a "?" or a placeholder: leave out what you can't read.
@@ -130,7 +131,10 @@ export function splitColumns(raw: string): { first: string; other: string; name:
 export function fixBars(t: string): string {
   return t
     .replace(new RegExp(`(${AMOUNT})\\s*[Il]\\s*(?=[\\d½⅓⅔¼¾⅛])`, 'gi'), (all, a: string) => (/[\d½⅓⅔¼¾⅛]/.test(a) ? `${a.trim()} | ` : all))
-    .replace(/(^|\s)([1-9])[1lI|]([2-9]|1[02468])(?=\s|$)/g, (all, sp: string, a: string, b: string) => (Number(b) === Number(a) * 2 ? `${sp}${a} | ${b}` : all))
+    .replace(/(^|\s)([1-9])\s?[1lI|]([1-9]|1[02468])(?=\s|$)/g, (all, sp: string, a: string, b: string) =>
+      // (the second column the same as the first, or twice it – as for twice the people)
+      Number(b) === Number(a) * 2 || b === a ? `${sp}${a} | ${b}` : all,
+    )
 }
 
 /** Kitchen equipment, not food: a pan, a pot, a baking sheet, paper towels, a bowl… (with no amount). */
@@ -158,12 +162,50 @@ export function tidyIngredient(raw: string): { text: string; allergens: string[]
       for (const a of list.split(/,|and|&/)) if (a.trim()) allergens.push(a.trim().replace(/^\w/, (c) => c.toUpperCase()))
       return ' '
     })
-    .replace(/^[\s*•·-]+/, '')
+    // a picture read as letters of another script ("ن/٦" for an onion), a badge (©, ®, ™)
+    .replace(/[^\p{Script=Latin}0-9½⅓⅔¼¾⅛⅜⅝⅞\p{P}\p{Zs}+=<>|~^`$°]/gu, ' ')
+    .replace(/^[\s*•·/\\-]+/, '')
+    // a stray letter first ("C Ground Beef…", from a badge) – not "A" or "I"
+    .replace(/^(?![AI]\s)[B-HJ-Z]\s+(?=\p{Lu})/u, '')
     .replace(/\s+[a-z]$/, '')
     .replace(/\s*[•·]\s*$/, '')
+    // a unit twice ("¼ Oz Oz": the second column's amount lost)
+    .replace(/\b(tbsps?|tsps?|oz|cups?|cloves?|lbs?)\s+\1\b/gi, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim()
   return { text, allergens }
+}
+
+/** An amount with nothing else (its name read on the next line, as on a card's grid of pictures). */
+const amountOnly = (t: string) => new RegExp(`^(?:${AMOUNT})(?:\\s*\\|\\s*(?:${AMOUNT}))?$`, 'i').test(t.trim())
+/** A name with no amount. */
+const nameOnly = (t: string) => !/[\d½⅓⅔¼¾⅛]/.test(t) && /\p{L}{3}/u.test(t)
+
+/** On a card's grid, each amount is read above its name ("1 | 1", "Yellow Onion"): put back together. */
+export function joinAmountsToNames(items: string[]): string[] {
+  const out: string[] = []
+  for (let i = 0; i < items.length; i++) {
+    if (amountOnly(items[i]) && i + 1 < items.length && nameOnly(items[i + 1])) {
+      out.push(`${items[i]} ${items[i + 1]}`)
+      i++
+    } else if (items[i].trim()) out.push(items[i])
+  }
+  return out
+}
+
+/** The card's own small print – not part of the recipe: social media, a phone number, packaging, the other side's options. */
+export const isBoilerplate = (t: string) =>
+  /hellofresh(?:pics|\.com)|share your|@\w{3,}|\(\d{3}\)\s*\d{3}-\d{4}|sustainab|rest assured|if you chose to modify|flip side of this card|scan here|issues with your order|get social|www\.|\.com\b/i.test(t)
+
+/** A "Bust out" list as one note ("BUST OUT • Zester • 2 Small bowls • Kosher salt • Olive oil (2 TBSP | 3 TBSP)"): its items. */
+export function bustOutItems(t: string): string[] | null {
+  if (!/^\s*bust out\b/i.test(t)) return null
+  return t
+    .replace(/^\s*bust out\s*:?/i, '')
+    .split(/[•·]/)
+    .map((x) => tidyIngredient(x).text)
+    // (leftovers of icons read as text: "0 e")
+    .filter((x) => /\p{L}{3}/u.test(x))
 }
 
 /**
@@ -251,13 +293,13 @@ export async function recipeFromPhotos(
   const kitchen: string[] = []
   const pantry: string[] = []
   const allergens = new Set<string>()
-  const ingredients = (s.ingredients ?? [])
-    .map(str)
-    .map((t) => {
+  const ingredients = joinAmountsToNames(
+    (s.ingredients ?? []).map(str).map((t) => {
       const x = tidyIngredient(t)
       x.allergens.forEach((a) => allergens.add(a))
       return x.text
-    })
+    }),
+  )
     .filter(keep)
     .map((t) => {
       // amounts for 2 and 4 people side by side ("2 TBSP | 4 TBSP • Sour Cream", "Butter (1 TBSP | 2 TBSP)"): the first
@@ -281,6 +323,14 @@ export async function recipeFromPhotos(
   if (!ingredients.length && !ordered.length) throw new Error('No ingredients or steps could be found in the photos.')
   const notes = (s.notes ?? [])
     .map(str)
+    // the card's "Bust out" list: equipment to "You'll need", the rest to "From your pantry"
+    .filter((n) => {
+      const items = bustOutItems(n)
+      if (!items) return true
+      for (const x of items) (isEquipment(x) ? kitchen : pantry).push(x.replace(/^[\s*•·-]+/, ''))
+      return false
+    })
+    .filter((n) => !isBoilerplate(n))
     // the other column's amounts are worked out here (not the AI's version, often with gaps: "Zucchini: ?"); an allergen on its own, a gap
     .filter((n) => !/also on the card|\bfor n people\b/i.test(n) && !/^\(?contains:[^)]*\)?\.?$/i.test(n) && !/:\s*\?|\?\s*(?:oz|,|\))/i.test(n))
     // a heading with nothing under it ("Bust out"), or a gap left for later ("You'll need: …")
@@ -299,6 +349,15 @@ export async function recipeFromPhotos(
   const nutrition = (s.nutrition ?? [])
     .map((x) => (Array.isArray(x) ? ([str(x[0]), str(x[1])] as [string, string]) : (['', ''] as [string, string])))
     .filter(([k, v]) => k && v && readNumbers.has((/\d+(?:\.\d+)?/.exec(v)?.[0] ?? '').replace(',', '.')))
+    // the same thing more than once ("Calories" for the meal and for each swap): the one on the card's times line, else the first
+    .filter(([k, v], i, list) => {
+      const same = list.filter(([k2]) => k2.toLowerCase() === k.toLowerCase())
+      if (same.length < 2) return true
+      const num = (x: string) => /\d+(?:\.\d+)?/.exec(x)?.[0] ?? ''
+      const onTimes = (x: string) => new RegExp(`(?:prep|cook|total)[^\\n]*\\b${num(x)}\\b|\\b${num(x)}\\b[^\\n]*(?:prep|cook|total)`, 'i').test(all)
+      const pick = same.find(([, v2]) => onTimes(v2)) ?? same[0]
+      return pick[1] === v && list.findIndex(([k2, v2]) => k2 === k && v2 === v) === i
+    })
   // a time whose number wasn't read (worked out by the AI) is left out
   const time = (v: unknown) => {
     const t = str(v)
