@@ -6147,6 +6147,12 @@ a.button {
   position: absolute;
   top: 4px;
   right: 4px;
+}
+.photo-pages figure .photo-turn {
+  right: auto;
+  left: 4px;
+}
+.photo-pages figure .icon {
   width: 24px;
   height: 24px;
   min-width: 0;

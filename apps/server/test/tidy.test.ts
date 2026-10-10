@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { recipeFromPhotos, markUnreadAmounts } from '../src/photoRecipe'
+import { isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
 
 let app: App
 let dir: string
@@ -187,5 +187,21 @@ BUST OUT Large pot, Salt, Pepper
     const read = new Set(['10', '1/2', '4'])
     expect(markUnreadAmounts('½ cup broth', read)).toBe('½ cup broth')
     expect(markUnreadAmounts('12 oz beef', read)).toBe('⸢12⸣ oz beef')
+  })
+})
+
+describe('a meal-kit card’s lines', () => {
+  it('amounts for 2 and 4 people: the first, the other kept apart', () => {
+    expect(splitColumns('2 TBSP | 4 TBSP • Sour Cream')).toEqual({ first: '2 TBSP', other: '4 TBSP', name: 'Sour Cream' })
+    expect(splitColumns('12 oz | 24 oz • Pork Cutlets*')).toEqual({ first: '12 oz', other: '24 oz', name: 'Pork Cutlets*' })
+    expect(splitColumns('1|2 • Lemon')).toEqual({ first: '1', other: '2', name: 'Lemon' })
+    expect(splitColumns('½ Cup | 1 Cup • Jasmine Rice')).toEqual({ first: '½ Cup', other: '1 Cup', name: 'Jasmine Rice' })
+    expect(splitColumns('(Contains: Milk) • Butter (1 TBSP | 2 TBSP)')).toEqual({ first: '1 TBSP', other: '2 TBSP', name: 'Butter' })
+    expect(splitColumns('Vegetable oil (2 tsp | 2 tsp)')).toEqual({ first: '2 tsp', other: '2 tsp', name: 'Vegetable oil' })
+    expect(splitColumns('10 oz Ground Beef')).toBeNull()
+  })
+  it('equipment isn’t an ingredient', () => {
+    for (const t of ['Large pan', 'Paper towels', 'Baking sheet', 'Small pot', 'Mixing bowl']) expect(isEquipment(t), t).toBe(true)
+    for (const t of ['Zucchini', 'Kosher salt', 'Black pepper', '1 pot of stock', 'Lemon']) expect(isEquipment(t), t).toBe(false)
   })
 })

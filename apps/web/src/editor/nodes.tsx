@@ -6,7 +6,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
+import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, RotateCw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { attendeeCount, attendeeNames, getContent, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
@@ -20,6 +20,7 @@ import { voicesApi } from '../lib/agents'
 import { DockedPlayer } from './DockedPlayer'
 import { hasLinkedInk, registerPlayer, replay, startReplay, stopReplay, useReplay } from '../lib/replay'
 import { addAttachment, attachmentBlob, attachmentUrl } from '../lib/attachments'
+import { rotateImage } from '../lib/rotate'
 import { NoteContext } from '../drawing/DrawingNode'
 import { DrawingCanvas } from '../drawing/DrawingCanvas'
 import { inkUi, useInkUi } from '../drawing/toolState'
@@ -155,6 +156,22 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
       setBusy(false)
     }
   }
+  /** The picture turned a quarter clockwise (a photo taken on its side): a turned copy takes its place. */
+  const rotate = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const blob = await attachmentBlob(node.attrs.attachmentId)
+      if (!blob) throw new Error('The picture hasn’t downloaded yet – try again in a moment.')
+      const turned = await rotateImage(blob, 1)
+      const id = await addAttachment(turned, `${((node.attrs.alt as string) || 'picture').slice(0, 60)}.${turned.type === 'image/png' ? 'png' : 'jpg'}`)
+      updateAttributes({ attachmentId: id })
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
   /** Open the picture's ink layer (created on first use) to draw on it. */
   const markUp = () => {
     let id = drawingId
@@ -265,6 +282,14 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
             <div className="image-actions">
               <button {...tap(markUp)} title="Draw on this picture (or just touch it with Apple Pencil)">
                 <PenLine size={15} /> Mark up
+              </button>
+              <button
+                {...tap(() => void rotate())}
+                disabled={busy || Boolean(drawingId)}
+                title={drawingId ? 'A picture you’ve drawn on can’t be turned – the drawing wouldn’t line up' : 'Turn it a quarter clockwise'}
+                aria-label="Rotate picture"
+              >
+                <RotateCw size={15} />
               </button>
               <button {...tap(() => void convert())} disabled={busy} title="Read the handwriting or text in this picture and add it below">
                 {busy ? <Loader2 size={15} className="spin" /> : <ScanText size={15} />} {busy ? 'Reading…' : 'Convert to text'}

@@ -61,7 +61,9 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 {"name": "", "description": "", "servings": "", "prep": "", "cook": "", "total": "", "ingredients": [""], "steps": [{"title": "", "text": ""}], "notes": [""], "nutrition": [["Calories", ""]]}
 
 - Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
-- ingredients: one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2 people | 4 people"), use the first column's amounts, set servings to that number of people, and add a note: "Amounts for N people are also on the card: …" listing them.
+- name: the recipe's title – the big name on the front (e.g. "Lemon Thyme Pork with Jasmine Rice"), not the time or calorie line.
+- ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2 people | 4 people"), use the first column's amounts, set servings to that number of people, and add a note: "Amounts for N people are also on the card: …" listing them.
+- Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
 - steps: in order, each with its title if it has one ("Cook the beef") and its text.
 - notes: what else matters – what you'll need (pans, tools), what you bring from home (salt, oil, butter), allergens, tips.
 - Times as written ("30 min").
@@ -94,6 +96,28 @@ function parseJson(reply: string): Structured | null {
     return null
   }
 }
+
+/** an amount: a number (or fraction) and its unit – "2 TBSP", "½ Cup", "12 oz", "1" */
+const AMOUNT = String.raw`(?:\d+(?:[.,/]\d+)?|[½⅓⅔¼¾⅛])(?:\s*[½⅓⅔¼¾⅛])?(?:\s*(?:tbsps?|tsps?|tablespoons?|teaspoons?|oz|ounces?|cups?|lbs?|pounds?|g|kg|ml|l|cloves?|pieces?|cans?|slices?|qt|pt|unit|units|pkg|packages?)\b\.?)?`
+
+/**
+ * An ingredient with amounts for different numbers of people side by side: the first amount, the
+ * other(s), and the ingredient. "2 TBSP | 4 TBSP • Sour Cream", "1|2 • Lemon", "Butter (1 TBSP | 2 TBSP)".
+ */
+export function splitColumns(t: string): { first: string; other: string; name: string } | null {
+  let m = new RegExp(`^(${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\s*[•·:–-]?\\s*(.+)$`, 'i').exec(t)
+  if (m) return { first: m[1].trim(), other: m[2].trim(), name: m[3].trim() }
+  m = new RegExp(`^(.+?)\\s*\\((${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\)\\s*$`, 'i').exec(t)
+  if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/^\(contains:[^)]*\)\s*[•·]?\s*/i, '').trim() }
+  return null
+}
+
+/** Kitchen equipment, not food: a pan, a pot, a baking sheet, paper towels, a bowl… (with no amount). */
+export const isEquipment = (t: string) =>
+  !/\d|[½⅓⅔¼¾⅛]/.test(t) &&
+  /^(?:an?\s+)?(?:(?:large|small|medium|big|non-?stick|oven-?proof|mixing|sauce|baking|sheet|frying|grill|cast[- ]iron)\s+)*(?:pans?|pots?|skillets?|baking sheets?|sheet pans?|paper towels?|bowls?|whisk|zester|grater|colander|strainer|peeler|cutting board|knife|tongs|spatula|blender|food processor|foil|parchment(?: paper)?|plastic wrap|microplane|measuring cups?|measuring spoons?|dutch oven|wok|baking dish|casserole dish)$/i.test(
+    t.trim(),
+  )
 
 const str = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : typeof v === 'number' ? String(v) : '')
 
@@ -149,13 +173,34 @@ export async function recipeFromPhotos(
     if (m !== t) unsure++
     return m
   }
-  const ingredients = (s.ingredients ?? []).map(str).filter(keep).map(mark)
+  const columns: string[] = []
+  const kitchen: string[] = []
+  const ingredients = (s.ingredients ?? [])
+    .map(str)
+    .filter(keep)
+    .map((t) => {
+      // amounts for 2 and 4 people side by side ("2 TBSP | 4 TBSP • Sour Cream", "Butter (1 TBSP | 2 TBSP)"): the first
+      const c = splitColumns(t)
+      if (c) columns.push(`${c.other} ${c.name}`.trim())
+      return c ? `${c.first} ${c.name}`.trim() : t
+    })
+    .filter((t) => {
+      // a pan, a sheet, paper towels… (no amount): equipment, not an ingredient
+      if (isEquipment(t)) return (kitchen.push(t), false)
+      return true
+    })
+    .map(mark)
   const steps = (s.steps ?? [])
     .map((x) => (typeof x === 'string' ? { title: '', text: str(x) } : { title: str((x as Record<string, unknown>)?.title), text: str((x as Record<string, unknown>)?.text) }))
     .filter((x) => keep(`${x.title} ${x.text}`.trim()))
     .map((x) => mark(x.title && !x.text.toLowerCase().startsWith(x.title.toLowerCase()) ? `${x.title}: ${x.text}` : x.text || x.title))
   if (!ingredients.length && !steps.length) throw new Error('No ingredients or steps could be found in the photos.')
   const notes = (s.notes ?? []).map(str).filter(keep).map(mark)
+  // what was taken out of the ingredients goes in the notes (unless the AI already said so there)
+  const said = notes.join(' ').toLowerCase()
+  const needed = kitchen.filter((k) => !said.includes(k.toLowerCase()))
+  if (needed.length) notes.unshift(`You’ll need: ${needed.join(', ')}`)
+  if (columns.length && !/also on the card/i.test(said)) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)
   const nutrition = (s.nutrition ?? [])
     .map((x) => (Array.isArray(x) ? ([str(x[0]), str(x[1])] as [string, string]) : (['', ''] as [string, string])))
     .filter(([k, v]) => k && v && readNumbers.has((/\d+(?:\.\d+)?/.exec(v)?.[0] ?? '').replace(',', '.')))

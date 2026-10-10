@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChefHat, Globe, Loader2, Plus, X } from 'lucide-react'
+import { ChefHat, Globe, Loader2, Plus, RotateCw, X } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
 import { recognizeImageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
 import { scanDocument, scannerAvailable } from '../lib/scanner'
+import { rotateImage, uprightPhoto } from '../lib/rotate'
 
 /**
  * Import a web page: a guide, manual or article becomes a note – its text,
@@ -52,9 +53,33 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
   const pdfInput = useRef<HTMLInputElement>(null)
 
   // a recipe on paper (a meal-kit card's front and back, cookbook pages): photos of it, in page order
-  const [photos, setPhotos] = useState<{ file: File; url: string }[]>([])
+  // each photo as it'll be sent: turned the right way up (automatically where this device can read it,
+  // or with its ↻ button), and what was read in it that way round
+  type Photo = { key: number; name: string; blob: Blob; url: string; text?: string; turning?: boolean }
+  const [photos, setPhotos] = useState<Photo[]>([])
+  const nextKey = useRef(0)
   const photoInput = useRef<HTMLInputElement>(null)
-  const addPhotos = (files: File[]) => setPhotos((p) => [...p, ...files.filter((f) => f.type.startsWith('image/')).map((file) => ({ file, url: URL.createObjectURL(file) }))].slice(0, 12))
+  const update = (key: number, patch: Partial<Photo>) => setPhotos((all) => all.map((p) => (p.key === key ? { ...p, ...patch } : p)))
+  const addPhotos = (files: File[]) => {
+    const added: Photo[] = files
+      .filter((f) => f.type.startsWith('image/'))
+      .map((f) => ({ key: nextKey.current++, name: f.name, blob: f, url: URL.createObjectURL(f), turning: true }))
+    setPhotos((p) => [...p, ...added].slice(0, 12))
+    // the right way up: read every way round on this device (where it can), the best kept
+    for (const p of added)
+      void uprightPhoto(p.blob)
+        .then((up) => update(p.key, up ? { blob: up.blob, url: up.quarters ? URL.createObjectURL(up.blob) : p.url, text: up.text, turning: false } : { turning: false }))
+        .catch(() => update(p.key, { turning: false }))
+  }
+  const turn = async (p: Photo) => {
+    update(p.key, { turning: true })
+    try {
+      const blob = await rotateImage(p.blob, 1)
+      update(p.key, { blob, url: URL.createObjectURL(blob), text: undefined, turning: false })
+    } catch {
+      update(p.key, { turning: false })
+    }
+  }
   // the previews let go when the dialog closes
   const previews = useRef<string[]>([])
   previews.current = photos.map((p) => p.url)
@@ -66,9 +91,11 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
     try {
       const pages: { attachmentId: string; text?: string }[] = []
       for (const p of photos) {
-        const attachmentId = await addAttachment(p.file, p.file.name)
-        // read on this device where it can (Apple's text recognition: quick, and very good at print)
-        const text = useDeviceOcr() ? await recognizeImageOnDevice(p.file).catch(() => '') : ''
+        // (turned: a new picture, named for its kind)
+        const name = p.blob instanceof File ? p.name : p.name.replace(/\.\w+$/, '') + (p.blob.type === 'image/png' ? '.png' : '.jpg')
+        const attachmentId = await addAttachment(p.blob, name)
+        // read on this device where it can (Apple's text recognition: quick, and very good at print) – already, when it was turned upright
+        const text = p.text ?? (useDeviceOcr() ? await recognizeImageOnDevice(p.blob).catch(() => '') : '')
         pages.push({ attachmentId, ...(text.trim() ? { text } : {}) })
       }
       await flushUploads()
@@ -246,11 +273,14 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
                 <>
                   <div className="photo-pages">
                     {photos.map((p, i) => (
-                      <figure key={p.url}>
+                      <figure key={p.key}>
                         <img src={p.url} alt={`Page ${i + 1}`} />
-                        <figcaption>Page {i + 1}</figcaption>
-                        <button type="button" className="icon" aria-label={`Remove page ${i + 1}`} onClick={() => setPhotos((all) => all.filter((x) => x !== p))}>
+                        <figcaption>{p.turning ? 'Straightening…' : `Page ${i + 1}`}</figcaption>
+                        <button type="button" className="icon photo-remove" aria-label={`Remove page ${i + 1}`} onClick={() => setPhotos((all) => all.filter((x) => x.key !== p.key))}>
                           <X size={14} />
+                        </button>
+                        <button type="button" className="icon photo-turn" aria-label={`Turn page ${i + 1} a quarter`} title="Turn it the right way up" disabled={p.turning} onClick={() => void turn(p)}>
+                          {p.turning ? <Loader2 size={14} className="spin" /> : <RotateCw size={14} />}
                         </button>
                       </figure>
                     ))}
@@ -258,7 +288,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
                       <Plus size={22} />
                     </button>
                   </div>
-                  <p className="hint">In page order – the first one is the recipe’s picture. Nothing is made up: what isn’t on the pages is left out, and an amount the AI isn’t sure of is marked to check.</p>
+                  <p className="hint">In page order, the right way up (↻ turns one) – the first one is the recipe’s picture. Nothing is made up: what isn’t on the pages is left out, and an amount the AI isn’t sure of is marked to check.</p>
                 </>
               )}
             </div>
@@ -267,7 +297,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
                 Cancel
               </button>
               {photos.length > 0 ? (
-                <button type="button" className="primary" disabled={reading} onClick={() => void startRecipe()}>
+                <button type="button" className="primary" disabled={reading || photos.some((p) => p.turning)} onClick={() => void startRecipe()}>
                   {reading ? <Loader2 size={15} className="spin" /> : <ChefHat size={15} />} Make the recipe
                 </button>
               ) : (
