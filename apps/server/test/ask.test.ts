@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
+import { askNotes, namesIn, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -336,6 +336,24 @@ describe('folder names in questions', () => {
 })
 
 describe('ask about this note', () => {
+  it('a question naming someone reads the notes that mention them – not a meeting that only shares "wanted" and "do"', async () => {
+    await addNote('sydneynote0001', ['Sydney’s chores that I need to do', 'Water Lawn', 'Walk dogs', 'Feed Stache every morning'])
+    await addNote('meetingnote001', [
+      'Meeting – Thu, Oct 8',
+      'I wanted to throw that out to you guys before we do it on Monday. Do you want to talk about splitting the scrum? What do you want me to do with the lieutenants?',
+    ])
+    app.sync.hocuspocus.flushPendingStores()
+    await new Promise((r) => setTimeout(r, 300))
+    prompts.length = 0
+    const res = await fetch(`${base}/api/ai/ask`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: 'what was it Sydney wanted me to do?' }),
+    })
+    expect(res.status).toBe(200)
+    expect(prompts[0]).toContain('Walk dogs')
+    expect(prompts[0]).not.toContain('splitting the scrum')
+  })
   it('reads only the note asked about, even when others match better', async () => {
     const api = (m: string, p: string, b?: unknown) =>
       fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
@@ -345,6 +363,14 @@ describe('ask about this note', () => {
     expect(done.status).toBe('done')
     expect(prompts[0]).toContain('milk')
     expect(prompts[0]).not.toContain('T8 bins')
+  })
+})
+
+describe('names in a question', () => {
+  it('are its capitalised words but the first – not "I", nor shouting', () => {
+    expect(namesIn('what was it Sydney wanted me to do?')).toEqual(['sydney'])
+    expect(namesIn('What did I tell Jesse about the FRC robot?')).toEqual(['jesse'])
+    expect(namesIn('What did Sydney’s mom say?')).toEqual(['sydney'])
   })
 })
 

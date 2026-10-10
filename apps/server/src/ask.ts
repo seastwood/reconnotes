@@ -281,7 +281,16 @@ export async function askNotes(
     }
     const rank = new Map(ids.map((id, i) => [id, i]))
     // a note referred to counts for much less than the one asked about: it fills in, it doesn't compete
-    const scored = scoreSections(all, words, rules, { noteRank: rank, passages }).map((x) => (isRef.has(x.noteId) ? { ...x, score: x.score * 0.5 } : x))
+    let scored = scoreSections(all, words, rules, { noteRank: rank, passages }).map((x) => (isRef.has(x.noteId) ? { ...x, score: x.score * 0.5 } : x))
+    // the question names someone or something ("what did Sydney want…"): the notes that mention
+    // them – a section that never does can't be what it's asking about, however many of its
+    // other words ("wanted", "do") it shares
+    const names = namesIn(question).filter((nm) => !STOP.has(nm))
+    const mentions = (x: Section) => {
+      const low = `${meta.get(x.noteId)?.title ?? ''} ${x.path.join(' ')} ${x.text}`.toLowerCase()
+      return names.some((nm) => new RegExp(`(?<![\\p{L}\\p{N}])${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(low))
+    }
+    if (names.length && !pinned.length && !rules.length && scored.some(mentions)) scored = scored.filter(mentions)
     const matched = scored.some((s) => s.score > 1)
     // nothing really matched (a vague question): each note's start, best notes first
     const order = matched ? [...scored].sort((a, b) => b.score - a.score) : [...scored].sort((a, b) => rank.get(a.noteId)! - rank.get(b.noteId)! || a.index - b.index)
@@ -753,6 +762,21 @@ export function reciteByWords(answer: string, texts: Map<number, string>): strin
       })
     })
     .join('\n')
+}
+
+/**
+ * The names in a question: its capitalised words, not the first ("What…") and not "I" – lower case.
+ * ("what was it Sydney wanted me to do?" → sydney)
+ */
+export function namesIn(question: string): string[] {
+  const words = [...question.matchAll(/[\p{L}][\p{L}\p{N}'’-]*/gu)]
+  return [
+    ...new Set(
+      words
+        .filter((m, i) => i > 0 && /^\p{Lu}/u.test(m[0]) && m[0].length >= 3 && m[0] !== m[0].toUpperCase())
+        .map((m) => m[0].replace(/['’]s$/, '').toLowerCase()),
+    ),
+  ]
 }
 
 /** Each citation in the answer, in order, with the line its sentence came from. */
