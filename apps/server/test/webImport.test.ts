@@ -49,7 +49,7 @@ function png(w: number, h: number): Buffer {
 const PNG = png(120, 80)
 const ICON_PNG = png(16, 16)
 /** a picture of its own for each address (different pictures aren't the same file) – but /img/same-*: one picture */
-const pngFor = (p: string) => (p.startsWith('/img/same-') ? PNG : png(100 + ([...p].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 7) % 300), 80))
+const pngFor = (p: string) => (p.startsWith('/img/pin-') ? png(100, 250) : p.startsWith('/img/same-') ? PNG : png(100 + ([...p].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 7) % 300), 80))
 
 const layout = (title: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title} | Robot Docs</title></head>
 <body>
@@ -176,7 +176,7 @@ const RECIPE_LD = {
       prepTime: 'PT20M',
       cookTime: 'PT45M',
       totalTime: 'PT1H5M',
-      recipeIngredient: ['2 pounds lean ground beef', '2&#189; tablespoons chili powder divided, or to taste', '1 (19 ounce) can red kidney beans drained and rinsed', 'salt and black pepper to taste'],
+      recipeIngredient: ['2 pounds lean ground beef', '2&#189; tablespoons chili powder divided, or to taste', '1 (19 ounce) can red kidney beans drained and rinsed', '&nbsp;', ' ', 'salt and black pepper to taste'],
       recipeInstructions: [
         { '@type': 'HowToStep', text: 'Combine ground beef and 1 ½ tablespoons chili powder.' },
         { '@type': 'HowToStep', text: 'In a large pot, brown ground beef, onion, jalapeno, and garlic. Drain any fat.' },
@@ -197,6 +197,12 @@ PAGES['/recipe/chili'] = `<!doctype html><html><head><title>The Best Chili Recip
 <h2>To Thicken Chili</h2><p>Simmer it uncovered, which lets the chili thicken naturally without cornstarch.</p>
 <p><img src="/img/same-a.png" alt="Bowl"></p><p><img src="/img/same-b.png" alt="Bowl again"></p>
 <div class="wprm-recipe-container"><h2>The Best Chili Recipe</h2><ul><li>2 pounds lean ground beef (the site's own card)</li></ul></div>
+<p><img src="/img/pin-title.png" alt="The Best Chili pin"></p>
+<h2>Can You Freeze Chili?</h2><p>Yes – it freezes and reheats beautifully.</p>
+<h2>More Chili Recipes You’ll Love</h2><ul><li><a href="/x">Texas Chili</a></li><li><a href="/y">White Chili</a></li></ul>
+<h2>Is Chili Healthy</h2><p>Lean beef, tomatoes and beans: lots of fiber and protein.</p>
+<p>Categories: <a href="/c">Ground Beef</a>, <a href="/d">Soups</a></p>
+<h3>About the author</h3><p>Holly writes easy comfort food.</p><p><img src="/img/ebook-cover.png" alt="Free eBook"></p><p>Subscribe to receive weekly recipes!</p>
 </article></body></html>`
 
 beforeAll(async () => {
@@ -240,6 +246,12 @@ describe('a recipe page', () => {
     expect(text).toContain('Simmer it uncovered')
     expect(text).not.toContain("the site's own card")
     expect(text).not.toContain('PinFacebook')
+    // no blank ingredient
+    expect(text).not.toMatch(/- \[ \]\s*\n/)
+    // the article's own sections stay; the site's leftovers at its end, its "more recipes" list and its pin graphic don't
+    expect(text).toContain('Can You Freeze Chili?')
+    expect(text).toContain('Is Chili Healthy')
+    for (const gone of ['More Chili Recipes', 'Texas Chili', 'Categories:', 'About the author', 'Holly writes', 'Subscribe', 'Free eBook', 'pin']) expect(text).not.toContain(gone)
     // the photo once (the card's photo and the article's at another size are one picture); the same file twice: once
     expect((xml.match(/<image /g) ?? []).length).toBe(2)
     // tagged

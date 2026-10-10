@@ -123,7 +123,8 @@ export function recipeIn(scripts: string[]): Recipe | null {
     }
     const r = objects(data).find(isRecipe)
     if (!r) continue
-    const ingredients = asArray(r.recipeIngredient as string[]).map(text).filter(Boolean)
+    // (an empty line in the site's list – a spacer, a blank group name – isn't an ingredient)
+    const ingredients = asArray(r.recipeIngredient as string[]).map(text).filter((t) => /[\p{L}\p{N}]/u.test(t))
     const steps = stepsOf(r.recipeInstructions)
     if (!ingredients.length || !steps.length) continue
     const yields = asArray(r.recipeYield as string[]).map(text).filter(Boolean)
@@ -177,6 +178,35 @@ export function recipeCard(r: Recipe, picture: string | null, esc: (s: string) =
   ]
   return lines.join('\n').trim()
 }
+
+/**
+ * The end of a recipe page's article where the site's own leftovers start – its categories, the
+ * author's bio, a newsletter or e-book offer: everything from there on is left out. And a "more
+ * recipes you'll love" list, wherever it is.
+ */
+export function trimRecipeArticle(md: string): string {
+  const lines = md.split('\n')
+  const end = lines.findIndex((l) => /^(?:#{1,6}\s*|\*\*)?(?:categories\s*:|about the author\b|free e-?book\b|subscribe to (?:receive|get|our)\b|sign up for (?:my|our) newsletter\b|meet the author\b|hi,? i['’]m\b)/i.test(l.trim()))
+  const kept = end >= 0 ? lines.slice(0, end) : lines
+  // "More Chili Recipes You'll Love", "You may also like", "Related recipes": the heading and its list
+  const out: string[] = []
+  let skipping = 0
+  for (const l of kept) {
+    const h = /^(#{1,6})\s+(.*)$/.exec(l)
+    if (h) {
+      if (skipping && h[1].length <= skipping) skipping = 0
+      if (!skipping && /\b(?:recipes?|posts?|ideas) you['’]ll (?:love|like|enjoy)\b|^you (?:may|might) also (?:like|love|enjoy)\b|^related (?:recipes|posts|articles)\b|^more [\w\s]{0,40} recipes\b/i.test(h[2].trim())) {
+        skipping = h[1].length
+        continue
+      }
+    }
+    if (!skipping) out.push(l)
+  }
+  return out.join('\n').trim()
+}
+
+/** A picture too tall for its width to be a photo of the food: a "pin it" graphic (500×1100, 500×1500…). */
+export const isPinGraphic = (w: number, h: number) => w > 0 && h / w >= 1.9
 
 /** The site's own recipe card in the article (WP Recipe Maker, Tasty, Mediavine…): left out when the card is made. */
 export const SITE_RECIPE_CARDS =

@@ -1,6 +1,6 @@
 /// <reference lib="dom.iterable" />
 import { guardAddress, isPrivateHost } from './netGuard'
-import { SITE_RECIPE_CARDS, recipeCard, recipeIn } from './recipe'
+import { SITE_RECIPE_CARDS, isPinGraphic, recipeCard, recipeIn, trimRecipeArticle } from './recipe'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -943,7 +943,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     }
     const card = recipeCard(r, photo, esc)
     if (opts.recipeArticle === false) return card
-    const article = md.replace(/^#\s[^\n]*\n+/, '').trim()
+    // without the page's own leftovers at the end (its categories, the author's bio, an e-book offer…)
+    const article = trimRecipeArticle(md.replace(/^#\s[^\n]*\n+/, ''))
     return article ? `${card}\n\n## From the article\n\n${article}` : card
   }
   const first = pages.map((_, i) => withCard(i, convert(i, mains[i].cloneNode(true) as El)))
@@ -956,6 +957,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const wanted = new Set(first.filter((_, i) => write[i]).flatMap((md) => md.match(/rnpic-\d+/g) ?? []))
   /** a picture that's the same file as one before it: that one (shown once) */
   const sameAs = new Map<string, string>()
+  /** pictures that are a recipe page's "pin it" graphics (tall, narrow, with the title on): left out */
+  const pins = new Set<string>()
   const byHash = new Map<string, string>()
   let blocked = 0
   const total = wanted.size
@@ -1003,6 +1006,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         continue
       }
       byHash.set(hash, token)
+      if (dims.w && dims.h && isPinGraphic(dims.w, dims.h)) pins.add(token)
       const a = { id: newId(), name: name.slice(0, 120), mime, size: data.length }
       store.putAttachment({ id: a.id, mime, name: a.name, size: a.size, created_at: Date.now() }, data, initialTextStatus(config, ai, mime, a.name))
       queueAttachment(config, store, ai, sync, a.id)
@@ -1077,7 +1081,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     const shown = new Set<string>()
     let md = markdowns[i].replace(/!\[([^\]]*)\]\((rnpic-\d+)\)/g, (m, alt: string, token: string) => {
       const canon = sameAs.get(token) ?? token
-      if (shown.has(canon)) return ''
+      if (shown.has(canon) || (recipes[i] && pins.has(canon))) return ''
       shown.add(canon)
       if (canon !== token) return `![${alt}](${canon})`
       const src = tokens.get(token)
