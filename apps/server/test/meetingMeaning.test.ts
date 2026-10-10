@@ -178,3 +178,15 @@ describe('decisions only for what was agreed', async () => {
     expect(keepAgreedDecisions('## Decisions\n- Box in the middle of the lot\n\n## Action items\n- [ ] y', outcomes, () => 0)).toBe('## Action items\n- [ ] y')
   })
 })
+
+describe('topics added back to the Summary', async () => {
+  const { coverTopics } = await import('../src/meetingNotes')
+  it('not what the part itself called small talk or non-actionable', () => {
+    const out = coverTopics('## Summary\n- **Sprinklers**: tested every 20 years\n\n## Decisions\n- x', [
+      { topic: 'Miscellaneous/Unresolved Items', said: 'Random mentions of a toilet piano clutter thing, maps, and roadkill (likely non-actionable).' },
+      { topic: 'Tractor Purchase', said: 'West Machinery is finalizing a tractor quote; trade-in value assessed.' },
+    ])
+    expect(out).toContain('Tractor Purchase')
+    expect(out).not.toContain('toilet piano')
+  })
+})

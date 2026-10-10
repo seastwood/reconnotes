@@ -248,6 +248,8 @@ export function coverTopics(markdown: string, topics: { topic: string; said: str
   const missing: string[] = []
   const seen = new Set<string>()
   for (const t of topics) {
+    // what the part itself called small talk or nothing to act on isn't added back
+    if (/\b(misc(?:ellaneous)?|small talk|banter|jokes?|unrelated|off[- ]topic|other items|random)\b/i.test(t.topic) || /\b(non-?actionable|small talk|unrelated|jok(?:e|ed|es|ing))\b/i.test(t.said)) continue
     const key = [...stems(t.topic)].sort().join(' ')
     if (seen.has(key)) continue
     seen.add(key)
