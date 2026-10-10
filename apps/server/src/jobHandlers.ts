@@ -33,7 +33,7 @@ import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
-import { askNotes } from './ask'
+import { askGeneral, askNotes } from './ask'
 import { attendeesFor, groupOfAttachment, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
@@ -541,11 +541,23 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   jobs.register('ask', async (job) => {
     const tzOffset = Number(job.input.tzOffset)
-    const r = await askNotes(store, sync, ai, String(job.input.question ?? '').slice(0, 1000), sync.meaning, {
-      tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined,
-    }, scopeFromInput(job.input), historyFromInput(job.input.history))
+    const when = { tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined }
+    const question = String(job.input.question ?? '').slice(0, 1000)
+    // "Anything": the AI's own answer, not from the notes (a recipe for the Recipes folder)
+    const r: Awaited<ReturnType<typeof askNotes>> & { general?: boolean } =
+      job.input.mode === 'general'
+        ? await askGeneral(ai, question, when, historyFromInput(job.input.history))
+        : await askNotes(store, sync, ai, question, sync.meaning, when, scopeFromInput(job.input), historyFromInput(job.input.history))
     // kept as a conversation (to read again, or carry on, from "Ask about this note")
-    saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: r.answer, sources: r.sources, ...(r.cites ? { cites: r.cites } : {}), ...(r.read ? { read: r.read } : {}), at: Date.now() })
+    saveTurn(store, job.id, job.input, {
+      question: String(job.input.question ?? ''),
+      answer: r.answer,
+      sources: r.sources,
+      ...(r.cites ? { cites: r.cites } : {}),
+      ...(r.read ? { read: r.read } : {}),
+      ...(r.general ? { general: true } : {}),
+      at: Date.now(),
+    })
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 

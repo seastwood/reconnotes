@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ChevronLeft, FilePlus2, History, Loader2, MessageCircleQuestion, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, ChevronLeft, FilePlus2, History, Loader2, MessageCircleQuestion, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
-import { useStore } from '../lib/store'
+import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { askChat, chatKey, closeAskChat, hideAskChat, showAskChat, type AskChatTarget } from '../lib/askChat'
 import { useAskHistory, when, type Conversation } from './AskHistory'
@@ -45,6 +45,13 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
   const setChat = (id: string | null) => askChat.set((s) => ({ chat: { ...s.chat, [key]: id } }))
   const history = useAskHistory(target.all ? {} : target.folderId ? { folderId: target.folderId } : { noteId: target.noteId })
   const [listOpen, setListOpen] = useState(false)
+  // what it answers from: your notes, or anything (the AI's own answer: a recipe for the Recipes
+  // folder) – kept for each chat window (a note's, a folder's, all notes')
+  const [mode, setModeState] = useState<'notes' | 'general'>(() => safeLocalGet<Record<string, 'notes' | 'general'>>(MODES, {})[key] ?? 'notes')
+  const setMode = (m: 'notes' | 'general') => {
+    setModeState(m)
+    safeLocalSet(MODES, { ...safeLocalGet<Record<string, 'notes' | 'general'>>(MODES, {}), [key]: m })
+  }
   const jobs = useJobs((s) => s.jobs)
   const conversation = chatId ? history.list?.find((c) => c.id === chatId) : undefined
   const saved = conversation?.turns ?? []
@@ -119,13 +126,14 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
         notes: [target.noteId!],
         unlocked: access.unlockedIds,
       }
-  const send = async (question: string) => {
+  const send = async (question: string, as: 'notes' | 'general' = mode) => {
     setError(null)
     if (!isSyncConfigured()) return setError('Asking uses the AI agents on your ReconNotes server – connect one in Settings.')
     const input: Record<string, unknown> = {
       ...scope,
       tzOffset: new Date().getTimezoneOffset(),
       question,
+      ...(as === 'general' ? { mode: 'general' } : {}),
     }
     try {
       if (!chatId || showList) {
@@ -178,6 +186,14 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
       const r = j.result as unknown as AskResult
       return { question: String(j.input.question), answer: r.answer, sources: r.sources }
     })
+  /** an answer from the notes that found nothing in them: the same question, answered without them */
+  const notFound = (r: { answer: string; sources: unknown[]; general?: boolean }) =>
+    !r.general && !r.sources.length && /don['’]t contain|do not contain|doesn['’]t (?:say|mention|contain)|no (?:information|mention)|not (?:mentioned|found|in (?:the|your) notes)/i.test(r.answer)
+  const withoutNotes = (q: string) => (
+    <button className="text ask-save" onClick={() => void send(q, 'general').catch(() => {})} disabled={busy}>
+      <Sparkles size={14} /> Answer without my notes
+    </button>
+  )
   const allTurns: TurnToSave[] = [...saved.map((t) => ({ question: t.question, answer: t.answer, sources: t.sources })), ...doneLive]
   const saveButton = (t: TurnToSave) => (
     <button className="text ask-save" onClick={() => setSaving([t])}>
@@ -280,13 +296,23 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           />
         ) : empty ? (
           <div className="ask-chat-empty">
-            <MessageCircleQuestion size={34} />
-            <p>
+            {mode === 'general' ? (
+              <>
+                <Sparkles size={34} />
+                <p>Ask your AI anything – a recipe, an email, an idea. It answers from what it knows, not from your notes.</p>
+                <p className="hint">Like an answer? Save it as a note{target.folderId ? ' – it’s suggested for this folder' : ''}.</p>
+              </>
+            ) : (
+              <>
+                <MessageCircleQuestion size={34} />
+                <p>
               Ask anything about {target.all ? 'your notes' : target.folderId ? 'the notes in this folder' : 'this note'}. The answer comes only from{' '}
               {target.all ? 'them' : target.folderId ? 'them' : 'it (and the notes it also reads)'}, and
               each source takes you to the spot it came from.
             </p>
             <p className="hint">Your chats are kept here – come back to them any time.</p>
+                        </>
+            )}
           </div>
         ) : (
           <div className="ask-chat-messages">
@@ -297,8 +323,9 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                   <span className="ask-chat-time">{when(t.at)}</span>
                 </div>
                 <div className="ask-chat-a ask-panel">
-                  <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read }} onOpen={go} />
+                  <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
                   {saveButton({ question: t.question, answer: t.answer, sources: t.sources })}
+                  {notFound(t) && i === saved.length - 1 && !live.length && withoutNotes(t.question)}
                 </div>
               </div>
             ))}
@@ -308,6 +335,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                 <div className="ask-chat-a ask-panel">
                   <Turn job={j} onRetry={() => retry(j)} onOpen={go} />
                   {j.status === 'done' && typeof j.result?.answer === 'string' && saveButton(doneLive.find((t) => t.question === String(j.input.question))!)}
+                  {j.status === 'done' && j === live[live.length - 1] && notFound(j.result as unknown as AskResult) && withoutNotes(String(j.input.question))}
                 </div>
               </div>
             ))}
@@ -316,8 +344,28 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
         )}
       </div>
 
+      <div className="ask-mode" role="radiogroup" aria-label="Answer from">
+        <button role="radio" aria-checked={mode === 'notes'} className={mode === 'notes' ? 'on' : ''} onClick={() => setMode('notes')} title="Answers come only from your notes, with their sources">
+          <BookOpen size={14} /> {target.all ? 'Your notes' : target.folderId ? 'This folder' : 'This note'}
+        </button>
+        <button role="radio" aria-checked={mode === 'general'} className={mode === 'general' ? 'on' : ''} onClick={() => setMode('general')} title="Your AI answers from what it knows – a recipe, an email, an idea – not from your notes">
+          <Sparkles size={14} /> Anything
+        </button>
+      </div>
       <ChatInput
-        placeholder={chatId && !showList ? 'Ask a follow-up…' : target.folderId ? 'Ask about this folder’s notes…' : 'What does it say about…?'}
+        placeholder={
+          mode === 'general'
+            ? chatId && !showList
+              ? 'Ask a follow-up…'
+              : 'Ask your AI anything – a recipe, an email, an idea…'
+            : chatId && !showList
+              ? 'Ask a follow-up…'
+              : target.all
+                ? 'What do your notes say about…?'
+                : target.folderId
+                  ? 'Ask about this folder’s notes…'
+                  : 'What does it say about…?'
+        }
         disabled={busy && !showList}
         autoFocus={empty}
         error={error}
@@ -335,6 +383,9 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     document.body,
   )
 }
+
+/** what each chat window answers from (by its key): 'notes' or 'general' */
+const MODES = 'reconnotes.askMode'
 
 function ChatList({
   list,

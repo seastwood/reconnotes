@@ -22,6 +22,8 @@ export interface AskResult {
   cites?: { n: number; find?: string }[]
   /** what was read to answer it: sections of a note, or notes */
   read?: string[]
+  /** the AI's own answer, not from the notes ("Anything" in the chat) */
+  general?: boolean
 }
 
 /** the newest "Ask your notes" job for this question (still useful: not failed or cancelled) */
@@ -289,6 +291,11 @@ export function AskAnswer({ result, onOpen }: { result: AskResult; onOpen: (note
   }, [result])
   return (
     <>
+      {result.general && (
+        <div className="ask-general-mark">
+          <Sparkles size={12} /> Your AI’s own answer – not from your notes
+        </div>
+      )}
       <div
         className="ask-answer"
         dangerouslySetInnerHTML={{ __html: html }}

@@ -14,6 +14,8 @@ export interface SavedTurn {
   sources: AskResult['sources']
   cites?: AskResult['cites']
   read?: AskResult['read']
+  /** the AI's own answer, not from the notes */
+  general?: boolean
   at: number
 }
 export interface Conversation {

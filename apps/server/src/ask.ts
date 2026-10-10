@@ -723,6 +723,29 @@ export function recite(answer: string, texts: Map<number, string>, sources: AskS
   })
 }
 
+/**
+ * A request that isn't about your notes ("make me a chili recipe", "word this email"): your AI's
+ * own answer – no notes read, nothing cited – with the conversation so far, so follow-ups work.
+ */
+export async function askGeneral(
+  ai: Ai,
+  question: string,
+  when: { tzOffset?: number; now?: number } = {},
+  history: AskTurn[] = [],
+): Promise<{ answer: string; sources: AskSource[]; general: true; agent: string }> {
+  const prompt = `You're a helpful assistant. Answer the request below from what you know – it isn't about any notes.
+
+- Be practical and complete, without filler or chit-chat. Start with the answer.
+- Write in Markdown: short headings where they help, lists for things to get or do (a recipe: its ingredients as a list with amounts, then numbered steps), and "- [ ] " checklists for tasks.
+- Answer in the language of the request.
+
+Today is ${todayLabel(when.now ?? Date.now(), when.tzOffset ?? 0)}.
+
+${history.length ? `The conversation so far (the request may refer to it):\n${history.map((h) => `Q: ${h.question}\nA: ${h.answer.slice(0, 3000)}`).join('\n\n')}\n\n` : ''}Request: ${question}`
+  const { text, agent } = await ai.chat(prompt, (soFar) => reportPartial({ answer: soFar, sources: [], general: true }))
+  return { answer: text, sources: [], general: true, agent }
+}
+
 /** a sentence saying the notes don't say something ("no explicit rules are stated in the notes") */
 const ABSENCE = new RegExp(`${NOT_FOUND.source}|\\bno\\b[^.\\n]{0,60}\\b(?:is|are|was|were)\\s+(?:explicitly\\s+)?(?:stated|mentioned|given|listed|specified|provided|included)\\b|\\bnone\\s+(?:of\\s+)?(?:the\\s+)?notes?\\b`, 'i')
 

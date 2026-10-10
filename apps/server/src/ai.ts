@@ -511,6 +511,20 @@ ${partNotes.join('\n\n')}
     return { text: result, agent: agent.name }
   }
 
+  /**
+   * A request that isn't about the notes ("make me a chili recipe"): the AI's own answer, with the
+   * "Ask your notes" agents – room for a longer one (a whole recipe).
+   */
+  async chat(prompt: string, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) => {
+      const gen = () => backend.generate([{ text: withExtra(prompt) }], 3000)
+      const raw = await (onText ? streaming(onText, gen) : gen())
+      return collapseRepeats(unwrapModelOutput(raw)).trim()
+    })
+    log.info(`answered a general request via "${agent.name}" (${result.length} chars)`)
+    return { text: result, agent: agent.name }
+  }
+
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
   /** `names`: people who'll be heard (a meeting's attendees) – spelled right */
   /** `group`: the recording's group (top-level folder) – only its fixed words are used */

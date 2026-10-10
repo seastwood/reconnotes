@@ -362,6 +362,20 @@ describe('ask about this note', () => {
     expect(prompts[0]).toContain('Walk dogs')
     expect(prompts[0]).not.toContain('splitting the scrum')
   })
+  it('"Anything": the AI’s own answer – no notes read, nothing cited, kept in the chat marked as such', async () => {
+    const api = (m: string, p: string, b?: unknown) =>
+      fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
+    prompts.length = 0
+    const job = (await api('POST', '/api/jobs', { kind: 'ask', input: { question: 'Make me a chili recipe for Sydney', mode: 'general', folders: [] } })).job
+    const done = (await api('GET', `/api/jobs/${job.id}/wait`)).job
+    expect(done.status).toBe('done')
+    expect(done.result.general).toBe(true)
+    expect(done.result.sources).toEqual([])
+    expect(prompts[0]).toContain('Request: Make me a chili recipe')
+    expect(prompts[0]).not.toContain('Walk dogs') // Sydney's notes aren't read
+    const kept = (await api('GET', '/api/ask/history')).conversations.find((c: { id: string }) => c.id === job.id)
+    expect(kept.turns[0].general).toBe(true)
+  })
   it('reads only the note asked about, even when others match better', async () => {
     const api = (m: string, p: string, b?: unknown) =>
       fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())

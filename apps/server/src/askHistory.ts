@@ -19,6 +19,8 @@ export interface AskTurnSaved {
   cites?: AskCite[]
   /** what was read to answer it (sections, or notes) */
   read?: string[]
+  /** answered by the AI itself, not from the notes ("Anything" in the chat) */
+  general?: boolean
   at: number
 }
 
