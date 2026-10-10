@@ -12,6 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
+import { recipeFromPhotos, markUnreadAmounts } from '../src/photoRecipe'
 
 let app: App
 let dir: string
@@ -132,5 +133,59 @@ describe('a recipe in a page’s data', () => {
       { section: 'Serve', steps: ['Fill the shells.'] },
     ])
     expect(recipeIn(['{"@type":"Article","name":"x"}'])).toBeNull()
+  })
+})
+
+describe('a recipe from photos', () => {
+  it('is set out like an imported one – checked against what was read: nothing made up, wrong amounts marked', async () => {
+    const front = 'Cheesy Beef Chili\nwith Cornbread\nPREP 10 MIN TOTAL 35 MIN CALORIES 820'
+    const back = `INGREDIENTS 2 PERSON | 4 PERSON
+10 oz | 20 oz Ground Beef
+1 | 2 Yellow Onion
+1 | 2 Chili Powder
+BUST OUT Large pot, Salt, Pepper
+1 PREP Halve, peel, and finely chop onion.
+2 COOK BEEF Heat a large drizzle of oil in a large pot. Add beef and onion; cook until browned, 4-5 minutes.
+3 SIMMER Stir in chili powder and 1 cup water; simmer 10 minutes.`
+    const atts = ['front', 'back'].map((n) => {
+      const id = `photo${n}0000001`.slice(0, 16)
+      app.store.putAttachment({ id, mime: 'image/png', name: `${n}.png`, size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+      return id
+    })
+    reply = JSON.stringify({
+      name: 'Cheesy Beef Chili',
+      servings: '2',
+      prep: '10 min',
+      total: '35 min',
+      // the AI got one amount wrong (12, not 10) and made one ingredient up
+      ingredients: ['12 oz Ground Beef', '1 Yellow Onion', '1 Chili Powder', '1 cup Brown Sugar'],
+      steps: [
+        { title: 'Prep', text: 'Halve, peel, and finely chop onion.' },
+        { title: 'Cook beef', text: 'Heat a large drizzle of oil in a large pot. Add beef and onion; cook until browned, 4-5 minutes.' },
+        { title: 'Simmer', text: 'Stir in chili powder and 1 cup water; simmer 10 minutes.' },
+      ],
+      notes: ['You’ll need: Large pot, Salt, Pepper', 'Amounts for 4 people are also on the card: 20 oz Ground Beef, 2 Yellow Onion, 2 Chili Powder'],
+    })
+    const r = await recipeFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: atts[0], text: front }, { attachmentId: atts[1], text: back }], null)
+    expect(r.left).toEqual(['1 cup Brown Sugar'])
+    expect(r.unsure).toBe(1)
+    const md = text(r.noteId)
+    expect(md).toMatch(/^# Cheesy Beef Chili/)
+    expect(md).toContain('**Servings:** 2 · **Prep:** 10 min · **Total:** 35 min · #recipe')
+    expect(md).toContain('- [ ] 10 oz Ground Beef'.replace('10', '12')) // as the AI wrote it…
+    expect(getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString()).toMatch(/<uncertain>12<\/uncertain>/) // …marked to check
+    expect(md).toMatch(/1\. Prep: Halve, peel, and finely chop onion\.\n2\. Cook beef: Heat a large drizzle/)
+    expect(md).toContain('## Notes')
+    expect(md).toContain('Amounts for 4 people are also on the card')
+    expect(md).not.toContain('Brown Sugar')
+    // the photos: the front as its picture, the back under "The original"
+    expect(md).toContain('## The original')
+    expect((getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString().match(/<image /g) ?? []).length).toBe(2)
+  })
+
+  it('marks an amount that wasn’t read, however it’s written', () => {
+    const read = new Set(['10', '1/2', '4'])
+    expect(markUnreadAmounts('½ cup broth', read)).toBe('½ cup broth')
+    expect(markUnreadAmounts('12 oz beef', read)).toBe('⸢12⸣ oz beef')
   })
 })

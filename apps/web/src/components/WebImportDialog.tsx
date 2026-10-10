@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Globe, Loader2 } from 'lucide-react'
+import { ChefHat, Globe, Loader2, Plus, X } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
+import { recognizeImageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
+import { scanDocument, scannerAvailable } from '../lib/scanner'
 
 /**
  * Import a web page: a guide, manual or article becomes a note – its text,
@@ -49,6 +51,36 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
   }
   const pdfInput = useRef<HTMLInputElement>(null)
 
+  // a recipe on paper (a meal-kit card's front and back, cookbook pages): photos of it, in page order
+  const [photos, setPhotos] = useState<{ file: File; url: string }[]>([])
+  const photoInput = useRef<HTMLInputElement>(null)
+  const addPhotos = (files: File[]) => setPhotos((p) => [...p, ...files.filter((f) => f.type.startsWith('image/')).map((file) => ({ file, url: URL.createObjectURL(file) }))].slice(0, 12))
+  // the previews let go when the dialog closes
+  const previews = useRef<string[]>([])
+  previews.current = photos.map((p) => p.url)
+  useEffect(() => () => previews.current.forEach((u) => URL.revokeObjectURL(u)), [])
+  const [reading, setReading] = useState(false)
+  const startRecipe = async () => {
+    setError(null)
+    setReading(true)
+    try {
+      const pages: { attachmentId: string; text?: string }[] = []
+      for (const p of photos) {
+        const attachmentId = await addAttachment(p.file, p.file.name)
+        // read on this device where it can (Apple's text recognition: quick, and very good at print)
+        const text = useDeviceOcr() ? await recognizeImageOnDevice(p.file).catch(() => '') : ''
+        pages.push({ attachmentId, ...(text.trim() ? { text } : {}) })
+      }
+      await flushUploads()
+      const j = await submitJob({ kind: 'recipe-photos', title: 'Recipe from photos', input: { photos: pages, folderId } })
+      setJobId(j.id)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setReading(false)
+    }
+  }
+
   const start = async () => {
     setError(null)
     let u = url.trim()
@@ -77,7 +109,8 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
       return ''
     }
   })()
-  const result = job?.status === 'done' ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[] } | null) : null
+  const result = job?.status === 'done' ? (job.result as { noteId?: string; pages?: number; pictures?: number; notes?: string[]; title?: string; left?: string[]; unsure?: number } | null) : null
+  const fromPhotos = job?.kind === 'recipe-photos'
   const busy = Boolean(job && !isFinished(job))
 
   return createPortal(
@@ -93,7 +126,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
         }}
       >
         <h2>
-          <Globe size={18} /> Import a web page or PDF
+          <Globe size={18} /> Import a web page, PDF or recipe
         </h2>
         {!isSyncConfigured() ? (
           <p className="hint">Importing web pages is done by your ReconNotes server – connect one in Settings.</p>
@@ -181,13 +214,67 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               A recipe is set out neatly at the top of the note – servings and times, the ingredients as a checklist, the steps numbered.
               {recipeArticle ? ' Below it: everything else the page says (tips, variations…).' : ' Only that – the rest of the page is left out.'}
             </p>
+            <div className="recipe-photos">
+              <p className="hint">
+                <ChefHat size={14} /> A recipe on paper – a meal-kit card, a cookbook page?{' '}
+                <button type="button" className="text" onClick={() => photoInput.current?.click()}>
+                  Choose photos of it
+                </button>
+                {scannerAvailable() && (
+                  <>
+                    {' '}
+                    or{' '}
+                    <button type="button" className="text" onClick={() => void scanDocument().then(addPhotos).catch(() => {})}>
+                      scan the pages
+                    </button>
+                  </>
+                )}{' '}
+                – front and back, or every page – and it becomes a recipe like one from a website.
+              </p>
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addPhotos(Array.from(e.target.files ?? []))
+                  e.target.value = ''
+                }}
+              />
+              {photos.length > 0 && (
+                <>
+                  <div className="photo-pages">
+                    {photos.map((p, i) => (
+                      <figure key={p.url}>
+                        <img src={p.url} alt={`Page ${i + 1}`} />
+                        <figcaption>Page {i + 1}</figcaption>
+                        <button type="button" className="icon" aria-label={`Remove page ${i + 1}`} onClick={() => setPhotos((all) => all.filter((x) => x !== p))}>
+                          <X size={14} />
+                        </button>
+                      </figure>
+                    ))}
+                    <button type="button" className="photo-add" onClick={() => photoInput.current?.click()} aria-label="Add more photos">
+                      <Plus size={22} />
+                    </button>
+                  </div>
+                  <p className="hint">In page order – the first one is the recipe’s picture. Nothing is made up: what isn’t on the pages is left out, and an amount the AI isn’t sure of is marked to check.</p>
+                </>
+              )}
+            </div>
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel
               </button>
-              <button type="submit" className="primary" disabled={!url.trim()}>
-                Import
-              </button>
+              {photos.length > 0 ? (
+                <button type="button" className="primary" disabled={reading} onClick={() => void startRecipe()}>
+                  {reading ? <Loader2 size={15} className="spin" /> : <ChefHat size={15} />} Make the recipe
+                </button>
+              ) : (
+                <button type="submit" className="primary" disabled={!url.trim()}>
+                  Import
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -199,7 +286,25 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
             )}
             {busy && <p className="hint">You can close this – it carries on in Jobs, and you’ll be told when it’s done.</p>}
             {job?.status === 'failed' && <p className="error-text">{job.error ?? 'Couldn’t import it.'}</p>}
-            {result && (
+            {result && fromPhotos && (
+              <>
+                <p>✅ {result.title ?? 'The recipe'} – set out from {photos.length || 'the'} photo{photos.length === 1 ? '' : 's'}.</p>
+                {!!result.unsure && (
+                  <p className="hint">
+                    {result.unsure} amount{result.unsure === 1 ? '' : 's'} weren’t found in what was read: they’re underlined with dots – check them against the photos.
+                  </p>
+                )}
+                {!!result.left?.length && (
+                  <ul className="hint web-import-notes">
+                    <li>Left out – not found in what was read:</li>
+                    {result.left.slice(0, 8).map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            {result && !fromPhotos && (
               <>
                 <p>
                   ✅ Imported {result.pages ?? 1} page{result.pages === 1 ? '' : 's'}

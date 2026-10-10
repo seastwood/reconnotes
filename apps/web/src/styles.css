@@ -6108,3 +6108,60 @@ a.button {
 .cook-dots span.on {
   background: var(--accent);
 }
+
+/* a recipe from photos: its pages, in order */
+.recipe-photos {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.recipe-photos .hint svg {
+  vertical-align: -2px;
+  color: var(--accent-text);
+}
+.photo-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+}
+.photo-pages figure {
+  position: relative;
+  margin: 0;
+  width: 92px;
+}
+.photo-pages img {
+  width: 92px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: block;
+}
+.photo-pages figcaption {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 3px;
+}
+.photo-pages figure .icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.photo-add {
+  width: 92px;
+  height: 120px;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}

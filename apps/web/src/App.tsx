@@ -444,6 +444,7 @@ export function App() {
         .filter((n) => n.template && !n.trashedAt)
         .map((t) => ({ id: `tpl-${t.id}`, label: `New note from template: ${t.title || 'Untitled'}`, section: N, run: () => void newNoteFromTemplate(t.id, folderNow()).then((id) => a().openNote(id)) })),
       { id: 'web-import', label: 'Import a web page…', section: N, keywords: 'website url guide manual article download save link', run: () => setWebImport({ folderId: folderNow() }) },
+      { id: 'recipe-photos', label: 'Recipe from photos…', section: N, keywords: 'hello fresh meal kit card cookbook scan picture camera', run: () => setWebImport({ folderId: folderNow() }) },
       { id: 'all', label: 'All Notes', section: G, run: () => a().showView({ kind: 'all' }) },
       { id: 'unfiled', label: 'Not in a folder', section: G, run: () => a().showView({ kind: 'unfiled' }) },
       { id: 'jobs', label: 'Jobs (AI and processing)', section: G, keywords: 'queue ai running tasks progress', run: () => a().showView({ kind: 'jobs' }) },

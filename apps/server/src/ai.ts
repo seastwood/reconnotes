@@ -8,7 +8,7 @@ import { fixHeard, Vocabulary } from './vocabulary'
 import { reportProgress } from './jobs'
 import { DRAWING_WIDTH, drawingToSvg, extractTags, linesToMarkdown, segmentLines, unionBounds, type Stroke } from '@reconnotes/core'
 import type { Config } from './config'
-import { EmptyReplyError, NoTextError, describeError, freeOllamaGpu, readingMode, rememberSpeechNeedsRoom, speechNeedsRoom, speechUsed, streaming, tracing, type AgentConfig, type AgentRegistry, type Backend, type Part } from './agents'
+import { EmptyReplyError, NoTextError, describeError, freeOllamaGpu, readingMode, rememberSpeechNeedsRoom, speechNeedsRoom, speechUsed, streaming, tracing, type AgentConfig, type AgentRegistry, type AiTask, type Backend, type Part } from './agents'
 import { log } from './log'
 import { fitForAi, pictureLines, type PictureLine } from './images'
 import { cleanOcrLine, cleanOcrText, cleanTranscript, collapseRepeats, unwrapModelOutput } from './text'
@@ -148,6 +148,13 @@ const FORMAT_PROMPT = `Below is text that an OCR model recognised from handwritt
 
 Recognised text:
 `
+
+const RECIPE_PAGE_PROMPT = `This is a photo of a page of a recipe (a meal-kit recipe card, a cookbook page or a printout). Write out all of its text, exactly as printed, in reading order.
+
+- Keep every word, number, fraction and unit exactly as printed ("1 ½ tbsp", "10 oz", "2 | 4"). Don't round, convert or correct anything.
+- Ingredient amounts in columns for different numbers of people (e.g. a "2 people" and a "4 people" column): write each ingredient on its own line as "amount for the first | amount for the second | ingredient", and write the column headings first.
+- Keep numbered steps numbered, with their titles.
+- Leave out nothing that's text; don't describe the pictures. Write only the text.`
 
 const IMAGE_TEXT_PROMPT = `This image was attached to a personal note. Produce text that will make it findable by search:
 
@@ -795,6 +802,20 @@ ${partNotes.join('\n\n')}
       .filter((l) => !/^\s*\**\s*description\s*:/i.test(l))
       .join('\n')
       .trim()
+  }
+
+  /**
+   * A photographed page of a recipe (a meal-kit card, a cookbook page) → its text, exactly as printed:
+   * every amount and unit, amounts in columns for different numbers of people kept as columns.
+   */
+  async readRecipePage(data: Buffer, mime: string): Promise<{ text: string; agent: string }> {
+    if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
+    const fit = fitForAi(data, mime)
+    const task: AiTask = this.agents.available('images') ? 'images' : 'handwriting'
+    const { result, agent } = await this.agents.run(task, (backend) =>
+      backend.generate([{ image: fit.data, mime: fit.mime }, { text: RECIPE_PAGE_PROMPT }], 4000),
+    )
+    return { text: result.trim(), agent: agent.name }
   }
 
   /** Image → searchable text (OCR + short description). */

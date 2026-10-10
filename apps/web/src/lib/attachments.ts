@@ -19,33 +19,51 @@ export async function addAttachment(file: Blob, name = ''): Promise<string> {
 }
 
 let flushing: Promise<void> | null = null
+/** asked to upload while a round was already going: another round after it (a file added since) */
+let again = false
 
+/** Upload what hasn't been: resolves once everything added before the call is on the server (or it couldn't be). */
 export function flushUploads(): Promise<void> {
   if (!isSyncConfigured()) return Promise.resolve()
-  flushing ??= (async () => {
+  if (flushing) {
+    again = true
+    return flushing
+  }
+  flushing = (async () => {
     try {
-      const db = await metaDb()
-      for (const rec of await db.getAll('blobs')) {
-        if (rec.uploaded) continue
-        const res = await fetch(apiUrl(`/api/attachments/${rec.id}`), {
-          method: 'PUT',
-          headers: {
-            ...authHeaders(),
-            'Content-Type': rec.blob.type || 'application/octet-stream',
-            'X-File-Name': encodeURIComponent(rec.name),
-          },
-          body: rec.blob,
-        })
-        if (!res.ok) break
-        await db.put('blobs', { ...rec, uploaded: true })
-      }
-    } catch {
-      /* offline – retried on reconnect */
+      do {
+        again = false
+        if (!(await uploadPending())) break
+      } while (again)
     } finally {
       flushing = null
     }
   })()
   return flushing
+}
+
+/** One round: every file not uploaded yet. false: stopped (offline, or the server said no) – retried on reconnect. */
+async function uploadPending(): Promise<boolean> {
+  try {
+    const db = await metaDb()
+    for (const rec of await db.getAll('blobs')) {
+      if (rec.uploaded) continue
+      const res = await fetch(apiUrl(`/api/attachments/${rec.id}`), {
+        method: 'PUT',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': rec.blob.type || 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(rec.name),
+        },
+        body: rec.blob,
+      })
+      if (!res.ok) return false
+      await db.put('blobs', { ...rec, uploaded: true })
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** The attachment's file, from this device or downloaded from the server. */

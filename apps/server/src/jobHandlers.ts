@@ -35,6 +35,7 @@ import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askGeneral, askNotes } from './ask'
 import { tidyNote } from './tidy'
+import { recipeFromPhotos } from './photoRecipe'
 import { attendeesFor, groupOfAttachment, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
@@ -78,6 +79,7 @@ export const JOB_KINDS: Record<string, string> = {
   'web-import': 'Import a web page',
   'web-refresh': 'Check imported pages for updates',
   'page-tidy': 'Tidy with AI',
+  'recipe-photos': 'Recipe from photos',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -248,6 +250,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'web-import': null,
   'web-refresh': null,
   'page-tidy': 'compile',
+  'recipe-photos': 'images',
 }
 
 /** a voice heard for less than this (seconds, or share of all the talk) isn't one of the meeting's main voices */
@@ -734,6 +737,24 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     await refreshNoteMeta(noteId)
     const text = t.refused ?? (t.removed.length ? `Took out ${t.removed.length}:\n${t.removed.map((x) => `• ${x}`).join('\n')}` : 'Nothing needed taking out.')
     return { result: { noteId, removed: t.removed, versionId: t.versionId, ...(t.refused ? { refused: t.refused } : {}), text: preview(text) } }
+  })
+
+  // a recipe from photos of it (a meal-kit card's front and back, cookbook pages): photoRecipe.ts
+  jobs.register('recipe-photos', async (job) => {
+    const raw = Array.isArray(job.input.photos) ? (job.input.photos as unknown[]) : []
+    const pages = raw
+      .map((p) => (p && typeof p === 'object' ? (p as Record<string, unknown>) : {}))
+      .filter((p) => typeof p.attachmentId === 'string')
+      .slice(0, 12)
+      .map((p) => ({ attachmentId: String(p.attachmentId), ...(typeof p.text === 'string' ? { text: p.text.slice(0, 20000) } : {}) }))
+    const folderId = typeof job.input.folderId === 'string' ? job.input.folderId : null
+    const r = await recipeFromPhotos(store, sync, ai, pages, folderId)
+    const text = [
+      `${r.title}`,
+      ...(r.unsure ? [`${r.unsure} amount${r.unsure === 1 ? '' : 's'} to check (dotted underline).`] : []),
+      ...(r.left.length ? [`Left out – not found in what was read:`, ...r.left.map((x) => `• ${x}`)] : []),
+    ].join('\n')
+    return { result: { noteId: r.noteId, title: r.title, left: r.left, unsure: r.unsure, text: preview(text) }, agent: r.agent }
   })
 
   // imported pages: fetched again, the changed ones brought up to date (see webImport.ts)
