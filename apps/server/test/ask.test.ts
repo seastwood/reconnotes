@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, namesIn, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
+import { askNotes, namesIn, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -354,6 +354,14 @@ describe('ask about this note', () => {
     expect(prompts[0]).toContain('Walk dogs')
     expect(prompts[0]).not.toContain('splitting the scrum')
   })
+  it('a follow-up that names nobody keeps to whoever the conversation is about', async () => {
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what do you want to do first with these?', null, {}, {}, [
+      { question: 'what was it Sydney wanted me to do?', answer: '- Walk dogs [1]', sources: ['sydneynote0001'] },
+    ])
+    expect(prompts[0]).toContain('Walk dogs')
+    expect(prompts[0]).not.toContain('splitting the scrum')
+  })
   it('reads only the note asked about, even when others match better', async () => {
     const api = (m: string, p: string, b?: unknown) =>
       fetch(base + p, { method: m, headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) }).then((r) => r.json())
@@ -371,6 +379,17 @@ describe('names in a question', () => {
     expect(namesIn('what was it Sydney wanted me to do?')).toEqual(['sydney'])
     expect(namesIn('What did I tell Jesse about the FRC robot?')).toEqual(['jesse'])
     expect(namesIn('What did Sydney’s mom say?')).toEqual(['sydney'])
+  })
+})
+
+describe('what the notes don’t say', () => {
+  it('isn’t cited to them', () => {
+    expect(unciteAbsence('- Walk dogs [2]\n\nNo explicit prioritization rules are stated in the notes [1][2], so this order reflects urgency.')).toBe(
+      '- Walk dogs [2]\n\nNo explicit prioritization rules are stated in the notes, so this order reflects urgency.',
+    )
+    expect(unciteAbsence('The notes don’t mention a deadline [3].')).toBe('The notes don’t mention a deadline.')
+    // what they do say keeps its citation
+    expect(unciteAbsence('Winterize the chicken coop by Monday [2].')).toBe('Winterize the chicken coop by Monday [2].')
   })
 })
 

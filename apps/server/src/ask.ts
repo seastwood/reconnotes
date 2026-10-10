@@ -285,7 +285,9 @@ export async function askNotes(
     // the question names someone or something ("what did Sydney want…"): the notes that mention
     // them – a section that never does can't be what it's asking about, however many of its
     // other words ("wanted", "do") it shares
-    const names = namesIn(question).filter((nm) => !STOP.has(nm))
+    // (a follow-up that names nobody – "how should we prioritize these?" – is about whoever the conversation was)
+    const ownNames = namesIn(question).filter((nm) => !STOP.has(nm))
+    const names = ownNames.length ? ownNames : [...new Set(history.flatMap((h) => namesIn(h.question)))].filter((nm) => !STOP.has(nm))
     const mentions = (x: Section) => {
       const low = `${meta.get(x.noteId)?.title ?? ''} ${x.path.join(' ')} ${x.text}`.toLowerCase()
       return names.some((nm) => new RegExp(`(?<![\\p{L}\\p{N}])${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(low))
@@ -469,6 +471,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
   text = markInference(text)
   // a sentence whose facts come only from a note referred to: labelled with it, so it isn't taken for the main note's rule
   if (refs.length) text = labelRefs(text, (n) => sources.find((x) => x.n === n)?.noteId, (id) => (isRef.has(id) ? shortTitle(meta.get(id)?.title ?? '') : null))
+  // "no rules are stated in the notes [1][2]": what the notes don't say isn't cited to them
+  text = unciteAbsence(text)
   // "in [8] and [8]": in [8]
   text = text.replace(/\[(\d+)\](\s*(?:,\s*and|,|and|&)\s*\[\1\])+/g, '[$1]')
   // what the answer left out of the lines most about the question (a small model
@@ -717,6 +721,20 @@ export function recite(answer: string, texts: Map<number, string>, sources: AskS
     })
     return [...new Set(fixed)].map((n) => `[${n}]`).join('')
   })
+}
+
+/** a sentence saying the notes don't say something ("no explicit rules are stated in the notes") */
+const ABSENCE = new RegExp(`${NOT_FOUND.source}|\\bno\\b[^.\\n]{0,60}\\b(?:is|are|was|were)\\s+(?:explicitly\\s+)?(?:stated|mentioned|given|listed|specified|provided|included)\\b|\\bnone\\s+(?:of\\s+)?(?:the\\s+)?notes?\\b`, 'i')
+
+/** Citations on a sentence saying what the notes don't say: taken off – there's nothing there to point to. */
+export function unciteAbsence(answer: string): string {
+  const cuts = [0, ...sentenceEnds(answer), answer.length].filter((x, i, a) => i === 0 || x > a[i - 1])
+  let out = ''
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const sentence = answer.slice(cuts[k], cuts[k + 1])
+    out += ABSENCE.test(sentence.replace(/\[\d+\]/g, '').replace(/’/g, "'")) ? sentence.replace(/\s*(?:\[\d+\])+/g, '') : sentence
+  }
+  return out
 }
 
 /** a word as compared: lower case, without a plural or -ed / -ing ending */
