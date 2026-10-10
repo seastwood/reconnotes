@@ -49,10 +49,12 @@ export function maybeSnapshot(store: Store, docName: string, doc: Y.Doc, now = D
 }
 
 /** Snapshot right now, whatever the timing (e.g. just before a restore). */
-export function snapshotNow(store: Store, docName: string, doc: Y.Doc, label: string, now = Date.now()) {
+/** Keep the note as it is now in its history (labelled); returns the version's id. */
+export function snapshotNow(store: Store, docName: string, doc: Y.Doc, label: string, now = Date.now()): number {
   const s = summary(doc)
-  store.addVersion(docName, { createdAt: now, title: s.title, chars: s.chars, label, state: Y.encodeStateAsUpdate(doc) })
+  const id = store.addVersion(docName, { createdAt: now, title: s.title, chars: s.chars, label, state: Y.encodeStateAsUpdate(doc) })
   lastSnapshot.set(docName, { at: now, text: s.fingerprint })
+  return id
 }
 
 /** Thin out old snapshots: all from the last day, hourly for a week, daily for 90 days. */

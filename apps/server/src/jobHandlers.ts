@@ -34,6 +34,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askGeneral, askNotes } from './ask'
+import { tidyNote } from './tidy'
 import { attendeesFor, groupOfAttachment, heardWith, processAttachment, setHeardWith, APPLE_SPEECH, sentWordTimes, setSpeakers, setTranscribedBy, setWordTimes, speakerSegments, speakersThreshold, transcribedBy, wordTimes } from './attachments'
 import { diarize, diarizeAvailable } from './diarize'
 import type { Job, Jobs } from './jobs'
@@ -76,6 +77,7 @@ export const JOB_KINDS: Record<string, string> = {
   digest: 'Weekly digest',
   'web-import': 'Import a web page',
   'web-refresh': 'Check imported pages for updates',
+  'page-tidy': 'Tidy with AI',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -245,6 +247,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   digest: 'compile',
   'web-import': null,
   'web-refresh': null,
+  'page-tidy': 'compile',
 }
 
 /** a voice heard for less than this (seconds, or share of all the talk) isn't one of the meeting's main voices */
@@ -419,6 +422,13 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const r = job.input.replace as string | null | undefined
     if (r) jobs.markReplaced(r, job.id)
     return r ?? null
+  }
+  /** a note's title, preview and tags in the list, after a job changed it */
+  const refreshNoteMeta = async (noteId: string) => {
+    const d = sync.getDoc(noteDocName(noteId))
+    if (!d) return
+    const ex = extractNote(d)
+    await sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
   }
   const noteDoc = (noteId: unknown) => {
     const doc = typeof noteId === 'string' && /^[a-z0-9]{8,64}$/.test(noteId) ? sync.getDoc(noteDocName(noteId)) : null
@@ -678,7 +688,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
 
   // a web page (and, if asked, the guide's other pages) into notes (see webImport.ts)
   jobs.register('web-import', async (job) => {
-    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string; splitPdf?: boolean; askRefFor?: string }
+    const i = job.input as { url?: string; follow?: boolean; maxPages?: number; folderId?: string | null; pdfAttachmentId?: string; splitPdf?: boolean; askRefFor?: string; tidy?: boolean; recipeArticle?: boolean }
     const r = await importWebPages(config, store, ai, sync, {
       url: String(i.url ?? ''),
       follow: Boolean(i.follow),
@@ -686,7 +696,24 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       folderId: i.folderId ?? null,
       pdfAttachmentId: typeof i.pdfAttachmentId === 'string' ? i.pdfAttachmentId : undefined,
       splitPdf: Boolean(i.splitPdf),
+      recipeArticle: i.recipeArticle !== false,
     })
+    // "Tidy with AI" asked for: each page's note, its website leftovers taken out (tidy.ts)
+    if (i.tidy && !i.pdfAttachmentId) {
+      const pagesOnly = r.noteIds.length > 1 ? r.noteIds.slice(1) : r.noteIds
+      let taken = 0
+      for (const [k, id] of pagesOnly.entries()) {
+        reportProgress(pagesOnly.length > 1 ? `Tidying note ${k + 1} of ${pagesOnly.length}…` : 'Tidying the note…')
+        try {
+          const t = await tidyNote(store, sync, ai, id)
+          taken += t.removed.length
+          await refreshNoteMeta(id)
+        } catch (e) {
+          r.notes.push(`Couldn’t tidy it: ${(e as Error).message}`)
+        }
+      }
+      r.notes.unshift(taken ? `Tidied: ${taken} block${taken === 1 ? '' : 's'} of website leftovers taken out (the untidied version is in the note’s history).` : 'Tidied: nothing needed taking out.')
+    }
     // imported as a document a note refers to: Ask reads it with that note from now on
     if (typeof i.askRefFor === 'string' && i.askRefFor) {
       const imported = r.noteIds.length > 1 ? r.noteIds.slice(1) : r.noteIds
@@ -697,6 +724,16 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       ...r.notes.slice(0, 20),
     ].join('\n')
     return { result: { noteId: r.noteIds[0], noteIds: r.noteIds, folderId: r.folderId, pages: r.pages, pictures: r.pictures, notes: r.notes, text: summary } }
+  })
+
+  // "Tidy with AI" on a note: its website leftovers taken out, nothing rewritten (tidy.ts)
+  jobs.register('page-tidy', async (job) => {
+    const noteId = String(job.noteId ?? job.input.noteId ?? '')
+    noteDoc(noteId)
+    const t = await tidyNote(store, sync, ai, noteId)
+    await refreshNoteMeta(noteId)
+    const text = t.refused ?? (t.removed.length ? `Took out ${t.removed.length}:\n${t.removed.map((x) => `• ${x}`).join('\n')}` : 'Nothing needed taking out.')
+    return { result: { noteId, removed: t.removed, versionId: t.versionId, ...(t.refused ? { refused: t.refused } : {}), text: preview(text) } }
   })
 
   // imported pages: fetched again, the changed ones brought up to date (see webImport.ts)

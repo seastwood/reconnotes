@@ -1,4 +1,6 @@
 /// <reference lib="dom.iterable" />
+import { guardAddress, isPrivateHost } from './netGuard'
+import { SITE_RECIPE_CARDS, recipeCard, recipeIn } from './recipe'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -45,6 +47,8 @@ export interface WebImportOptions {
   pdfAttachmentId?: string
   /** a PDF: a note per chapter (in a folder, with a contents note) instead of one note */
   splitPdf?: boolean
+  /** a recipe page: the rest of the article under its recipe card (default), or the card only */
+  recipeArticle?: boolean
 }
 
 export interface WebImportResult {
@@ -64,11 +68,24 @@ const MAX_PICTURE = 25 * 1024 * 1024
 const MAX_PICTURES = 600
 const PAGE_LIMIT = 300
 
-async function fetchWithLimit(url: string, accept: string, max: number, timeoutMs = 30_000): Promise<{ data: Buffer; type: string; url: string }> {
+/**
+ * Fetch, up to `max` bytes. `allowPrivate`: may it reach addresses on your own network (only when
+ * the page imported is on it) – checked on every redirect too.
+ */
+async function fetchWithLimit(url: string, accept: string, max: number, timeoutMs = 30_000, allowPrivate = false): Promise<{ data: Buffer; type: string; url: string }> {
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeoutMs)
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: accept, 'Accept-Language': 'en,*;q=0.5' }, redirect: 'follow', signal: ctl.signal })
+    let res: Response
+    for (let hops = 0; ; hops++) {
+      await guardAddress(url, allowPrivate)
+      res = await fetch(url, { headers: { 'User-Agent': UA, Accept: accept, 'Accept-Language': 'en,*;q=0.5' }, redirect: 'manual', signal: ctl.signal })
+      const to = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+      if (!to) break
+      if (hops >= 8) throw new Error('too many redirects')
+      void res.body?.cancel()
+      url = new URL(to, url).href
+    }
     if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'error'} from ${new URL(url).host}`)
     const len = Number(res.headers.get('content-length') ?? 0)
     if (len > max) throw new Error(`too large (${Math.round(len / 1048576)} MB)`)
@@ -79,7 +96,7 @@ async function fetchWithLimit(url: string, accept: string, max: number, timeoutM
       if (size > max) throw new Error(`too large (over ${Math.round(max / 1048576)} MB)`)
       chunks.push(Buffer.from(c))
     }
-    return { data: Buffer.concat(chunks), type: (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase(), url: res.url || url }
+    return { data: Buffer.concat(chunks), type: (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase(), url }
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw new Error(`${new URL(url).host} took too long to answer`)
     // "fetch failed" says nothing: the reason is underneath
@@ -274,6 +291,19 @@ function standaloneSvg(el: El): string | null {
 }
 
 /** Text that Markdown must read as text. */
+/** A picture's address without its size (WordPress's photo-300x200.jpg, a CDN's ?w=600): the same picture at any size. */
+export function samePicture(src: string): string {
+  if (!/^https?:/i.test(src)) return src
+  try {
+    const u = new URL(src)
+    for (const k of [...u.searchParams.keys()]) if (/^(w|h|width|height|resize|fit|quality|q|crop|ssl|strip|dpr|format|auto)$/i.test(k)) u.searchParams.delete(k)
+    u.pathname = u.pathname.replace(/-\d{2,5}x\d{2,5}(?=\.\w{3,4}$)/, '').replace(/-scaled(?=\.\w{3,4}$)/, '')
+    return u.href
+  } catch {
+    return src
+  }
+}
+
 function esc(s: string): string {
   return s.replace(/([\\`*_[\]<>|~!#])/g, '\\$1')
 }
@@ -753,6 +783,8 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   if (!/^https?:$/.test(start.protocol)) throw new Error('Only http:// and https:// addresses can be imported.')
   const maxPages = opts.follow ? Math.min(PAGE_LIMIT, Math.max(1, opts.maxPages ?? 50)) : 1
   const notes: string[] = []
+  // a page on your own network may use addresses on it; one from the internet may not (netGuard.ts)
+  const local = !opts.pdfAttachmentId && (await isPrivateHost(start.hostname))
 
   // 1. the pages (the first, then the guide's pages in the order they're linked)
   const pages: Page[] = []
@@ -776,7 +808,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     reportProgress(opts.follow ? `Reading page ${pages.length + 1} of up to ${Math.min(maxPages, pages.length + 1 + queue.length)}…` : 'Reading the page…')
     let got: { data: Buffer; type: string; url: string }
     try {
-      got = await fetchWithLimit(url.href, 'text/html,application/xhtml+xml,*/*;q=0.8', MAX_HTML)
+      got = await fetchWithLimit(url.href, 'text/html,application/xhtml+xml,*/*;q=0.8', MAX_HTML, 30_000, local)
     } catch (e) {
       if (!pages.length) throw new Error(`Couldn’t get the page: ${(e as Error).message}`)
       notes.push(`${url.href}: ${(e as Error).message}`)
@@ -814,13 +846,18 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   }
   if (opts.follow && queue.length) notes.push(`Stopped at ${maxPages} pages; ${queue.length} more weren’t imported.`)
 
-  // 2. each page's content and title
-  const mains = pages.map((p) => {
+  // 2. each page's content and title – and a recipe page's recipe, from the data it gives search engines (recipe.ts)
+  const recipes = pages.map((p) =>
+    p.pdfPages ? null : recipeIn([...p.doc.querySelectorAll('script[type="application/ld+json"]')].map((el) => el.textContent ?? '')),
+  )
+  const mains = pages.map((p, i) => {
     markIndents(p.doc)
     const gdoc = googleDoc(p.doc)
     const main = gdoc?.main ?? findMain(p.doc)
+    // the site's own recipe card: the one made from the data replaces it
+    if (recipes[i]) for (const el of [...main.querySelectorAll(SITE_RECIPE_CARDS)]) el.remove()
     removeNoise(main)
-    p.title = gdoc?.title || titleOf(p.doc, main, p.url)
+    p.title = recipes[i]?.name || gdoc?.title || titleOf(p.doc, main, p.url)
     return main
   })
   // checking for updates: the notes the pages went into before
@@ -847,7 +884,9 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
     if (icons.has(src)) return null
     if (tokens.size >= MAX_PICTURES && ![...tokens.values()].includes(src)) return null
     const token = `rnpic-${tokens.size}`
-    for (const [t, s] of tokens) if (s === src) return t
+    // the same picture at another size (photo-300x200.jpg, ?w=600): the same picture
+    const key = samePicture(src)
+    for (const [t, s] of tokens) if (s === src || samePicture(s) === key) return t
     tokens.set(token, src)
     return token
   }
@@ -892,7 +931,22 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         return /^https?:$/.test(u.protocol) ? { url: u.href } : null
       },
     })
-  const first = pages.map((_, i) => convert(i, mains[i].cloneNode(true) as El))
+  // a recipe page: its card first, then (unless left out) the rest of the article
+  const withCard = (i: number, md: string) => {
+    const r = recipes[i]
+    if (!r) return md
+    let photo: string | null = null
+    try {
+      photo = r.image ? pictureToken(new URL(r.image, pages[i].url).href) : null
+    } catch {
+      photo = null
+    }
+    const card = recipeCard(r, photo, esc)
+    if (opts.recipeArticle === false) return card
+    const article = md.replace(/^#\s[^\n]*\n+/, '').trim()
+    return article ? `${card}\n\n## From the article\n\n${article}` : card
+  }
+  const first = pages.map((_, i) => withCard(i, convert(i, mains[i].cloneNode(true) as El)))
   // each page's content, comparable between imports (pictures by their address)
   const contentOf = (md: string) => md.replace(/rnpic-\d+/g, (t) => tokens.get(t) ?? t).replace(/rnpage-\d+(~\d+)?/g, 'page')
   const hashes = first.map((md) => crypto.createHash('sha1').update(contentOf(md)).digest('hex'))
@@ -900,6 +954,10 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const write = pages.map((p, i) => !prev || isNew[i] || prev.pages[pageKey(p.url)]?.hash !== hashes[i])
 
   const wanted = new Set(first.filter((_, i) => write[i]).flatMap((md) => md.match(/rnpic-\d+/g) ?? []))
+  /** a picture that's the same file as one before it: that one (shown once) */
+  const sameAs = new Map<string, string>()
+  const byHash = new Map<string, string>()
+  let blocked = 0
   const total = wanted.size
   let done = 0
   for (const [token, src] of tokens) {
@@ -921,7 +979,7 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         mime = m[1]
         name = `picture.${mime.split('/')[1].replace('svg+xml', 'svg')}`
       } else {
-        const got = await fetchWithLimit(src, 'image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5', MAX_PICTURE, 20_000)
+        const got = await fetchWithLimit(src, 'image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5', MAX_PICTURE, 20_000, local)
         mime = got.type.startsWith('image/') ? got.type : mimeFromName(src) ?? ''
         if (!mime.startsWith('image/')) throw new Error('not a picture')
         data = got.data
@@ -936,19 +994,30 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
         pictures.set(src, null)
         continue
       }
+      // the very same picture again (the site shows it twice): once
+      const hash = crypto.createHash('sha1').update(data).digest('hex')
+      const firstToken = byHash.get(hash)
+      if (firstToken) {
+        sameAs.set(token, firstToken)
+        pictures.set(src, pictures.get(tokens.get(firstToken)!) ?? null)
+        continue
+      }
+      byHash.set(hash, token)
       const a = { id: newId(), name: name.slice(0, 120), mime, size: data.length }
       store.putAttachment({ id: a.id, mime, name: a.name, size: a.size, created_at: Date.now() }, data, initialTextStatus(config, ai, mime, a.name))
       queueAttachment(config, store, ai, sync, a.id)
       pictures.set(src, a)
-    } catch {
+    } catch (e) {
       pictures.set(src, null)
-      failedPictures++
+      if (/on your own network/.test((e as Error).message)) blocked++
+      else failedPictures++
     }
   }
+  if (blocked) notes.push(`${blocked} picture${blocked === 1 ? ' was' : 's were'} left out: on your own network, which a page from the internet can’t make the server reach.`)
   if (failedPictures) notes.push(`${failedPictures} picture${failedPictures === 1 ? '' : 's'} couldn’t be downloaded (kept as links).`)
 
   // rule numbers ("see G206") linked to the page where the rule is written
-  const markdowns = linkRules(pages.map((_, i) => convert(i, mains[i])))
+  const markdowns = linkRules(pages.map((_, i) => withCard(i, convert(i, mains[i]))))
 
   // 4. the notes (in a folder of their own when there are several, with a contents note first)
   const when = new Date().toISOString().slice(0, 10)
@@ -1004,7 +1073,13 @@ export async function importWebPages(config: Config, store: Store, ai: Ai, sync:
   const pageText = (i: number) => {
     const p = pages[i]
     // pictures that didn't come: icons left out, the others a link to where they are
+    // each picture once (the same one again – another size, the same file – left out)
+    const shown = new Set<string>()
     let md = markdowns[i].replace(/!\[([^\]]*)\]\((rnpic-\d+)\)/g, (m, alt: string, token: string) => {
+      const canon = sameAs.get(token) ?? token
+      if (shown.has(canon)) return ''
+      shown.add(canon)
+      if (canon !== token) return `![${alt}](${canon})`
       const src = tokens.get(token)
       if (!src || pictures.get(src)) return m
       if (icons.has(src) || src.startsWith('svg:') || src.startsWith('data:')) return ''

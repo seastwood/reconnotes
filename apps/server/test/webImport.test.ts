@@ -48,6 +48,8 @@ function png(w: number, h: number): Buffer {
 }
 const PNG = png(120, 80)
 const ICON_PNG = png(16, 16)
+/** a picture of its own for each address (different pictures aren't the same file) – but /img/same-*: one picture */
+const pngFor = (p: string) => (p.startsWith('/img/same-') ? PNG : png(100 + ([...p].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 7) % 300), 80))
 
 const layout = (title: string, body: string) => `<!doctype html><html><head><meta charset="utf-8"><title>${title} | Robot Docs</title></head>
 <body>
@@ -160,6 +162,43 @@ const PAGES: Record<string, string> = {
     <footer class="footer">Copyright REV</footer></div></body></html>`,
 }
 
+// a recipe page (as WordPress recipe plugins write them): the recipe for search engines, the site's own card, its leftovers
+const RECIPE_LD = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    { '@type': 'WebPage', name: 'The Best Chili Recipe {EASY} - Spend Less' },
+    {
+      '@type': 'Recipe',
+      name: 'The Best Chili Recipe',
+      description: 'A big pot of ground beef chili loaded with beef and beans.',
+      image: ['/img/chili-photo.png', '/img/chili-photo-300x200.png'],
+      recipeYield: ['8', '8 servings'],
+      prepTime: 'PT20M',
+      cookTime: 'PT45M',
+      totalTime: 'PT1H5M',
+      recipeIngredient: ['2 pounds lean ground beef', '2&#189; tablespoons chili powder divided, or to taste', '1 (19 ounce) can red kidney beans drained and rinsed', 'salt and black pepper to taste'],
+      recipeInstructions: [
+        { '@type': 'HowToStep', text: 'Combine ground beef and 1 ½ tablespoons chili powder.' },
+        { '@type': 'HowToStep', text: 'In a large pot, brown ground beef, onion, jalapeno, and garlic. Drain any fat.' },
+        { '@type': 'HowToStep', text: 'Add in remaining ingredients and bring to a boil. Simmer uncovered for 45 to 60 minutes.' },
+      ],
+      nutrition: { '@type': 'NutritionInformation', calories: '395 kcal', proteinContent: '29 g' },
+      recipeCuisine: ['American', 'Tex Mex'],
+      recipeCategory: 'Main Course',
+    },
+  ],
+}
+PAGES['/recipe/chili'] = `<!doctype html><html><head><title>The Best Chili Recipe {EASY} - Spend Less</title>
+<script type="application/ld+json">${JSON.stringify(RECIPE_LD)}</script></head><body><article>
+<h1>The Best Chili Recipe {EASY}</h1>
+<div class="share-bar">PinFacebookTweetEmail</div>
+<p>The Best Chili Recipe is one that is loaded with beef and beans and absolutely full of flavor.</p>
+<p><img src="/img/chili-photo-600x400.png" alt="Chili in a pot"></p>
+<h2>To Thicken Chili</h2><p>Simmer it uncovered, which lets the chili thicken naturally without cornstarch.</p>
+<p><img src="/img/same-a.png" alt="Bowl"></p><p><img src="/img/same-b.png" alt="Bowl again"></p>
+<div class="wprm-recipe-container"><h2>The Best Chili Recipe</h2><ul><li>2 pounds lean ground beef (the site's own card)</li></ul></div>
+</article></body></html>`
+
 beforeAll(async () => {
   site = http.createServer((req, res) => {
     hits.push(req.url!)
@@ -167,7 +206,7 @@ beforeAll(async () => {
     if (p) return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(p)
     if (req.url === '/img/tiny.png') return res.writeHead(200, { 'Content-Type': 'image/png' }).end(ICON_PNG)
     if (req.url === '/img/broken.png') return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<html>Not found</html>')
-    if (req.url!.startsWith('/img/') && !req.url!.includes('missing')) return res.writeHead(200, { 'Content-Type': 'image/png' }).end(PNG)
+    if (req.url!.startsWith('/img/') && !req.url!.includes('missing')) return res.writeHead(200, { 'Content-Type': 'image/png' }).end(pngFor(req.url!.split('?')[0]))
     res.writeHead(404).end('no')
   })
   await new Promise<void>((r) => site.listen(0, '127.0.0.1', () => r()))
@@ -183,6 +222,38 @@ afterAll(async () => {
 })
 
 const md = (id: string) => noteToMarkdown(app.sync.getDoc(noteDocName(id))!)
+
+describe('a recipe page', () => {
+  it('becomes a recipe card from the recipe the page gives search engines – then the article, its pictures once each', async () => {
+    const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/recipe/chili` })
+    const text = md(r.noteIds[0])
+    const xml = getContent(app.sync.getDoc(noteDocName(r.noteIds[0]))!).toString()
+    expect(text).toMatch(/^# The Best Chili Recipe\n/)
+    expect(text).toContain('**Servings:** 8 servings · **Prep:** 20 min · **Cook:** 45 min · **Total:** 1 hr 5 min · #recipe')
+    // every ingredient, as it was (a checklist), every step, numbered
+    expect(text).toContain('## Ingredients')
+    expect(text).toMatch(/- \[ \] 2 pounds lean ground beef\n- \[ \] 2½ tablespoons chili powder divided, or to taste\n- \[ \] 1 \(19 ounce\) can red kidney beans drained and rinsed\n- \[ \] salt and black pepper to taste/)
+    expect(text).toMatch(/## Steps\n\n1\. Combine ground beef and 1 ½ tablespoons chili powder\.\n2\. In a large pot/)
+    expect(text).toContain('Calories: 395 kcal · Protein: 29 g')
+    // then the article: its tips kept, the site's own card and share bar not
+    expect(text).toContain('## From the article')
+    expect(text).toContain('Simmer it uncovered')
+    expect(text).not.toContain("the site's own card")
+    expect(text).not.toContain('PinFacebook')
+    // the photo once (the card's photo and the article's at another size are one picture); the same file twice: once
+    expect((xml.match(/<image /g) ?? []).length).toBe(2)
+    // tagged
+    expect(app.sync.noteMeta().get(r.noteIds[0])?.tags).toContain('recipe')
+  })
+
+  it('the card only, when the article isn’t wanted', async () => {
+    const r = await importWebPages(app.config, app.store, app.ai, app.sync, { url: `${base}/recipe/chili`, recipeArticle: false })
+    const text = md(r.noteIds[0])
+    expect(text).toContain('## Ingredients')
+    expect(text).not.toContain('From the article')
+    expect(text).not.toContain('Simmer it uncovered')
+  })
+})
 
 describe('importing a web page', () => {
   it('keeps the content as it was – without the site’s menus, footer and scripts – with its pictures downloaded', async () => {

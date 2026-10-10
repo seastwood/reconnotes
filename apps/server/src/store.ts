@@ -115,10 +115,12 @@ export class Store {
 
   // --- Version history -------------------------------------------------
 
-  addVersion(docName: string, v: { createdAt: number; title: string; chars: number; label?: string; state: Uint8Array }) {
-    this.db
-      .prepare('INSERT INTO versions (doc_name, created_at, title, chars, label, state) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(docName, v.createdAt, v.title, v.chars, v.label ?? '', Buffer.from(v.state))
+  addVersion(docName: string, v: { createdAt: number; title: string; chars: number; label?: string; state: Uint8Array }): number {
+    return Number(
+      this.db
+        .prepare('INSERT INTO versions (doc_name, created_at, title, chars, label, state) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(docName, v.createdAt, v.title, v.chars, v.label ?? '', Buffer.from(v.state)).lastInsertRowid,
+    )
   }
 
   listVersions(docName: string): VersionRow[] {
