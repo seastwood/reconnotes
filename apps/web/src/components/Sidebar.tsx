@@ -188,6 +188,26 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     return tags.filter(([t]) => top.has(t))
   }, [tags, allTags, view])
 
+  // the folder you're in, in view: when the folders show again (back on a phone) or it changes –
+  // or the folder it's in, when that's folded
+  const folderList = useRef<HTMLElement>(null)
+  const shownFolder = view.kind === 'folder' ? view.folderId : null
+  const searching = Boolean(search.trim())
+  useLayoutEffect(() => {
+    const list = folderList.current
+    if (!list || !shownFolder) return
+    const byId = new Map(ws.folders.map((f) => [f.id, f]))
+    let row: HTMLElement | null = null
+    for (let id: string | null = shownFolder, n = 0; id && !row && n < 50; id = byId.get(id)?.parentId ?? null, n++)
+      row = list.querySelector<HTMLElement>(`[data-folder="${CSS.escape(id)}"]`)
+    if (!row) return
+    const top = row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
+    // already in view: left where it is
+    if (top >= list.scrollTop && top + row.offsetHeight <= list.scrollTop + list.clientHeight) return
+    list.scrollTop = Math.max(0, top - list.clientHeight / 3)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownFolder, searching, ws.loaded])
+
   const toggle = (id: string) => {
     const next = { ...collapsed, [id]: !collapsed[id] }
     setCollapsed(next)
@@ -230,6 +250,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         <li key={f.id}>
           <div
             className={`folder-row${active ? ' active' : ''}${hint ? ` drop-${hint}` : ''}`}
+            data-folder={f.id}
             style={{ paddingLeft: 8 + depth * 16 }}
             draggable={renaming !== f.id}
             onDragStart={(e) => setDrag(e, { kind: 'folder', id: f.id })}
@@ -495,7 +516,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           </ErrorBoundary>
         </div>
       ) : (
-      <nav className="folders">
+      <nav className="folders" ref={folderList}>
         <div className={`folder-row special${view.kind === 'all' ? ' active' : ''}`} onClick={() => onView({ kind: 'all' })}>
           <Inbox size={16} /> <span className="folder-name">All Notes</span>
           <span className="count">{liveCount}</span>
