@@ -5772,7 +5772,11 @@ a.button {
 /* cook mode: a recipe's steps one at a time, big */
 .cook-mode {
   position: fixed;
-  inset: 0;
+  /* on the visible area (iOS may have slid it, with the keyboard up in the note) */
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100%);
   z-index: 300;
   background: var(--bg);
   color: var(--text);
@@ -5877,6 +5881,7 @@ a.button {
   background: rgba(127, 127, 127, 0.14);
 }
 .cook-views button {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -6062,6 +6067,14 @@ a.button {
   .cook-views button {
     padding: 6px 8px;
     font-size: 13px;
+  }
+  .cook-head {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  /* (just the icon: the list of ingredients) */
+  .cook-head button.text .cook-label {
+    display: none;
   }
 }
 .cook-nav {

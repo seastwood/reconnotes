@@ -5,7 +5,7 @@ import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
-import { preferServerOcr, recognizeImageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
+import { preferServerOcr, recognizeImageOnDevice, recognizePageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
 import { scanDocument, scannerAvailable } from '../lib/scanner'
 import { rotateImage, uprightPhoto } from '../lib/rotate'
 
@@ -155,7 +155,8 @@ export function WebImportDialog({
         // read on this device where it can (Apple's text recognition: quick, and very good at print) – already, when it was turned upright
         // (handwriting, when your server's readers are set to go first: read there)
         const device = useDeviceOcr() && !(kind === 'handwriting' && preferServerOcr())
-        const text = device ? (p.text ?? (await recognizeImageOnDevice(p.blob).catch(() => ''))) : ''
+        // (print: down each column, so a card's steps don't run into each other; handwriting: line by line, as when it was straightened)
+        const text = !device ? '' : kind === 'handwriting' ? (p.text ?? (await recognizeImageOnDevice(p.blob).catch(() => ''))) : await recognizePageOnDevice(p.blob).catch(() => p.text ?? '')
         pages.push({ attachmentId, ...(text.trim() ? { text } : {}) })
       }
       await flushUploads()

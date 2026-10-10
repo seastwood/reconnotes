@@ -99,7 +99,7 @@ describe('lines that are only a bullet mark', () => {
   })
 })
 
-import { positionedLinesToMarkdown } from '../src'
+import { positionedLinesToMarkdown, readingOrderText } from '../src'
 
 describe('positioned lines from an on-device recogniser', () => {
   it('rebuilds nesting from where each line starts', () => {
@@ -126,5 +126,36 @@ describe('positioned lines from an on-device recogniser', () => {
         '  - Imagry award',
       ].join('\n'),
     )
+  })
+})
+
+describe('reading order of a printed page', () => {
+  const line = (text: string, x: number, y: number, w = 0.2, h = 0.012) => ({ text, x, y, w, h })
+  it('reads a grid of steps row by row, each step down its column, a table row by row', () => {
+    const found = [
+      // the left column: what you'll need, the ingredients (a table: names | amounts)
+      line('BUST OUT', 0.05, 0.1, 0.1),
+      line('Small pot', 0.05, 0.115, 0.1),
+      line('INGREDIENTS', 0.05, 0.4, 0.1),
+      line('Zucchini', 0.05, 0.415, 0.08),
+      line('1 | 2', 0.17, 0.415, 0.03),
+      line('Lemon', 0.05, 0.43, 0.05),
+      line('1 | 2', 0.17, 0.43, 0.03),
+      line('Sour Cream', 0.05, 0.445, 0.09),
+      line('2 TBSP | 4 TBSP', 0.15, 0.445, 0.05),
+      // steps 1 2 3 across the top, 4 5 6 under them (photos between: blank)
+      ...[1, 2, 3].flatMap((n, i) => [line(`${n} STEP ${n}`, 0.25 + i * 0.25, 0.3), line(`first line of step ${'abcdef'[n - 1]} goes here`, 0.25 + i * 0.25, 0.315), line(`second line of step ${'abcdef'[n - 1]} goes here`, 0.25 + i * 0.25, 0.33)]),
+      ...[4, 5, 6].flatMap((n, i) => [line(`${n} STEP ${n}`, 0.25 + i * 0.25, 0.7), line(`first line of step ${'abcdef'[n - 1]} goes here`, 0.25 + i * 0.25, 0.715), line(`second line of step ${'abcdef'[n - 1]} goes here`, 0.25 + i * 0.25, 0.73)]),
+    ]
+    const text = readingOrderText(found)
+    const at = (s: string) => text.indexOf(s)
+    for (let n = 1; n < 6; n++) expect(at(`second line of step ${'abcdef'[n - 1]}`)).toBeLessThan(at(`${n + 1} STEP ${n + 1}`))
+    expect(at('first line of step a')).toBeLessThan(at('second line of step a'))
+    expect(text).toContain('Zucchini  1 | 2\nLemon  1 | 2\nSour Cream  2 TBSP | 4 TBSP')
+    expect(text).not.toMatch(/first line of step a.*first line of step b/)
+  })
+  it('two columns of a book: the whole first column, then the second', () => {
+    const found = [0, 1, 2].flatMap((i) => [line(`left ${'abc'[i]}`, 0.05, 0.1 + i * 0.015, 0.4), line(`right ${'abc'[i]}`, 0.55, 0.1 + i * 0.015, 0.4)])
+    expect(readingOrderText(found)).toBe('left a\nleft b\nleft c\n\nright a\nright b\nright c')
   })
 })

@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
+import { fixBars, isEquipment, recipeFromPhotos, markUnreadAmounts, splitColumns } from '../src/photoRecipe'
 import { notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
@@ -177,11 +177,35 @@ BUST OUT Large pot, Salt, Pepper
     expect(getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString()).toMatch(/<uncertain>12<\/uncertain>/) // …marked to check
     expect(md).toMatch(/1\. Prep: Halve, peel, and finely chop onion\.\n2\. Cook beef: Heat a large drizzle/)
     expect(md).toContain('## Notes')
-    expect(md).toContain('Amounts for 4 people are also on the card')
+    // (the AI's own note of the other column's amounts isn't used: they're worked out from the ingredients)
+    expect(md).not.toContain('also on the card')
     expect(md).not.toContain('Brown Sugar')
     // the photos: the front as its picture, the back under "The original"
     expect(md).toContain('## The original')
     expect((getContent(app.sync.getDoc(noteDocName(r.noteId))!).toString().match(/<image /g) ?? []).length).toBe(2)
+  })
+
+  it('a card’s table: both columns split, no worked-out times, no gaps or stray allergen notes', async () => {
+    const id = 'photocard0000001'
+    app.store.putAttachment({ id, mime: 'image/png', name: 'back.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    const read = 'LEMON THYME PORK\nPREP: 10 MIN TOTAL: 35 MIN\nINGREDIENTS 2-person | 4-person\nZucchini 112\nJasmine Rice ½ Cup | 1 Cup\nSour Cream\n1 PREP Trim and halve zucchini lengthwise.\nInternal temperature reaches 145 degrees'
+    reply = JSON.stringify({
+      name: 'Lemon Thyme Pork',
+      servings: '2',
+      prep: '10 MIN',
+      cook: '35 MIN',
+      total: '45 MIN',
+      ingredients: ['Zucchini 112', 'Jasmine Rice ½ Cup | 1 Cup', 'Sour Cream'],
+      steps: [{ title: 'Prep', text: 'Trim and halve zucchini lengthwise.' }],
+      notes: ['Amounts for N people are also on the card: 4-person amounts (Zucchini: ?, Jasmine Rice: 1 Cup)', '(Contains: Milk)'],
+    })
+    const r = await recipeFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: id, text: read }], null)
+    const md = text(r.noteId)
+    expect(md).toContain('**Servings:** 2 · **Prep:** 10 MIN · **Total:** 35 MIN · #recipe')
+    expect(md).toContain('- [ ] 1 Zucchini\n- [ ] ½ Cup Jasmine Rice\n- [ ] Sour Cream')
+    expect(md).toContain('Amounts for the other number of people on the card: 2 Zucchini, 1 Cup Jasmine Rice')
+    expect(md).not.toContain('?')
+    expect(md).not.toContain('Contains')
   })
 
   it('marks an amount that wasn’t read, however it’s written', () => {
@@ -192,6 +216,17 @@ BUST OUT Large pot, Salt, Pepper
 })
 
 describe('a meal-kit card’s lines', () => {
+  it('amounts after the name, as in the card’s table, and bars read as letters or ones', () => {
+    expect(splitColumns('Jasmine Rice ½ Cup | 1 Cup')).toEqual({ first: '½ Cup', other: '1 Cup', name: 'Jasmine Rice' })
+    expect(splitColumns('Pork Cutlets* 12 oz | 24 oz')).toEqual({ first: '12 oz', other: '24 oz', name: 'Pork Cutlets*' })
+    expect(splitColumns('Zucchini 112')).toEqual({ first: '1', other: '2', name: 'Zucchini' })
+    expect(splitColumns('Thyme ¼ Oz I¼ Oz')).toEqual({ first: '¼ Oz', other: '¼ Oz', name: 'Thyme' })
+    expect(splitColumns('Lemon 1|2')).toEqual({ first: '1', other: '2', name: 'Lemon' })
+    expect(fixBars('Bake at 425 degrees')).toBe('Bake at 425 degrees')
+    expect(fixBars('Chicken Stock Concentrate 113')).toBe('Chicken Stock Concentrate 113')
+    expect(splitColumns('Sour Cream')).toBeNull()
+  })
+
   it('amounts for 2 and 4 people: the first, the other kept apart', () => {
     expect(splitColumns('2 TBSP | 4 TBSP • Sour Cream')).toEqual({ first: '2 TBSP', other: '4 TBSP', name: 'Sour Cream' })
     expect(splitColumns('12 oz | 24 oz • Pork Cutlets*')).toEqual({ first: '12 oz', other: '24 oz', name: 'Pork Cutlets*' })

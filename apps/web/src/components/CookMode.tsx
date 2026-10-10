@@ -34,6 +34,10 @@ export function CookMode({ title, steps, ingredients, onClose }: { title: string
   const clamp = (i: number) => Math.max(0, Math.min(steps.length - 1, i))
   const go = (d: number) => setAt((i) => clamp(i + d))
 
+  // the keyboard down (it was up if you were typing in the note)
+  useEffect(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  }, [])
   // the screen stays on (where the browser can keep it on), again when you come back to the app
   useEffect(() => {
     type Lock = { release: () => Promise<void> }
@@ -104,8 +108,8 @@ export function CookMode({ title, steps, ingredients, onClose }: { title: string
           </button>
         </div>
         {view === 'step' && (
-          <button className={`text${showIngredients ? ' on' : ''}`} onClick={() => setShowIngredients((v) => !v)} aria-pressed={showIngredients}>
-            <ListChecks size={18} /> Ingredients
+          <button className={`text${showIngredients ? ' on' : ''}`} onClick={() => setShowIngredients((v) => !v)} aria-pressed={showIngredients} aria-label="Ingredients" title="Ingredients">
+            <ListChecks size={18} /> <span className="cook-label">Ingredients</span>
           </button>
         )}
       </header>

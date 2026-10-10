@@ -62,11 +62,11 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 
 - Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
 - name: the recipe's title – the big name on the front (e.g. "Lemon Thyme Pork with Jasmine Rice"), not the time or calorie line.
-- ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2 people | 4 people"), use the first column's amounts, set servings to that number of people, and add a note: "Amounts for N people are also on the card: …" listing them.
+- ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. An ingredient whose amount you can't read: just its name.
 - Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
 - steps: in order, each with its title if it has one ("Cook the beef") and its text.
-- notes: what else matters – what you'll need (pans, tools), what you bring from home (salt, oil, butter), allergens, tips.
-- Times as written ("30 min").
+- notes: what else matters – what you'll need (pans, tools), what you bring from home (salt, oil, butter), tips. Never a "?" or a placeholder: leave out what you can't read.
+- Times as written ("30 min"), only the ones the text gives: don't work out a cook or total time yourself.
 - Reply with the JSON only.
 
 ${text}`
@@ -104,12 +104,27 @@ const AMOUNT = String.raw`(?:\d+(?:[.,/]\d+)?|[½⅓⅔¼¾⅛])(?:\s*[½⅓⅔�
  * An ingredient with amounts for different numbers of people side by side: the first amount, the
  * other(s), and the ingredient. "2 TBSP | 4 TBSP • Sour Cream", "1|2 • Lemon", "Butter (1 TBSP | 2 TBSP)".
  */
-export function splitColumns(t: string): { first: string; other: string; name: string } | null {
+export function splitColumns(raw: string): { first: string; other: string; name: string } | null {
+  const t = fixBars(raw)
   let m = new RegExp(`^(${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\s*[•·:–-]?\\s*(.+)$`, 'i').exec(t)
   if (m) return { first: m[1].trim(), other: m[2].trim(), name: m[3].trim() }
   m = new RegExp(`^(.+?)\\s*\\((${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\)\\s*$`, 'i').exec(t)
   if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/^\(contains:[^)]*\)\s*[•·]?\s*/i, '').trim() }
+  // after the name, as in a card's table: "Jasmine Rice ½ Cup | 1 Cup"
+  m = new RegExp(`^(.*?\\p{L}.*?)\\s+(${AMOUNT})\\s*\\|\\s*(${AMOUNT})\\s*$`, 'iu').exec(t)
+  if (m) return { first: m[2].trim(), other: m[3].trim(), name: m[1].replace(/\s*[•·:–-]\s*$/, '').trim() }
   return null
+}
+
+/**
+ * The bar between two amounts, as text recognition sometimes reads it: an "I" or "l" ("¼ Oz I¼ Oz"),
+ * or a "1" run into the numbers ("Zucchini 112" for 1 | 2 – the second twice the first, as for
+ * twice the people).
+ */
+export function fixBars(t: string): string {
+  return t
+    .replace(new RegExp(`(${AMOUNT})\\s*[Il]\\s*(?=[\\d½⅓⅔¼¾⅛])`, 'gi'), (all, a: string) => (/[\d½⅓⅔¼¾⅛]/.test(a) ? `${a.trim()} | ` : all))
+    .replace(/(^|\s)([1-9])[1lI|]([2-9]|1[02468])(?=\s|$)/g, (all, sp: string, a: string, b: string) => (Number(b) === Number(a) * 2 ? `${sp}${a} | ${b}` : all))
 }
 
 /** Kitchen equipment, not food: a pan, a pot, a baking sheet, paper towels, a bowl… (with no amount). */
@@ -195,23 +210,42 @@ export async function recipeFromPhotos(
     .filter((x) => keep(`${x.title} ${x.text}`.trim()))
     .map((x) => mark(x.title && !x.text.toLowerCase().startsWith(x.title.toLowerCase()) ? `${x.title}: ${x.text}` : x.text || x.title))
   if (!ingredients.length && !steps.length) throw new Error('No ingredients or steps could be found in the photos.')
-  const notes = (s.notes ?? []).map(str).filter(keep).map(mark)
+  const notes = (s.notes ?? [])
+    .map(str)
+    // the other column's amounts are worked out here (not the AI's version, often with gaps: "Zucchini: ?"); an allergen on its own, a gap
+    .filter((n) => !/also on the card|\bfor n people\b/i.test(n) && !/^\(?contains:[^)]*\)?\.?$/i.test(n) && !/:\s*\?|\?\s*(?:oz|,|\))/i.test(n))
+    .filter(keep)
+    .map(mark)
   // what was taken out of the ingredients goes in the notes (unless the AI already said so there)
   const said = notes.join(' ').toLowerCase()
   const needed = kitchen.filter((k) => !said.includes(k.toLowerCase()))
   if (needed.length) notes.unshift(`You’ll need: ${needed.join(', ')}`)
-  if (columns.length && !/also on the card/i.test(said)) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)
+  if (columns.length) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)
   const nutrition = (s.nutrition ?? [])
     .map((x) => (Array.isArray(x) ? ([str(x[0]), str(x[1])] as [string, string]) : (['', ''] as [string, string])))
     .filter(([k, v]) => k && v && readNumbers.has((/\d+(?:\.\d+)?/.exec(v)?.[0] ?? '').replace(',', '.')))
+  // a time whose number wasn't read (worked out by the AI) is left out
+  const time = (v: unknown) => {
+    const t = str(v)
+    const n = /\d+/.exec(t)?.[0]
+    return t && n && readNumbers.has(n) ? t : undefined
+  }
+  // a cook time that's the card's total (the AI moved it, and worked out a total of its own): the total
+  const cookAndTotal = () => {
+    const cook = time(s.cook)
+    const total = time(s.total)
+    const cardTotal = /\btotal\b\W{0,3}(\d+)/i.exec(all)?.[1]
+    if (cook && cardTotal && /\d+/.exec(cook)?.[0] === cardTotal && /\d+/.exec(total ?? '')?.[0] !== cardTotal) return { cook: undefined, total: cook }
+    if (cook && cook === total) return { cook: undefined, total }
+    return { cook, total }
+  }
   const name = str(s.name) && grounded(str(s.name), readWords) >= 0.5 ? str(s.name) : texts[0].split('\n').find((l) => l.trim().length > 3)?.trim().slice(0, 80) || 'Recipe'
   const recipe: Recipe = {
     name,
     description: str(s.description) && grounded(str(s.description), readWords) >= 0.6 ? str(s.description) : undefined,
     servings: str(s.servings) || undefined,
-    prep: str(s.prep) || undefined,
-    cook: str(s.cook) || undefined,
-    total: str(s.total) || undefined,
+    prep: time(s.prep),
+    ...cookAndTotal(),
     ingredients,
     steps: [{ steps }],
     nutrition,

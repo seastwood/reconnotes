@@ -298,3 +298,84 @@ export function positionedLinesToMarkdown(found: { text: string; x: number; y: n
     rows.map((r) => r.text),
   )
 }
+
+type TextBox = { text: string; x: number; y: number; w: number; h: number }
+
+/** The gaps between the boxes along one axis (a stretch no box covers), widest first. */
+function gapsAlong(boxes: TextBox[], start: (b: TextBox) => number, size: (b: TextBox) => number): { at: number; size: number }[] {
+  const spans = boxes.map((b) => [start(b), start(b) + size(b)] as const).sort((a, b) => a[0] - b[0])
+  const out: { at: number; size: number }[] = []
+  let end = spans[0][1]
+  for (const [s, e] of spans.slice(1)) {
+    if (s > end) out.push({ at: (s + end) / 2, size: s - end })
+    end = Math.max(end, e)
+  }
+  return out
+}
+
+const centreY = (b: TextBox) => b.y + b.h / 2
+/** Do two boxes sit on the same line (their middles within half a line of each other)? */
+const sameRow = (a: TextBox, b: TextBox) => Math.abs(centreY(a) - centreY(b)) < Math.min(a.h, b.h) / 2
+
+/**
+ * Is this a table (names on the left, amounts on the right, row by row) rather than columns of text?
+ * The right side's lines are short and have numbers in them, and line up with lines on the left.
+ */
+function isTable(left: TextBox[], right: TextBox[]): boolean {
+  const cells = right.filter((r) => /\d|[½⅓⅔¼¾⅛]/.test(r.text) && r.text.trim().length <= 20)
+  const matched = right.filter((r) => left.some((l) => sameRow(l, r))).length
+  return right.length >= 2 && cells.length >= right.length * 0.6 && matched >= right.length * 0.6
+}
+
+/**
+ * Text found in a photo (each line's box, 0–1 from the top left) in reading order, column by column:
+ * a printed page or card laid out in columns or a grid of steps reads down each column (and row of
+ * the grid) instead of straight across them. Cut where blank space runs right across (between rows
+ * of a grid, under a title), else down (between columns, the leftmost first); a table's rows stay
+ * together ("Zucchini   1 | 2"). Blocks are separated by a blank line.
+ */
+export function readingOrderText(found: TextBox[]): string {
+  const usable = found.filter((l) => l.text.trim())
+  if (!usable.length) return ''
+  const heights = usable.map((b) => b.h).sort((a, b) => a - b)
+  const lineH = heights[Math.floor(heights.length / 2)]
+  const blocks: TextBox[][] = []
+  const cut = (bs: TextBox[], depth: number) => {
+    if (bs.length > 1 && depth < 40) {
+      // a band of space right across, taller than a line: rows (of a grid, or under a title) – the widest
+      const across = gapsAlong(bs, (b) => b.y, (b) => b.h).filter((g) => g.size >= lineH * 1.2)
+      if (across.length) {
+        const g = across.reduce((a, b) => (b.size > a.size ? b : a))
+        cut(bs.filter((b) => centreY(b) < g.at), depth + 1)
+        cut(bs.filter((b) => centreY(b) >= g.at), depth + 1)
+        return
+      }
+      // a gap down the whole of it: columns, the leftmost first (unless it's a table's)
+      const down = gapsAlong(bs, (b) => b.x, (b) => b.w)
+        .filter((g) => g.size >= 0.012)
+        .sort((a, b) => a.at - b.at)
+      for (const g of down) {
+        const left = bs.filter((b) => b.x + b.w / 2 < g.at)
+        const right = bs.filter((b) => b.x + b.w / 2 >= g.at)
+        if (isTable(left, right)) continue
+        cut(left, depth + 1)
+        cut(right, depth + 1)
+        return
+      }
+    }
+    blocks.push(bs)
+  }
+  cut(usable, 0)
+  return blocks
+    .map((bs) => {
+      // a block's lines, top to bottom; pieces of one line (a table's cells) joined left to right
+      const rows: TextBox[][] = []
+      for (const b of [...bs].sort((a, b) => centreY(a) - centreY(b))) {
+        const row = rows[rows.length - 1]
+        if (row && row.some((r) => sameRow(r, b))) row.push(b)
+        else rows.push([b])
+      }
+      return rows.map((r) => r.sort((a, b) => a.x - b.x).map((b) => b.text.trim()).join('  ')).join('\n')
+    })
+    .join('\n\n')
+}

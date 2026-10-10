@@ -3,6 +3,7 @@ import {
   linesToMarkdown,
   type PictureWords,
   positionedLinesToMarkdown,
+  readingOrderText,
   recognitionStyle,
   segmentLines,
   strokePath,
@@ -120,6 +121,14 @@ export async function recognizeDrawingOnDevice(strokes: Stroke[]): Promise<strin
 export async function recognizeImageOnDevice(blob: Blob): Promise<string> {
   const base64 = await blobToBase64(blob)
   return positionedLinesToMarkdown(await recognize(base64))
+}
+
+/**
+ * A photographed page of print (a recipe card, a book, a guide) read on the device, in reading order:
+ * down each column, a grid of steps row by row, a table's rows kept together.
+ */
+export async function recognizePageOnDevice(blob: Blob): Promise<string> {
+  return readingOrderText(await recognize(await blobToBase64(blob)))
 }
 
 /**
