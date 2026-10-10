@@ -193,61 +193,71 @@ export function CookMode({ title, steps, ingredients, onClose }: { title: string
 }
 
 /**
- * Every step a tile, reading across (1 2 3, then 4 5 6…), each in the shortest column so far
- * (masonry): as many columns as fit, scrolling down for more.
+ * Every step a tile, in a grid that reads across row by row (1 2 3, then 4 5 6…): every row the
+ * same height – the height that fits the longest step, where that isn't too tall; a longer one
+ * scrolls inside its tile (and opens big when tapped). As many columns as fit, scrolling for more.
  */
 function StepTiles({ steps, done, onToggleDone, onOpen }: { steps: string[]; done: Set<number>; onToggleDone: (i: number) => void; onOpen: (i: number) => void }) {
   const box = useRef<HTMLDivElement>(null)
-  const [cols, setCols] = useState(2)
+  const [rowHeight, setRowHeight] = useState<number | null>(null)
+  const [clipped, setClipped] = useState<Set<number>>(new Set())
+  // the height every step's text needs, measured as laid out (again when the screen turns)
   useLayoutEffect(() => {
     const el = box.current
     if (!el) return
-    const fit = () => setCols(Math.max(1, Math.min(4, Math.floor((el.clientWidth - 16) / 240))))
+    const fit = () => {
+      const tiles = [...el.querySelectorAll<HTMLElement>('.cook-tile')]
+      if (!tiles.length) return
+      const needs = tiles
+        .map((t) => {
+          const head = t.querySelector<HTMLElement>('.cook-tile-head')?.offsetHeight ?? 32
+          const text = t.querySelector<HTMLElement>('p')?.scrollHeight ?? 0
+          return head + text + 40
+        })
+        .sort((a, b) => b - a)
+      // one step far longer than the rest doesn't make every row as tall: it scrolls in its tile
+      const need = needs.length > 1 && needs[0] > needs[1] * 1.4 ? needs[1] : needs[0]
+      // and never taller than about 40% of the screen
+      setRowHeight(Math.max(150, Math.min(need, Math.round(window.innerHeight * 0.4))))
+    }
     fit()
     const watch = new ResizeObserver(fit)
     watch.observe(el)
     return () => watch.disconnect()
-  }, [])
-  // each step into the column that's shortest so far (masonry): the numbers still read across, row
-  // by row, and a long step doesn't leave a hole under its neighbours
-  const width = (box.current?.clientWidth ?? 800) / cols
-  const perLine = Math.max(16, Math.floor((width - 40) / 9.5))
-  const tall = (t: string) => 64 + Math.ceil(t.length / perLine) * 26
-  const columns: number[][] = Array.from({ length: cols }, () => [])
-  const heights = Array.from({ length: cols }, () => 0)
-  steps.forEach((t, i) => {
-    const c = heights.indexOf(Math.min(...heights))
-    columns[c].push(i)
-    heights[c] += tall(t) + 14
-  })
+  }, [steps])
+  // which tiles have more than shows (a hint to tap for all of it)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || rowHeight === null) return
+    const more = new Set<number>()
+    el.querySelectorAll<HTMLElement>('.cook-tile p').forEach((p, i) => p.scrollHeight > p.clientHeight + 2 && more.add(i))
+    setClipped(more)
+  }, [rowHeight, steps])
   return (
-    <div className="cook-tiles" ref={box}>
-      {columns.map((col, c) => (
-        <div key={c} className="cook-col">
-          {col.map((i) => (
-            <div
-              key={i}
-              className={`cook-tile${done.has(i) ? ' done' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpen(i)}
-              onKeyDown={(e) => (e.key === 'Enter' ? onOpen(i) : undefined)}
-              aria-label={`Step ${i + 1}: ${steps[i]}`}
+    <div className="cook-tiles" ref={box} style={rowHeight ? ({ '--cook-row': `${rowHeight}px` } as React.CSSProperties) : undefined}>
+      {steps.map((t, i) => (
+        <div
+          key={i}
+          className={`cook-tile${done.has(i) ? ' done' : ''}${clipped.has(i) ? ' clipped' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpen(i)}
+          onKeyDown={(e) => (e.key === 'Enter' ? onOpen(i) : undefined)}
+          aria-label={`Step ${i + 1}: ${t}`}
+        >
+          <div className="cook-tile-head">
+            <span className="cook-num">{i + 1}</span>
+            <button
+              className={`cook-done${done.has(i) ? ' on' : ''}`}
+              onClick={(e) => (e.stopPropagation(), onToggleDone(i))}
+              aria-label={done.has(i) ? `Step ${i + 1} done – undo` : `Mark step ${i + 1} done`}
+              aria-pressed={done.has(i)}
             >
-              <div className="cook-tile-head">
-                <span className="cook-num">{i + 1}</span>
-                <button
-                  className={`cook-done${done.has(i) ? ' on' : ''}`}
-                  onClick={(e) => (e.stopPropagation(), onToggleDone(i))}
-                  aria-label={done.has(i) ? `Step ${i + 1} done – undo` : `Mark step ${i + 1} done`}
-                  aria-pressed={done.has(i)}
-                >
-                  <Check size={16} />
-                </button>
-              </div>
-              <p>{steps[i]}</p>
-            </div>
-          ))}
+              <Check size={16} />
+            </button>
+          </div>
+          <p>{t}</p>
+          {clipped.has(i) && <span className="cook-more">Tap to read all</span>}
         </div>
       ))}
     </div>

@@ -5923,17 +5923,12 @@ a.button {
 .cook-tiles {
   flex: 1;
   overflow-y: auto;
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-auto-rows: var(--cook-row, 200px);
+  align-content: start;
   gap: 14px;
   padding: 16px;
-}
-.cook-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 .cook-tile {
   background: var(--paper);
@@ -5949,10 +5944,26 @@ a.button {
 .cook-tile:active {
   transform: scale(0.98);
 }
+.cook-tile {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .cook-tile p {
   margin: 8px 0 0;
   font-size: 18px;
   line-height: 1.45;
+  flex: 1;
+  min-height: 0;
+  /* longer than the row: scrolls in the tile (or tap it to read it big) */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.cook-more {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
 }
 .cook-tile.done {
   opacity: 0.5;
