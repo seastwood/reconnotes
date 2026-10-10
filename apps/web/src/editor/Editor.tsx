@@ -311,9 +311,9 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             onShareLink={isSyncConfigured() ? () => setShareOpen(true) : undefined}
             onPrint={() => printNote(editor, doc, noteId)}
           />
+          {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} />}
           <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
-            {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
             {settingUp && (
               <MeetingSetup
                 noteId={noteId}
