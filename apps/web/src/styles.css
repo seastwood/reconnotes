@@ -908,16 +908,13 @@ button.text {
 .note-path {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px 4px 14px;
+  padding: 4px 4px 4px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   color: var(--muted);
   font-size: 13px;
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
   max-height: 44px;
+  overflow: hidden;
   transition:
     max-height 0.2s ease,
     padding 0.2s ease,
@@ -930,16 +927,34 @@ button.text {
   padding-bottom: 0;
   border-bottom-width: 0;
   opacity: 0;
-  overflow: hidden;
 }
-.note-path::-webkit-scrollbar {
+/* the crumbs: in one line, never squeezed into each other – scrolled sideways when they don't fit */
+.note-path-crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* fades at the edges where there's more */
+  mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+}
+.note-path-crumbs::-webkit-scrollbar {
   display: none;
+}
+.note-path-crumbs > *,
+.note-path-part > * {
+  flex: none;
 }
 .note-path-part {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  min-width: 0;
+  flex: none;
 }
 .note-path button,
 .note-path-here {
@@ -949,14 +964,20 @@ button.text {
 }
 .note-path-here {
   color: var(--text);
-  min-width: 0;
-  padding: 2px 4px;
+  padding: 2px 6px 2px 4px;
 }
+/* a long name: cut short (all of it on a long press / hover) */
 .note-path-name {
-  max-width: 220px;
+  display: inline-block;
+  max-width: 160px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+@media (max-width: 699px) {
+  .note-path-name {
+    max-width: 110px;
+  }
 }
 .note-path-sep {
   flex: none;
@@ -980,8 +1001,8 @@ button.text {
   background: var(--line);
 }
 .note-path .note-path-fold {
-  margin-left: auto;
   flex: none;
+  margin-left: 2px;
 }
 /* folded: a small tab hanging under the buttons, over the note */
 .note-path-hang {

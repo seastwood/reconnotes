@@ -53,11 +53,29 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => scroller.removeEventListener('scroll', onScroll)
   }, [open, noteId])
+  // the crumbs scroll sideways when they don't fit: scrolled to the end – this note – to start
+  const crumbs = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = crumbs.current
+    if (!el) return
+    const toEnd = () => (el.scrollLeft = el.scrollWidth)
+    toEnd()
+    // (and again once laid out, or the screen turns)
+    const watch = new ResizeObserver(toEnd)
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [open, noteId, folderId, title, path])
   const sep = <ChevronRight size={12} className="note-path-sep" aria-hidden />
   if (!open)
     return (
       <div className="note-path-hang">
-        <button className="note-path-tab" title="Show where this note is" aria-label="Show where this note is" aria-expanded={false} onClick={() => setOpen(true)}>
+        <button
+          className="note-path-tab"
+          title="Show where this note is"
+          aria-label="Show where this note is"
+          aria-expanded={false}
+          onClick={() => setOpen(true)}
+        >
           <Folder size={15} aria-hidden />
           <ChevronDown size={14} aria-hidden />
         </button>
@@ -65,30 +83,35 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
     )
   return (
     <nav ref={bar} className={`note-path${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
-      <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
-        <Inbox size={13} aria-hidden /> All Notes
-      </button>
-      {sep}
-      {path.length ? (
-        path.map((f) => (
-          <span key={f.id} className="note-path-part">
-            <button title={`Show the folder “${f.name}”`} onClick={() => onShow({ kind: 'folder', folderId: f.id })}>
-              <Folder size={13} aria-hidden /> <span className="note-path-name">{f.name}</span>
+      <div className="note-path-crumbs" ref={crumbs}>
+        <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
+          <Inbox size={13} aria-hidden /> All Notes
+        </button>
+        {sep}
+        {path.length ? (
+          path.map((f) => (
+            <span key={f.id} className="note-path-part">
+              <button title={`Show the folder “${f.name}”`} onClick={() => onShow({ kind: 'folder', folderId: f.id })}>
+                <Folder size={13} aria-hidden />{' '}
+                <span className="note-path-name" title={f.name}>
+                  {f.name}
+                </span>
+              </button>
+              {sep}
+            </span>
+          ))
+        ) : (
+          <span className="note-path-part">
+            <button title="Show the notes in no folder" onClick={() => onShow({ kind: 'unfiled' })}>
+              <FolderMinus size={13} aria-hidden /> Not in a folder
             </button>
             {sep}
           </span>
-        ))
-      ) : (
-        <span className="note-path-part">
-          <button title="Show the notes in no folder" onClick={() => onShow({ kind: 'unfiled' })}>
-            <FolderMinus size={13} aria-hidden /> Not in a folder
-          </button>
-          {sep}
+        )}
+        <span className="note-path-here" aria-current="page">
+          <FileText size={13} aria-hidden /> <span className="note-path-name">{title}</span>
         </span>
-      )}
-      <span className="note-path-here" aria-current="page">
-        <FileText size={13} aria-hidden /> <span className="note-path-name">{title}</span>
-      </span>
+      </div>
       <button className="note-path-fold" title="Hide the path" aria-label="Hide the path" aria-expanded onClick={() => setOpen(false)}>
         <ChevronUp size={14} aria-hidden />
       </button>
