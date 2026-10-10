@@ -1,4 +1,8 @@
-import { errorText } from '../lib/jobs'
+import { errorText, runJob } from '../lib/jobs'
+import { addToShoppingList, ingredientsOf, isRecipeNote, scaleRecipe, servingsOf, stepsOf } from '../lib/recipe'
+import { CookMode } from '../components/CookMode'
+import { showActionToast, showToast } from '../lib/toast'
+import { apiUrl, authHeaders } from '../lib/settings'
 import { canIndentAt, indentAt } from './indent'
 import { useEffect, useRef, useState } from 'react'
 import { Popover } from '../components/Popover'
@@ -6,6 +10,10 @@ import { useEditorState, type Editor } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import {
+  ChefHat,
+  Eraser,
+  Scale,
+  ShoppingCart,
   BookOpen,
   Bold,
   Camera,
@@ -246,6 +254,46 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   }
   const source = saved ?? (menu === 'more' ? fromLine() : null)
 
+  // a recipe note (an "Ingredients" heading): its tools in the ⋯ menu
+  const [cooking, setCooking] = useState<{ steps: string[]; ingredients: string[] } | null>(null)
+  const recipe = menu === 'more' && isRecipeNote(editor)
+  const title = (meta?.get('title') as string) ?? ''
+  const scale = () => {
+    const now = servingsOf(editor)
+    const answer = window.prompt(now ? `How many servings? (the recipe makes ${now})` : 'Scale by how much? (2 doubles it, 0.5 halves it)', now ? String(now) : '2')
+    if (answer === null) return
+    const n = Number(answer.replace(',', '.'))
+    if (!(n > 0) || n > 1000) return showToast('A number, please')
+    if (now) scaleRecipe(editor, now, n)
+    else scaleRecipe(editor, 1, n)
+    showToast(now ? `Scaled to ${n} servings` : `Scaled ×${n}`)
+  }
+  const shop = () =>
+    run('Adding to the shopping list…', async () => {
+      const r = await addToShoppingList(editor, title)
+      showActionToast(`Added ${r.added} ingredient${r.added === 1 ? '' : 's'} to your shopping list`, 'Open', () => onOpenNote(r.noteId))
+    })
+  const cook = () => {
+    const steps = stepsOf(editor).map((s) => s.text)
+    if (!steps.length) return showToast('No numbered steps found under a “Steps” or “Instructions” heading')
+    setCooking({ steps, ingredients: ingredientsOf(editor).map((i) => i.text) })
+  }
+  // Tidy with AI: the website's leftovers taken out (on the server: tidy.ts) – and put back with Undo
+  const tidy = () =>
+    run('Tidying…', async () => {
+      const j = await runJob({ kind: 'page-tidy', noteId, title: 'Tidy with AI', input: {} })
+      if (j.status === 'failed') throw new Error(j.error ?? 'Couldn’t tidy it')
+      const r = (j.result ?? {}) as { removed?: string[]; versionId?: number | null; refused?: string }
+      if (r.refused) return showToast(r.refused)
+      const n = r.removed?.length ?? 0
+      if (!n || !r.versionId) return showToast('Nothing needed taking out')
+      showToast(
+        `Took out ${n} block${n === 1 ? '' : 's'} of website leftovers`,
+        () => void fetch(apiUrl(`/api/notes/${noteId}/versions/${r.versionId}/restore`), { method: 'POST', headers: authHeaders() }).catch(() => showToast('Couldn’t put it back')),
+        10_000,
+      )
+    })
+
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label)
     setError(null)
@@ -279,6 +327,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
 
   return (
     <div className="editor-toolbar" onPointerDown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}>
+      {cooking && <CookMode title={title} steps={cooking.steps} ingredients={cooking.ingredients} onClose={() => setCooking(null)} />}
       {onTogglePanels && (
         <button
           className="tb"
@@ -509,9 +558,29 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor, noteId)))} title="Fix spelling, grammar and clarity of the selected text">
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}
             </button>
+            {source && (
+              <button onClick={() => (setMenu(null), void tidy())} title="Take out the website’s leftovers – share buttons, ratings, ads, newsletter boxes. Nothing is rewritten; Undo puts it back.">
+                <Eraser size={16} /> Tidy with AI
+              </button>
+            )}
             <button onClick={() => (setMenu(null), openRefs(noteId))} title="The notes Ask reads with this one (the documents it refers to) – add, import, remove">
               <BookOpen size={16} /> References…{refCount > 0 && <span className="menu-shortcut">{refCount}</span>}
             </button>
+            {recipe && (
+              <>
+                <div className="menu-sep" />
+                <div className="menu-label">Recipe</div>
+                <button onClick={() => (setMenu(null), cook())}>
+                  <ChefHat size={16} /> Cook mode
+                </button>
+                <button onClick={() => (setMenu(null), scale())}>
+                  <Scale size={16} /> Scale servings…
+                </button>
+                <button onClick={() => (setMenu(null), void shop())}>
+                  <ShoppingCart size={16} /> Add ingredients to shopping list
+                </button>
+              </>
+            )}
             <div className="menu-sep" />
             {onLinkNote && (
               <button

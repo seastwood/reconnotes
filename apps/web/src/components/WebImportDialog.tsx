@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Globe, Loader2 } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
+import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
 
@@ -18,6 +19,11 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
   const [maxPages, setMaxPages] = useState(50)
   /** a PDF: a note per chapter (in a folder) instead of one note */
   const [splitPdf, setSplitPdf] = useState(false)
+  // remembered from last time: tidy with AI, and a recipe page's article under its card
+  const [tidy, setTidyState] = useState(() => safeLocalGet<boolean>('reconnotes.importTidy', false))
+  const setTidy = (v: boolean) => (setTidyState(v), safeLocalSet('reconnotes.importTidy', v))
+  const [recipeArticle, setRecipeArticleState] = useState(() => safeLocalGet<boolean>('reconnotes.importRecipeArticle', true))
+  const setRecipeArticle = (v: boolean) => (setRecipeArticleState(v), safeLocalSet('reconnotes.importRecipeArticle', v))
   const [jobId, setJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const job = useJobs((s) => s.jobs.find((j) => j.id === jobId))
@@ -54,7 +60,7 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
       return setError('That doesn’t look like a web address.')
     }
     try {
-      const j = await submitJob({ kind: 'web-import', title: u.replace(/^https?:\/\//, '').slice(0, 120), input: { url: u, follow, maxPages: follow ? maxPages : 1, folderId, splitPdf } })
+      const j = await submitJob({ kind: 'web-import', title: u.replace(/^https?:\/\//, '').slice(0, 120), input: { url: u, follow, maxPages: follow ? maxPages : 1, folderId, splitPdf, tidy, recipeArticle } })
       setJobId(j.id)
     } catch (e) {
       setError((e as Error).message)
@@ -159,6 +165,19 @@ export function WebImportDialog({ folderId, onClose, onOpen, initialUrl = '' }: 
               <input type="checkbox" checked={splitPdf} onChange={(e) => setSplitPdf(e.target.checked)} /> Split a PDF into a note per chapter
             </label>
             {splitPdf && <p className="hint">Each chapter becomes its own note, in a new folder with a contents note – handy for very long manuals.</p>}
+            <label className="check">
+              <input type="checkbox" checked={tidy} onChange={(e) => setTidy(e.target.checked)} /> Tidy with AI
+            </label>
+            {tidy && (
+              <p className="hint">
+                Takes out the website’s leftovers – share buttons, ratings, ads, newsletter boxes, “you’ll also love” lists. It never rewrites anything, and never
+                removes steps, ingredients or amounts; the untidied version stays in the note’s history.
+              </p>
+            )}
+            <label className="check">
+              <input type="checkbox" checked={recipeArticle} onChange={(e) => setRecipeArticle(e.target.checked)} /> Recipe pages: keep the rest of the article
+            </label>
+            <p className="hint">A recipe page becomes a recipe card – ingredients as a checklist, numbered steps.{recipeArticle ? ' The article’s tips follow it.' : ' Just the card.'}</p>
             <div className="row">
               <button type="button" onClick={onClose}>
                 Cancel
