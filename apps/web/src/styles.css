@@ -1828,6 +1828,7 @@ button.link {
   width: 100%;
 }
 .save-note-dialog .move-list {
+  position: relative;
   max-height: 45vh;
   overflow-y: auto;
   border: 1px solid var(--line);

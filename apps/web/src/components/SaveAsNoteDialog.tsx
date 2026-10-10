@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, FilePlus2, Folder, Inbox, Sparkles, X } from 'lucide-react'
 import { buildTree, type TreeNode } from '@reconnotes/core'
 import { useWorkspace } from '../lib/workspace'
@@ -27,6 +27,15 @@ export function SaveAsNoteDialog({
   const [folder, setFolder] = useState<string | null>(suggested)
   const [title, setTitle] = useState(() => turns[0]?.question.replace(/\s+/g, ' ').trim().slice(0, 120) ?? '')
   const [busy, setBusy] = useState(false)
+  // the suggested folder in view when the dialog opens (a long list of folders)
+  const list = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = list.current
+    const row = el?.querySelector<HTMLElement>('.move-row.chosen')
+    if (!el || !row) return
+    el.scrollTop = Math.max(0, row.offsetTop - el.clientHeight / 2 + row.offsetHeight / 2)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const save = async () => {
     setBusy(true)
@@ -82,7 +91,7 @@ export function SaveAsNoteDialog({
             'Pick where it goes:'
           )}
         </p>
-        <div className="move-list">
+        <div className="move-list" ref={list}>
           {row(null, 'Not in a folder', 0, <Inbox size={16} />)}
           {render(tree, 0)}
         </div>
