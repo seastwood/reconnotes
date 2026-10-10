@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, ChevronUp, FileText, Folder, FolderMinus, Inbox } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { useWorkspace } from '../lib/workspace'
 import type { View } from './Sidebar'
@@ -10,7 +10,8 @@ const OPEN = 'reconnotes.notePathOpen'
  * Where a note is, as breadcrumbs – All Notes › Work › Meetings › this note – in a bar under the
  * note's buttons: a note opened from search, Ask or a link otherwise doesn't say. Tapping a crumb
  * shows that folder (or all notes), with this note in its list. The bar folds away to a small tab
- * (remembered for every note).
+ * (remembered for every note); open, it slides away while you scroll down the note and comes
+ * back when you scroll up, or reach the top.
  */
 export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderId: string | null; onShow: (view: View) => void }) {
   const ws = useWorkspace()
@@ -30,6 +31,28 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
     setOpenState(v)
     safeLocalSet(OPEN, v)
   }
+  // scrolled down the note: out of the way
+  const [away, setAway] = useState(false)
+  const bar = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const scroller = bar.current?.parentElement?.querySelector<HTMLElement>(':scope > .editor-scroll')
+    if (!scroller) return
+    let last = scroller.scrollTop
+    // how far it has gone the same way: a small jiggle doesn't flip it
+    let run = 0
+    const onScroll = () => {
+      const now = scroller.scrollTop
+      const d = now - last
+      last = now
+      if (now < 24) return setAway(false)
+      run = Math.sign(d) === Math.sign(run) ? run + d : d
+      if (run > 40) setAway(true)
+      else if (run < -40) setAway(false)
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [open, noteId])
   const sep = <ChevronRight size={12} className="note-path-sep" aria-hidden />
   if (!open)
     return (
@@ -41,7 +64,7 @@ export function NotePath({ noteId, folderId, onShow }: { noteId: string; folderI
       </div>
     )
   return (
-    <nav className="note-path" aria-label="Where this note is">
+    <nav ref={bar} className={`note-path${away ? ' away' : ''}`} aria-label="Where this note is" aria-hidden={away || undefined} inert={away || undefined}>
       <button title="Show all notes" onClick={() => onShow({ kind: 'all' })}>
         <Inbox size={13} aria-hidden /> All Notes
       </button>

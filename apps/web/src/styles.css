@@ -917,6 +917,20 @@ button.text {
   white-space: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
+  max-height: 44px;
+  transition:
+    max-height 0.2s ease,
+    padding 0.2s ease,
+    opacity 0.15s ease;
+}
+/* scrolled down the note: slid away */
+.note-path.away {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 .note-path::-webkit-scrollbar {
   display: none;
