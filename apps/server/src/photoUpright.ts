@@ -3,7 +3,7 @@ import { newId } from '@reconnotes/core'
 import type { Store } from './store'
 import type { Ai } from './ai'
 import { reportProgress } from './jobs'
-import { rotatePicture, textRunsSideways } from './images'
+import { rotatePicture, textRunsSideways, textUpsideDown, upAndDown } from './images'
 import type { PhotoPage } from './photoRecipe'
 
 /**
@@ -12,9 +12,11 @@ import type { PhotoPage } from './photoRecipe'
  *
  * On the iPhone and iPad, photos are straightened before they're sent (Apple's text recognition says
  * which way the words run). In a browser nothing can tell, so the server does it for the photos it
- * reads itself: whether the text runs up or down the page (textRunsSideways, from the letters'
- * shapes), then which way round it reads – a few lines read each way, the one that reads as words
- * kept. The turned photo becomes the page's picture (in the note too); the original is left as it
+ * reads itself: whether the text runs up or down the page (textRunsSideways), then which way round
+ * – both from the letters' shapes: in print, far more letters reach up above a line than hang below
+ * it (upAndDown); only when that can't tell are a few lines read each way round by the AI (which can
+ * read upside-down print, so it's the fallback, not the judge). A level page upside down is turned
+ * too. The turned photo becomes the page's picture (in the note too); the original is left as it
  * was. A photo already the right way up, or that can't be told, is read as it is.
  */
 
@@ -35,19 +37,32 @@ export async function uprightPages(store: Store, ai: Ai, pages: PhotoPage[]): Pr
       continue
     }
     const data = fs.readFileSync(store.blobPath(att.id))
-    if (!textRunsSideways(data, att.mime)) {
-      out.push(p)
-      continue
+    const sideways = textRunsSideways(data, att.mime)
+    let best: { data: Buffer; mime: string } | null = null
+    if (sideways) {
+      reportProgress(`Turning photo ${k + 1} the right way up…`)
+      // which way round: from the letters (more reach up above a line than hang below it)…
+      const cw = await rotatePicture(data, att.mime, 1)
+      const c = cw ? upAndDown(cw.data, cw.mime) : null
+      if (cw && c && c.up > c.down * 1.15) best = cw
+      else if (c && c.down > c.up * 1.15) best = await rotatePicture(data, att.mime, 3)
+      else {
+        // …or, when they can't tell, a few lines read each way round
+        let score = -1
+        for (const q of [1, 3]) {
+          const turned = q === 1 ? cw : await rotatePicture(data, att.mime, q)
+          if (!turned) continue
+          const sc = readability(await ai.readSnippet(turned.data, turned.mime).catch(() => ''))
+          if (sc > score) (score = sc), (best = turned)
+        }
+        if (score < 3) best = null
+      }
+    } else if (textUpsideDown(data, att.mime)) {
+      // level, but upside down
+      reportProgress(`Turning photo ${k + 1} the right way up…`)
+      best = await rotatePicture(data, att.mime, 2)
     }
-    reportProgress(`Turning photo ${k + 1} the right way up…`)
-    let best: { data: Buffer; mime: string; score: number } | null = null
-    for (const q of [1, 3]) {
-      const turned = await rotatePicture(data, att.mime, q)
-      if (!turned) continue
-      const score = readability(await ai.readSnippet(turned.data, turned.mime).catch(() => ''))
-      if (!best || score > best.score) best = { ...turned, score }
-    }
-    if (!best || best.score < 3) {
+    if (!best) {
       out.push(p)
       continue
     }

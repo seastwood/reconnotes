@@ -350,6 +350,45 @@ export function textRunsSideways(data: Buffer, mime: string): boolean | null {
   return null
 }
 
+/**
+ * Is the (level) text in this photo upside down? From the letters' shapes: in Latin print far more
+ * letters reach up above the others (b d f h k l t, capitals, digits) than hang below (g j p q y),
+ * so in each line, whichever side more letters stick out of is the top. null: can't tell.
+ */
+export function textUpsideDown(data: Buffer, mime: string, margin = 1.4): boolean | null {
+  const c = upAndDown(data, mime)
+  if (!c || c.up + c.down < 30) return null
+  if (c.down > c.up * margin) return true
+  if (c.up > c.down * margin) return false
+  return null
+}
+
+/** How many letters reach up above their line, and how many hang below it. */
+export function upAndDown(data: Buffer, mime: string): { up: number; down: number } | null {
+  const img = decodeImage(data, mime, 1600)
+  if (!img) return null
+  const boxes = inkBoxes(binarize(img))
+    .filter((b) => b.box.w >= 2 && b.box.h >= 4 && b.box.w <= 50 && b.box.h <= 50)
+  if (boxes.length < 60) return null
+  const byId = new Map(boxes.map((b) => [b.id, b.box]))
+  let up = 0
+  let down = 0
+  for (const line of segmentBoxes(boxes)) {
+    const parts = line.allIds.map((id) => byId.get(id)!).filter(Boolean)
+    if (parts.length < 6) continue
+    const med = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+    const top = med(parts.map((b) => b.y))
+    const bottom = med(parts.map((b) => b.y + b.h))
+    const h = bottom - top
+    if (h < 3) continue
+    for (const b of parts) {
+      if (b.y < top - h * 0.3 && b.y + b.h > top + h * 0.5) up++
+      if (b.y + b.h > bottom + h * 0.3 && b.y < bottom - h * 0.5) down++
+    }
+  }
+  return { up, down }
+}
+
 /** The picture turned clockwise by quarter turns, as a JPEG (or a PNG, without the canvas library), at most `max` px. */
 export async function rotatePicture(data: Buffer, mime: string, quarters: number, max = 2400): Promise<{ data: Buffer; mime: string } | null> {
   const q = ((quarters % 4) + 4) % 4

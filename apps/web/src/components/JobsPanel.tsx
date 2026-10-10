@@ -40,6 +40,7 @@ import {
   pauseAllJobs,
   pauseJob,
   productNote,
+  MAKES_A_NOTE,
   redoJob,
   removeJobResult,
   resumeJob,
@@ -293,6 +294,14 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
         <ChevronDown size={15} className="job-chevron" />
       </button>
 
+      {/* a finished job's note, a tap away */}
+      {!open && j.status === 'done' && product && productExists && (
+        <div className="job-quick">
+          <button className="text link" onClick={() => onOpenNote(product)} title="Open the note">
+            <FileText size={14} /> Open
+          </button>
+        </div>
+      )}
       {/* the quick actions, without opening the job */}
       {!open && (j.status === 'running' || j.status === 'queued' || j.status === 'paused') && (
         <div className="job-quick">
@@ -330,16 +339,16 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                 </dd>
               </>
             )}
-            {j.kind === 'compile' && product && (
+            {MAKES_A_NOTE.has(j.kind) && product && (
               <>
                 <dt>Made</dt>
                 <dd>
                   {productExists ? (
                     <button className="text link" onClick={() => onOpenNote(product)}>
-                      Open the compiled note
+                      {j.kind === 'compile' ? 'Open the compiled note' : ws.notes.find((n) => n.id === product)?.title || (typeof j.result?.title === 'string' ? j.result.title : 'Open the note')}
                     </button>
                   ) : (
-                    <span className="muted">The compiled note was deleted</span>
+                    <span className="muted">{j.kind === 'compile' ? 'The compiled note was deleted' : 'The note was deleted'}</span>
                   )}
                 </dd>
               </>
@@ -522,7 +531,7 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
                 </button>
               </>
             )}
-            {j.status === 'done' && product && productExists && j.kind !== 'compile' && (
+            {j.status === 'done' && product && productExists && !MAKES_A_NOTE.has(j.kind) && (
               <button onClick={() => onOpenNote(product)}>
                 <FileText size={14} /> Open note
               </button>

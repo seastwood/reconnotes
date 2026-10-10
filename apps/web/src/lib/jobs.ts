@@ -283,9 +283,14 @@ export function setServerPush(on: boolean) {
 export const navigateToNote = (id: string) => nav?.openNote(id)
 
 /** What a job made, if it's a note to open. */
+/** Jobs that make a note of their own (rather than adding to one): compiled, imported, from photos. */
+export const MAKES_A_NOTE = new Set(['compile', 'web-import', 'recipe-photos', 'photo-pages'])
+
+/** The note a job made or changed (to open from the Jobs list). */
 export function productNote(j: Job): string | null {
   if (j.result?.removed) return null
-  const id = (j.kind === 'compile' ? j.result?.noteId : j.noteId) as string | null | undefined
+  const made = typeof j.result?.noteId === 'string' ? j.result.noteId : null
+  const id = MAKES_A_NOTE.has(j.kind) ? made : (j.noteId ?? made)
   return id ?? null
 }
 
