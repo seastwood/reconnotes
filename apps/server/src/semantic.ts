@@ -103,6 +103,12 @@ export class MeaningIndex {
         vec BLOB NOT NULL,
         PRIMARY KEY (note_id, chunk)
       );
+      -- notes looked at with this model that had nothing to index (empty): not asked for again
+      CREATE TABLE IF NOT EXISTS note_vectors_none (
+        note_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        PRIMARY KEY (note_id, model)
+      );
     `)
   }
 
@@ -131,6 +137,8 @@ export class MeaningIndex {
     const model = this.modelKey()
     if (!model) return 0
     const parts = passages(title, text)
+    this.store.db.prepare('DELETE FROM note_vectors_none WHERE note_id = ?').run(noteId)
+    if (!parts.length) this.store.db.prepare('INSERT OR IGNORE INTO note_vectors_none (note_id, model) VALUES (?, ?)').run(noteId, model)
     const existing = new Map(
       (this.store.db.prepare('SELECT * FROM note_vectors WHERE note_id = ?').all(noteId) as Row[]).filter((r) => r.model === model).map((r) => [r.text_hash, r]),
     )
@@ -159,6 +167,7 @@ export class MeaningIndex {
 
   removeNote(noteId: string) {
     this.store.db.prepare('DELETE FROM note_vectors WHERE note_id = ?').run(noteId)
+    this.store.db.prepare('DELETE FROM note_vectors_none WHERE note_id = ?').run(noteId)
     this.cache = null
   }
 
@@ -166,7 +175,9 @@ export class MeaningIndex {
   notesNeedingVectors(noteIds: string[]): string[] {
     const model = this.modelKey()
     if (!model) return []
-    const have = new Set((this.store.db.prepare('SELECT DISTINCT note_id FROM note_vectors WHERE model = ?').all(model) as { note_id: string }[]).map((r) => r.note_id))
+    const have = new Set(
+      (this.store.db.prepare('SELECT DISTINCT note_id FROM note_vectors WHERE model = ? UNION SELECT note_id FROM note_vectors_none WHERE model = ?').all(model, model) as { note_id: string }[]).map((r) => r.note_id),
+    )
     return noteIds.filter((id) => !have.has(id))
   }
 

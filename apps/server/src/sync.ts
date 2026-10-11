@@ -239,7 +239,12 @@ export class SyncEngine {
   /** Queue vectors for every note that doesn't have them yet (first setup, or a new embedding model). */
   embedMissing(): number {
     if (!this.meaning?.available) return 0
-    const ids = this.store.listDocuments('note:').map((n) => noteIdFromDocName(n)!).filter(Boolean)
+    // notes in the library (not in the bin, not gone for good)
+    const meta = this.noteMeta()
+    const ids = this.store
+      .listDocuments('note:')
+      .map((n) => noteIdFromDocName(n)!)
+      .filter((id) => id && meta.has(id) && !meta.get(id)!.trashedAt)
     const missing = this.meaning.notesNeedingVectors(ids)
     for (const id of missing) this.scheduleEmbedding(id, 0)
     return missing.length

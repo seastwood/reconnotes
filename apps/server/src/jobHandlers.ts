@@ -664,6 +664,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const meaning = sync.meaning
     const doc = sync.getDoc(noteDocName(noteId))
     if (!meaning?.available || !doc) return { result: { skipped: true } }
+    // in the bin (or gone) since it was asked for: nothing to search for
+    const m = sync.noteMeta().get(noteId)
+    if (!m || m.trashedAt) return (meaning.removeNote(noteId), { result: { skipped: true } })
     const ex = extractNote(doc)
     const full = extractNote(doc, store.attachmentTexts(ex.attachments))
     const made = await meaning.indexNote(noteId, full.title, full.text)

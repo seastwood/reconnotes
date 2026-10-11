@@ -294,14 +294,6 @@ function JobRow({ job: j, label, pos, open, onToggle, onOpenNote, jobs }: { job:
         <ChevronDown size={15} className="job-chevron" />
       </button>
 
-      {/* a finished job's note, a tap away */}
-      {!open && j.status === 'done' && product && productExists && (
-        <div className="job-quick">
-          <button className="text link" onClick={() => onOpenNote(product)} title="Open the note">
-            <FileText size={14} /> Open
-          </button>
-        </div>
-      )}
       {/* the quick actions, without opening the job */}
       {!open && (j.status === 'running' || j.status === 'queued' || j.status === 'paused') && (
         <div className="job-quick">
