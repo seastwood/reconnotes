@@ -173,14 +173,45 @@ export function tidyIngredient(raw: string): { text: string; allergens: string[]
     .replace(/^(?![AI]\s)[B-HJ-Z]\s+(?=\p{Lu})/u, '')
     .replace(/\s+[a-z]$/, '')
     .replace(/\s*[•·]\s*$/, '')
-    // a bar left at the end ("Hot Sauce |"), a name either side of one ("Yellow Onion | Yellow Onion")
+    // a bar left at the end ("Hot Sauce |")
     .replace(/\s*\|\s*$/, '')
-    .replace(/^(.+?)\s*\|\s*\1$/i, '$1')
     // a unit twice ("¼ Oz Oz": the second column's amount lost)
     .replace(/\b(tbsps?|tsps?|oz|cups?|cloves?|lbs?)\s+\1\b/gi, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim()
   return { text, allergens }
+}
+
+/**
+ * An ingredient line with its parts between bars, however the AI put them – amounts and names in any
+ * order, a name written once per column ("Yellow Onion | Yellow Onion | Yellow Onion", "½ Zucchini |
+ * 1 Zucchini | Zucchini", "1 Clove | Garlic"): its amounts, then its name once ("½ | 1 Zucchini"). A
+ * line with different names between its bars, or bars only inside brackets, is left as it is.
+ */
+export function normalizeColumns(raw: string): string {
+  const t = raw.trim()
+  if (!t.includes('|') || /\([^)]*\|[^)]*\)/.test(t)) return t
+  const parts = t.split('|').map((p) => p.trim()).filter(Boolean)
+  const amounts: string[] = []
+  const names: string[] = []
+  for (const p of parts) {
+    const m = new RegExp(`^(${AMOUNT})(?:\\s+(.*))?$`, 'i').exec(p)
+    // (or the amount after the name: "Jasmine Rice ½ Cup")
+    const after = new RegExp(`^(.*?\\p{L}.*?)\\s+(${AMOUNT})$`, 'iu').exec(p)
+    if (m && /[\d½⅓⅔¼¾⅛]/.test(m[1])) {
+      amounts.push(m[1].trim())
+      if (m[2] && /\p{L}/u.test(m[2])) names.push(m[2].trim())
+    } else if (after && /[\d½⅓⅔¼¾⅛]/.test(after[2])) {
+      amounts.push(after[2].trim())
+      names.push(after[1].trim())
+    } else names.push(p)
+  }
+  const key = (n: string) => n.toLowerCase().replace(/[^\p{L}\s]/gu, '').replace(/s\b/g, '').replace(/\s+/g, ' ').trim()
+  const distinct: string[] = []
+  for (const n of names) if (!distinct.some((d) => key(d) === key(n))) distinct.push(n)
+  if (distinct.length > 1) return t
+  const name = distinct[0] ?? ''
+  return [amounts.slice(0, 2).join(' | '), name].filter(Boolean).join(' ')
 }
 
 /** An amount with nothing else (its name read on the next line, as on a card's grid of pictures). */
@@ -230,9 +261,10 @@ export const isBoilerplate = (t: string) =>
 
 /** A "Bust out" list as one note ("BUST OUT • Zester • 2 Small bowls • Kosher salt • Olive oil (2 TBSP | 3 TBSP)"): its items. */
 export function bustOutItems(t: string): string[] | null {
-  if (!/^\s*(?:bust out|you['’]ll need)\b/i.test(t)) return null
+  const LIST = /^\s*(?:bust out|you['’]ll need|from your pantry|from home|bring from home|what you(?:['’]ll| will) need)\b\s*:?/i
+  if (!LIST.test(t)) return null
   const list = t
-    .replace(/^\s*(?:bust out|you['’]ll need)\s*:?/i, '')
+    .replace(LIST, '')
     // (a summary the AI added of its own: "From your pantry: Salt, Pepper, Oil, Butter.")
     .replace(/\.?\s*from your pantry\s*:.*$/i, '')
   // split at •, a comma or a bar – but not inside brackets ("Cooking oil (1 TBSP | 1 TBSP)")
@@ -242,7 +274,7 @@ export function bustOutItems(t: string): string[] | null {
   for (const ch of list) {
     if (ch === '(') depth++
     if (ch === ')') depth = Math.max(0, depth - 1)
-    if (!depth && /[•·,|]/.test(ch)) {
+    if (!depth && /[•·,|;]/.test(ch)) {
       items.push(cur)
       cur = ''
     } else cur += ch
@@ -250,6 +282,8 @@ export function bustOutItems(t: string): string[] | null {
   items.push(cur)
   return items
     .map((x) => tidyIngredient(x.replace(/\.$/, '')).text)
+    // a generic list the AI wrote of its own ("Salt, pepper, oil, butter you supply"): nothing the card says
+    .filter((x) => !/^(?:salt|pepper|oil|butter)(?:\s+you supply)?$/i.test(x))
     // (leftovers of icons read as text: "0 e")
     .filter((x) => /\p{L}{3}/u.test(x))
 }
@@ -348,6 +382,7 @@ export async function recipeFromPhotos(
       // a column heading stuck on ("2 PERSON | 4 PERSON Yellow Onion"); calories (a swap's, on the card's side)
       .map((t) => t.replace(/^\d+\s*(?:-\s*)?(?:person|people|servings?)\s*\|\s*\d+\s*(?:-\s*)?(?:person|people|servings?)\s*/i, ''))
       .filter((t) => !/^calories\b|^\d+\s*(?:-\s*)?(?:person|people|servings?)\b.*\|/i.test(t))
+      .map(normalizeColumns)
       .map((t) => {
       const x = tidyIngredient(t)
       x.allergens.forEach((a) => allergens.add(a))
@@ -374,6 +409,8 @@ export async function recipeFromPhotos(
   const steps = (s.steps ?? [])
     .map((x) => (typeof x === 'string' ? { title: '', text: str(x) } : { title: str((x as Record<string, unknown>)?.title), text: str((x as Record<string, unknown>)?.text) }))
     .filter((x) => keep(`${x.title} ${x.text}`.trim()))
+    // (bars and numbers left at the start: "4 | 5 | Heat…")
+    .map((x) => ({ ...x, text: x.text.replace(/^\s*(?:\d+\s*\|\s*)+/, ''), title: x.title.replace(/^\s*(?:\d+\s*\|\s*)+/, '') }))
     // (the card's number and title repeated at the start of the text: "4 COOK VEGGIES - Heat…")
     .map((x) => ({ ...x, text: x.title ? x.text.replace(new RegExp(`^\\d{0,2}\\s*${x.title.replace(/^\d+\s*/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-–:•]?\\s*`, 'i'), '') : x.text }))
     .map((x) => mark(x.title && !x.text.toLowerCase().startsWith(x.title.toLowerCase()) ? `${x.title}: ${x.text}` : x.text || x.title))
@@ -398,9 +435,10 @@ export async function recipeFromPhotos(
     .map(mark)
   // what was taken out of the ingredients goes in the notes (unless the AI already said so there)
   const said = notes.join(' ').toLowerCase()
-  const needed = kitchen.filter((k) => !said.includes(k.toLowerCase()))
+  const once = (xs: string[]) => xs.filter((x, i) => xs.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i)
+  const needed = once(kitchen).filter((k) => !said.includes(k.toLowerCase()))
   if (needed.length) notes.unshift(`You’ll need: ${needed.join(', ')}`)
-  const fromHome = pantry.filter((k) => !said.includes(k.toLowerCase()))
+  const fromHome = once(pantry).filter((k) => !said.includes(k.toLowerCase()))
   if (fromHome.length) notes.push(`From your pantry: ${fromHome.join(', ')}`)
   if (allergens.size && !/\bcontains\b|allergen/i.test(said)) notes.push(`Contains: ${[...allergens].filter((a, i, all) => all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i).join(', ')}`)
   if (columns.length) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)

@@ -152,8 +152,8 @@ Recognised text:
 const RECIPE_PAGE_PROMPT = `This is a photo of a page of a recipe (a meal-kit recipe card, a cookbook page or a printout). Write out all of its text, exactly as printed, in reading order.
 
 - Keep every word, number, fraction and unit exactly as printed ("1 ½ tbsp", "10 oz", "2 | 4"). Don't round, convert or correct anything.
-- Ingredient amounts in columns for different numbers of people (e.g. a "2 people" and a "4 people" column): write each ingredient on its own line as "amount for the first | amount for the second | ingredient", and write the column headings first.
-- Ingredients shown as a grid of pictures, each with its amount and its name printed under it: write one line per ingredient, its own amount with its own name ("1 | 1 | Yellow Onion", "¼ oz | ¼ oz | Parsley") – going across each row of the grid. Never a row of amounts and then a row of names.
+- Ingredient amounts in columns for different numbers of people (e.g. a "2 people" and a "4 people" column): write each ingredient once, on its own line, with its amounts just as printed and then its name (e.g. 1 Clove | 2 Cloves Garlic).
+- Ingredients shown as a grid of pictures, each with its amount and name under it: still one line per ingredient – its own amount with its own name – going across each row of the grid; never all the amounts and then all the names. Write each name only once.
 - Keep numbered steps numbered, with their titles.
 - Leave out nothing that's text; don't describe the pictures. Write only the text.`
 

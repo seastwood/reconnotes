@@ -12,7 +12,7 @@ import { tidyNote } from '../src/tidy'
 import { guardAddress, isPrivateHost, isPrivateIp } from '../src/netGuard'
 import { samePicture } from '../src/webImport'
 import { duration, recipeIn } from '../src/recipe'
-import { amountFromReading, bustOutItems, fixBars, inCardOrder, isBoilerplate, joinAmountsToNames, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
+import { amountFromReading, bustOutItems, normalizeColumns, fixBars, inCardOrder, isBoilerplate, joinAmountsToNames, isEquipment, isPantry, recipeFromPhotos, markUnreadAmounts, splitColumns, tidyIngredient, titleCase } from '../src/photoRecipe'
 import { guessKind, kindFromWords, kindIn, notesFromPhotos, reflow, sameWords } from '../src/photoPages'
 
 let app: App
@@ -264,6 +264,31 @@ BUST OUT Large pot, Salt, Pepper
     expect(md).not.toContain('Salt, Pepper, Oil')
   })
 
+  it('what the AI made of a card’s grid last time: names repeated, bars everywhere', async () => {
+    const id = 'photorepeat00001'
+    app.store.putAttachment({ id, mime: 'image/png', name: 'front.png', size: 3, created_at: Date.now() }, Buffer.from('png'), 'skipped')
+    const read =
+      'APRICOT TAGINE\n1 | 1 Yellow Onion\n¼ oz | ¼ oz Parsley\n1 Clove | 2 Cloves Garlic\n1 | 2 Zucchini\n½ Cup | 1 Cup Basmati Rice\nHot Sauce\n' +
+      '4 COOK VEGGIES Heat large drizzle oil in large pan.\nBUST OUT Zester 2 Small bowls Strainer Large pan Small pot Kosher salt Black pepper Olive oil (2 TBSP | 3 TBSP)'
+    reply = JSON.stringify({
+      name: 'Apricot Tagine',
+      ingredients: ['Yellow Onion | Yellow Onion | Yellow Onion', '¼ oz | Parsley', '1 Clove | Garlic', '½ Zucchini | 1 Zucchini | Zucchini', '½ Cup | Basmati Rice', 'Hot Sauce | Hot Sauce | Hot Sauce'],
+      steps: [{ title: 'COOK VEGGIES', text: '4 | 5 | Heat large drizzle oil in large pan.' }],
+      notes: [
+        'You’ll need: Zester',
+        'From your pantry: Salt, pepper, oil, butter you supply.',
+        'From your pantry: 2 Small bowls; Strainer, Large pan; Small pot, ; Kosher salt, ; Black pepper, ; Olive oil (2 TBSP | 3 TBSP)',
+      ],
+    })
+    const r = await recipeFromPhotos(app.store, app.sync, app.ai, [{ attachmentId: id, text: read }], null)
+    const md = text(r.noteId)
+    expect(md).toContain('- [ ] 1 Yellow Onion\n- [ ] ¼ oz Parsley\n- [ ] 1 Clove Garlic\n- [ ] ½ Zucchini\n- [ ] ½ Cup Basmati Rice\n- [ ] Hot Sauce\n')
+    expect(md).toContain('1. COOK VEGGIES: Heat large drizzle oil in large pan.')
+    expect(md).toContain('You’ll need: Zester, 2 Small bowls, Strainer, Large pan, Small pot')
+    expect(md).toContain('From your pantry: Kosher salt, Black pepper, Olive oil (2 TBSP | 3 TBSP)')
+    expect(md).not.toMatch(/you supply|Yellow Onion \||\| 5 \|/)
+  })
+
   it('marks an amount that wasn’t read, however it’s written', () => {
     const read = new Set(['10', '1/2', '4'])
     expect(markUnreadAmounts('½ cup broth', read)).toBe('½ cup broth')
@@ -280,13 +305,25 @@ describe('a meal-kit card’s lines', () => {
     expect(tidyIngredient('¼ Oz Oz').text).toBe('¼ Oz')
     expect(tidyIngredient('1 Jalapeño').text).toBe('1 Jalapeño')
     expect(tidyIngredient('Crème fraîche').text).toBe('Crème fraîche')
-    expect(tidyIngredient('Yellow Onion | Yellow Onion').text).toBe('Yellow Onion')
+    expect(normalizeColumns('Yellow Onion | Yellow Onion')).toBe('Yellow Onion')
     expect(tidyIngredient('Hot Sauce |').text).toBe('Hot Sauce')
     expect(tidyIngredient('½ oz Parsley | ¼ oz Parsley').text).toBe('½ oz Parsley | ¼ oz Parsley')
   })
   it('the same amount for both columns, the bar read as a 1', () => {
     expect(splitColumns('1 11 Jalapeño')).toEqual({ first: '1', other: '1', name: 'Jalapeño' })
     expect(fixBars('Lemon 111')).toBe('Lemon 1 | 1')
+  })
+  it('a line’s parts between bars, however the AI put them', () => {
+    expect(normalizeColumns('Yellow Onion | Yellow Onion | Yellow Onion')).toBe('Yellow Onion')
+    expect(normalizeColumns('½ Zucchini | 1 Zucchini | Zucchini')).toBe('½ | 1 Zucchini')
+    expect(normalizeColumns('1 Clove | Garlic')).toBe('1 Clove Garlic')
+    expect(normalizeColumns('¼ oz | ¼ oz | Parsley')).toBe('¼ oz | ¼ oz Parsley')
+    expect(normalizeColumns('1 | 2 | Chickpeas')).toBe('1 | 2 Chickpeas')
+    expect(normalizeColumns('Veggie Stock Concentrates | Veggie Stock Concentrate')).toBe('Veggie Stock Concentrates')
+    expect(normalizeColumns('Cooking oil (1 TBSP | 1 TBSP)')).toBe('Cooking oil (1 TBSP | 1 TBSP)')
+    expect(normalizeColumns('Salt | Pepper')).toBe('Salt | Pepper')
+    expect(normalizeColumns('2 Lemons')).toBe('2 Lemons')
+    expect(normalizeColumns('Jasmine Rice ½ Cup | 1 Cup')).toBe('½ Cup | 1 Cup Jasmine Rice')
   })
   it('an amount the AI left out, found with its name in what was read', () => {
     const read = ['2 PERSON | 4 PERSON', '1 | 1 | Yellow Onion', '¼ oz | ¼ oz', 'Parsley', 'Lemon zest to taste']
@@ -312,6 +349,15 @@ describe('a meal-kit card’s lines', () => {
       'Olive oil (2 TBSP | 3 TBSP)',
     ])
     expect(bustOutItems('Toast the almonds')).toBeNull()
+    expect(bustOutItems('From your pantry: Salt, pepper, oil, butter you supply.')).toEqual([])
+    expect(bustOutItems('From your pantry: 2 Small bowls; Strainer, Large pan; Small pot, ; Kosher salt, ; Olive oil (2 TBSP | 3 TBSP)')).toEqual([
+      '2 Small bowls',
+      'Strainer',
+      'Large pan',
+      'Small pot',
+      'Kosher salt',
+      'Olive oil (2 TBSP | 3 TBSP)',
+    ])
     // the AI's own version: two columns with bars, and a pantry summary of its own
     expect(
       bustOutItems(
