@@ -3,6 +3,7 @@ import { newId } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { log } from './log'
+import { gpuAt, hostOf } from './gpu'
 import { jobSignal, reportAgent, reportProgress, timeoutSignal } from './jobs'
 import { parseWyomingUri, toPcm, wyomingDescribe, wyomingTranscribe } from './wyoming'
 import { spawn } from 'node:child_process'
@@ -331,7 +332,7 @@ const MB = 1048576
  * `tight` once a model was seen squeezed partly onto the CPU; `fitMb` the most
  * that was seen loaded with everything on the GPU.
  */
-type GpuInfo = { tight?: boolean; fitMb?: number }
+type GpuInfo = { tight?: boolean; fitMb?: number; totalMb?: number }
 const GPU_KEY = 'ollama.gpu'
 function gpuInfo(base: string): GpuInfo {
   return spendStore?.getSetting<Record<string, GpuInfo>>(GPU_KEY)?.[base] ?? {}
@@ -356,7 +357,7 @@ export function observeOllama(baseUrl: string, models: OllamaLoaded[]) {
   if (big.some(spilled) && speechInUse.size) return
   if (big.some(spilled)) {
     if (!cur.tight) log.info(`Ollama at ${base}: a model was squeezed partly onto the CPU – from now on one model at a time on its GPU`)
-    if (!cur.tight || (cur.fitMb ?? Infinity) > vram) saveGpuInfo(base, { tight: true, fitMb: Math.round(Math.min(cur.fitMb ?? Infinity, vram)) })
+    if (!cur.tight || (cur.fitMb ?? Infinity) > vram) saveGpuInfo(base, { ...cur, tight: true, fitMb: Math.round(Math.min(cur.fitMb ?? Infinity, vram)) })
   } else if (models.length && vram > (cur.fitMb ?? 0) && !cur.tight) saveGpuInfo(base, { ...cur, fitMb: Math.round(vram) })
 }
 
@@ -610,11 +611,25 @@ async function makeRoom(agent: AgentConfig): Promise<string[]> {
   const others = models.filter((m) => m !== self)
   if (!self && !others.length) return []
   if (!self) {
-    // will it fit beside what's loaded? Only if that's been seen to work.
-    const info = gpuInfo(base)
+    // will it fit beside what's loaded?
     const seen = seenSize.get(`${base}|${agent.model}`) ?? seenSize.get(`${base}|${agent.model}:latest`)
     const disk = seen === undefined ? await diskSizeMb(base, agent.model) : null
     const need = seen ?? (disk !== null ? disk * 1.25 + 500 : null)
+    // the GPUs' own say (the monitor beside Ollama, or nvidia-smi here): room on one of them – Ollama
+    // puts a model that fits on one card there, so with two cards, two models stay loaded
+    const cards = await gpuAt(hostOf(base))
+    if (cards) {
+      const total = cards.reduce((a, c) => a + c.totalMb, 0)
+      const known = gpuInfo(base)
+      // a card added or taken out: what was learned about the old one doesn't hold
+      if (known.totalMb !== total) {
+        if (known.totalMb) log.info(`Ollama at ${base}: the GPU memory is now ${total} MB (${cards.length} card${cards.length > 1 ? 's' : ''}) – learning again what fits`)
+        saveGpuInfo(base, { totalMb: total })
+      }
+      if (need !== null && cards.some((c) => c.totalMb - c.usedMb >= need)) return []
+    }
+    // without them: only if that's been seen to work
+    const info = gpuInfo(base)
     const used = all.reduce((a, m) => a + (m.size_vram || 0), 0) / MB
     if (need !== null && info.fitMb && used + need <= info.fitMb + 1) return []
   }
