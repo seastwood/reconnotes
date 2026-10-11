@@ -8,6 +8,7 @@ import { reportProgress } from './jobs'
 import { markdownToNodes } from './importNotes'
 import { recipeCard, type Recipe } from './recipe'
 import { uprightPages } from './photoUpright'
+import { readPrintedPhoto } from './printReader'
 
 /**
  * A recipe from photos
@@ -337,7 +338,9 @@ export async function recipeFromPhotos(
     let text = (p.text ?? '').trim()
     if (text.length < 40) {
       reportProgress(`Reading photo ${k + 1} of ${pages.length}…`)
-      const r = await ai.readRecipePage(fs.readFileSync(store.blobPath(att.id)), att.mime)
+      const data = fs.readFileSync(store.blobPath(att.id))
+      // the print read by Tesseract, where it's installed (exact, and where each word is); else the AI
+      const r = (await readPrintedPhoto(ai, data, att.mime)) ?? (await ai.readRecipePage(data, att.mime))
       text = r.text
       reader = r.agent
     } else reader ||= 'Apple text recognition (on the phone)'

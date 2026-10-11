@@ -8,6 +8,7 @@ import { decryptPath } from './offsite'
 import { defaultNames, loadTls, setupHttps, suggestedAddress } from './tls'
 import { VERSION } from './http'
 import { log } from './log'
+import { tesseractAvailable } from './printReader'
 
 const HELP = `ReconNotes server ${VERSION}
 
@@ -95,6 +96,9 @@ ${r.newCa ? '' : '\nDevices that already trust the authority need nothing new.'}
     log.info(`data: ${config.dataDir}  backups: ${config.backupDir}`)
     log.info(
       `AI agents: ${app.ai.enabled ? app.ai.describe() : 'none yet – add them in the app under Settings › AI agents'}`,
+    )
+    void tesseractAvailable().then((ok) =>
+      log.info(ok ? 'Tesseract found: photos of printed pages from a browser are read with it' : 'Tesseract not found – photos of printed pages from a browser are read by the AI (sudo apt install tesseract-ocr to read them exactly)'),
     )
   })
 

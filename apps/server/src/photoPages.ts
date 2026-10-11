@@ -4,6 +4,7 @@ import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import { jobSignal, reportProgress } from './jobs'
 import { uprightPages } from './photoUpright'
+import { readPrintedPhoto } from './printReader'
 import { createPhotoNote, numbersIn, words, type PhotoPage } from './photoRecipe'
 
 /**
@@ -121,7 +122,14 @@ export async function notesFromPhotos(
       const data = fs.readFileSync(store.blobPath(att.id))
       // handwriting: your handwriting readers (with your words); print: the "Pictures" readers
       // (anything: whatever's written or printed in it)
-      const r = kind === 'handwriting' || kind === 'general' ? await ai.transcribePhoto(data, att.mime, { format: false }) : await ai.readPrintedPage(data, att.mime)
+      // print: Tesseract where it's installed (for a general note only when it's sure – it may be handwriting)
+      const printed = kind === 'handwriting' ? null : await readPrintedPhoto(ai, data, att.mime)
+      const r =
+        printed && (kind !== 'general' || printed.confidence >= 75)
+          ? printed
+          : kind === 'handwriting' || kind === 'general'
+            ? await ai.transcribePhoto(data, att.mime, { format: false })
+            : await ai.readPrintedPage(data, att.mime)
       text = r.text.trim()
       reader = r.agent
     } else reader ||= 'Apple text recognition (on the phone)'
@@ -242,7 +250,10 @@ export async function readForGuess(store: Store, ai: Ai, pages: PhotoPage[]): Pr
     const att = store.getAttachment(p.attachmentId)
     if (!att || !store.hasBlob(att.id)) throw new Error('A photo hasn’t reached the server yet – try again in a moment.')
     reportProgress(`Reading photo ${k + 1} of ${pages.length}…`)
-    const r = await ai.readPrintedPage(fs.readFileSync(store.blobPath(att.id)), att.mime)
+    const data = fs.readFileSync(store.blobPath(att.id))
+    // Tesseract when it's sure (print); else the AI (handwriting, or no Tesseract)
+    const printed = await readPrintedPhoto(ai, data, att.mime)
+    const r = printed && printed.confidence >= 75 ? printed : await ai.readPrintedPage(data, att.mime)
     agent = r.agent
     out.push({ ...p, text: r.text })
   }

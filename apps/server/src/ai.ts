@@ -837,6 +837,14 @@ ${partNotes.join('\n\n')}
     return result
   }
 
+  /** A question about a photo for a "Pictures" model (e.g. which fraction is printed on a line), its answer as it came. */
+  async lookAtPhoto(data: Buffer, mime: string, prompt: string): Promise<string> {
+    if (!isAiImage(mime)) throw new Error(`unsupported image type ${mime}`)
+    const fit = fitForAi(data, mime, 2000)
+    const { result } = await this.agents.run('images', (backend) => backend.generate([{ image: fit.data, mime: fit.mime }, { text: prompt }], 2500))
+    return result
+  }
+
   /** A few lines of a photo's text (to tell which way round it reads best): quick, short. */
   async readSnippet(data: Buffer, mime: string): Promise<string> {
     if (!isAiImage(mime)) return ''

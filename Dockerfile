@@ -19,7 +19,7 @@ ENV NODE_ENV=production \
     RECON_PORT=8787
 WORKDIR /app
 # ffmpeg converts recordings for Wyoming (Home Assistant) speech-to-text servers
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg tesseract-ocr tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 # Install only the server's runtime dependencies (core is bundled into dist/).
 COPY apps/server/package.json ./package.json
 RUN npm pkg delete devDependencies "dependencies.@reconnotes/core" scripts \

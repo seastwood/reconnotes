@@ -4,6 +4,7 @@ import type { Store } from './store'
 import type { Ai } from './ai'
 import { reportProgress } from './jobs'
 import { rotatePicture, textRunsSideways, textUpsideDown, upAndDown } from './images'
+import { tesseractLines } from './printReader'
 import type { PhotoPage } from './photoRecipe'
 
 /**
@@ -47,7 +48,18 @@ export async function uprightPages(store: Store, ai: Ai, pages: PhotoPage[]): Pr
       if (cw && c && c.up > c.down * 1.15) best = cw
       else if (c && c.down > c.up * 1.15) best = await rotatePicture(data, att.mime, 3)
       else {
-        // …or, when they can't tell, a few lines read each way round
+        // …or, when they can't tell: which way round Tesseract reads with more certainty (where it's installed)…
+        const ccw = await rotatePicture(data, att.mime, 3)
+        const sure = async (x: { data: Buffer; mime: string } | null) => {
+          const lines = x ? await tesseractLines(x.data, x.mime) : null
+          return lines?.length ? lines.reduce((s, l) => s + l.conf * l.text.length, 0) / Math.max(1, lines.reduce((s, l) => s + l.text.length, 0)) : null
+        }
+        const [a, b] = [await sure(cw), await sure(ccw)]
+        if (a !== null && b !== null && Math.abs(a - b) >= 5) best = a > b ? cw : ccw
+      }
+      if (sideways && !best) {
+        // …or a few lines read each way round by the AI
+        const cw = await rotatePicture(data, att.mime, 1)
         let score = -1
         for (const q of [1, 3]) {
           const turned = q === 1 ? cw : await rotatePicture(data, att.mime, q)

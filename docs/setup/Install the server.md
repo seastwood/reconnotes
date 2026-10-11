@@ -48,4 +48,6 @@ Your notes live in `/var/lib/reconnotes` (Docker: the `reconnotes-data` volume) 
 
 If you'll transcribe recordings with a Home Assistant Whisper server, also install ffmpeg: `sudo apt install ffmpeg`.
 
+To import photos of printed pages (recipe cards, book pages) from a browser – Safari on a phone or a laptop – also install Tesseract: `sudo apt install tesseract-ocr`. It reads the print on your server, exactly and with where each word is, as the iPhone and iPad app does on the device; without it, your AI's vision model reads the photos, which is less exact with small print and fractions. The server finds it by itself (the log says "Tesseract found" when it starts). For pages in other languages, add their packs (e.g. `tesseract-ocr-fra`) and set `RECON_TESSERACT_LANG=eng+fra`.
+
 Next: [[Connect your devices]].
