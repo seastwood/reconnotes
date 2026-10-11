@@ -120,8 +120,10 @@ with your own domain via Cloudflare + pfSense + HAProxy, AI agents, backups) are
 [`docs/setup`](docs/setup). They also come with the server: on first start they're added as notes
 in a **ReconNotes Setup** folder (each once; edit or delete them freely – an edited guide keeps your text, and a newer version arrives beside it).
 
-You need Node.js 20 or newer (or Docker), and `ffmpeg` if you'll transcribe recordings with a
-Wyoming (Home Assistant) Whisper server: `sudo apt install ffmpeg`.
+You need Node.js 20 or newer (or Docker). Without Docker, also install `ffmpeg` if you'll transcribe
+recordings with a Wyoming (Home Assistant) Whisper server, and `tesseract-ocr` to read photos of
+printed pages imported from a browser: `sudo apt update && sudo apt install ffmpeg tesseract-ocr`.
+(The Docker image already has both.)
 
 ### Option A: Docker
 
