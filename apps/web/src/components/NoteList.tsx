@@ -452,7 +452,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
               <button onClick={act(async () => onOpen(await duplicateNote(n.id)))}>
                 <Copy size={16} /> Duplicate
               </button>
-              {!n.template && (
+              {n.template ? (
+                <button onClick={act(() => updateNote(workspaceDoc, n.id, { template: false }))} title="It leaves Templates and goes with your other notes">
+                  <LayoutTemplate size={16} /> Turn into a normal note
+                </button>
+              ) : (
                 <button onClick={act(() => saveAsTemplate(n.id))}>
                   <LayoutTemplate size={16} /> Save as template
                 </button>
