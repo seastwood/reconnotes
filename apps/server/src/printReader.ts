@@ -320,6 +320,12 @@ function distance(a: string, b: string): number {
   }
   return prev[b.length]
 }
+/** A line without the words Tesseract may have made of a small fraction ("VY," "Ve" "Y%" "Ys" "%"). */
+const withoutFractionScraps = (t: string) =>
+  t
+    .split(/\s+/)
+    .map((w) => w.replace(/^[(]?(?:[YV][a-z0-9%]?|[%¥]+|\d?[%¥])[,.;)]?(?=$|-)/i, ''))
+    .join(' ')
 const lettersOf = (t: string) => t.toLowerCase().replace(/[^\p{L}]/gu, '')
 /** Nothing but an amount: numbers, fractions, units and bars ("1 | 2", "½ oz | 1 oz", "3 TBSP | 6 TBSP"). */
 const AMOUNT_ONLY = /^[\d½¼¾⅓⅔⅛\s|.,/]*(?:(?:oz|cups?|tbsp|tsp|lbs?|g|ml|cloves?|cans?|pieces?|units?|pkgs?|slices?)\b[\d½¼¾⅓⅔⅛\s|.,/]*)*$/i
@@ -399,8 +405,10 @@ export async function closeUps(ai: Ai, data: Buffer, mime: string, lines: PrintL
   })
   const out = [...lines]
   let taken = 0
-  for (let start = 0; start < strips.length; start += 12) {
-    const batch = strips.slice(start, start + 12)
+  let lastReply = ''
+  // a few at a time: a small vision model loses count of many strips
+  for (let start = 0; start < strips.length; start += 6) {
+    const batch = strips.slice(start, start + 6)
     // each enlarged to about 64 px tall (no wider than 1500), 40 px of white between
     const gap = 40
     const sized = batch.map((b) => ({ ...b, z: Math.min(64 / b.h, 1500 / b.w) }))
@@ -433,10 +441,11 @@ export async function closeUps(ai: Ai, data: Buffer, mime: string, lines: PrintL
     const prompt = `This picture is ${batch.length} strips cut from a photo of a printed page, one under another, top to bottom. Each strip is one line of print – some only an amount, like "1 | 2" or "½ oz | 1 oz". OCR read them as:
 ${batch.map((b, k) => `${k + 1}: ${b.read || '(nothing)'}`).join('\n')}
 
-Write what each strip actually says, exactly as printed: small fractions as ½ ¼ ¾ ⅓ ⅔ ⅛, the bar between two amounts as |. Change nothing else. Reply with JSON only: {"1": "…", "2": "…"}`
+Write what each strip actually says, exactly as printed: small fractions as ½ ¼ ¾ ⅓ ⅔ ⅛, the bar between two amounts as |.${grid ? ' On this page the amounts are given for two numbers of people, two amounts with a bar between them ("1 | 2", "¼ oz | ½ oz").' : ''} Change nothing else. Reply with JSON only: {"1": "…", "2": "…"}`
     let fixed: Record<string, unknown> = {}
     try {
       const reply = await ai.lookAtPhoto(grayPng(cw, chh, gray), 'image/png', prompt)
+      lastReply = reply
       const json = /\{[\s\S]*\}/.exec(reply.replace(/<think>[\s\S]*?<\/think>/g, ''))?.[0]
       fixed = json ? (JSON.parse(json) as Record<string, unknown>) : {}
     } catch (e) {
@@ -447,8 +456,14 @@ Write what each strip actually says, exactly as printed: small fractions as ½ �
       const f = fixed[String(k + 1)]
       if (typeof f !== 'string' || !f.trim()) return
       const t = f.trim()
-      const was = lettersOf(b.read)
-      const ok = was.length >= 3 ? distance(lettersOf(t), was) <= Math.max(2, Math.round(was.length * 0.15)) : isAmount(t)
+      // the words compared without what was doubtful (a fraction misread as "VY," "Ye" "%" is letters too)
+      const was = lettersOf(withoutFractionScraps(b.read))
+      const now = lettersOf(withoutFractionScraps(t))
+      const ok =
+        was.length >= 3
+          ? distance(now, was) <= Math.max(2, Math.round(was.length * 0.15))
+          : // an amount for an amount – on a page with two columns of them, both ("7" for "1 | 1", "½" for "1 | 2": no)
+            isAmount(t) && (!grid || /\|/.test(t))
       if (!ok) return
       if (t !== b.read) taken++
       if (b.line) {
@@ -458,6 +473,7 @@ Write what each strip actually says, exactly as printed: small fractions as ½ �
     })
   }
   log.info(`close-ups of the print: ${taken} of ${strips.length} doubtful lines put right by the vision model`)
+  if (!taken && lastReply) log.info(`close-ups: the vision model's last reply was ${JSON.stringify(lastReply.slice(0, 400))}`)
   return out
 }
 

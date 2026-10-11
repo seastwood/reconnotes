@@ -62,7 +62,7 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 
 {"name": "", "description": "", "servings": "", "prep": "", "cook": "", "total": "", "ingredients": [""], "steps": [{"title": "", "text": ""}], "notes": [""], "nutrition": [["Calories", ""]]}
 
-- Copy the wording exactly – every amount, unit and word as read. Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
+- Copy the wording exactly – every amount, unit and word as read, word for word (in the steps too: "halve" stays "halve"). Don't add, guess, convert or reword anything; leave a field "" or [] when the text doesn't give it.
 - name: the recipe's title – the big name on the front with the line under it, if it has one (e.g. "Lemon Thyme Pork with Jasmine Rice", "Balsamic Tomato & Herb Chicken over Buttery Garlic Spaghetti"), not the time or calorie line. A letter missing where the card has a hole punched in it ("ALM ND", "TOM TO"): fill it in.
 - ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. Each ingredient has its own amount on the card (on a grid of pictures, the amount is printed with the name) – keep it with its name. An ingredient whose amount you can't read: just its name. Not ingredients: column headings ("2 PERSON | 4 PERSON"), calories.
 - A card often shows the ingredients as a grid of pictures, each with its amount on one line and its name on the next ("1 | 1" then "Yellow Onion"): put each amount with its own name, one ingredient per line – never two in one. Leave out what's only the other side of the card's options ("HelloCustom", calories for a swap).
@@ -261,6 +261,26 @@ export const isBoilerplate = (t: string) =>
   /hellofresh(?:pics|\.com)|share your|@\w{3,}|\(\d{3}\)\s*\d{3}-\d{4}|sustainab|rest assured|if you chose to modify|flip side of this card|scan here|issues with your order|get social|www\.|\.com\b|^\W*hellocustom\W*$/i.test(t)
 
 /**
+ * Cells of a grid read side by side on the same lines – amounts on one ("1 oz | 2 oz  1 tsp | 1 tsp"),
+ * names on the next ("Dried Apricots  Hot Sauce"), cells two spaces apart – put one under another,
+ * each amount with its own name. Only where the counts match, so ordinary text is left as it is.
+ */
+export function splitGridRows(text: string): string {
+  const AMT = /^(?:\d+(?:[.,/]\d+)?|[½⅓⅔¼¾⅛])[\d½⅓⅔¼¾⅛\s|.,/]*(?:\s*\p{L}{1,6}\.?)?(?:\s*\|\s*[\d½⅓⅔¼¾⅛][\d½⅓⅔¼¾⅛\s.,/]*(?:\s*\p{L}{1,6}\.?)?)*$/u
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const a = lines[i].split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    const b = (lines[i + 1] ?? '').split(/\s{2,}/).map((c) => c.trim()).filter(Boolean)
+    if (a.length >= 2 && a.length === b.length && a.every((c) => AMT.test(c)) && b.every((c) => /^\p{L}[\p{L}\s'’&,-]{1,40}$/u.test(c))) {
+      out.push(a.map((c, k) => `${c}\n${b[k]}`).join('\n\n'))
+      i++
+    } else out.push(lines[i])
+  }
+  return out.join('\n')
+}
+
+/**
  * The card's small print taken out of what was read, before the AI sets it out (it would otherwise
  * end up among the ingredients): a block mostly of it goes, and so do the "HelloCustom" swaps under
  * their heading (an amount and a protein, "Calories: 1250") – those come back as one note.
@@ -283,7 +303,10 @@ export function withoutSmallPrint(text: string): { text: string; swaps: string[]
             ...lines
               .join(' ')
               // (the degree sign read as a quote: 160")
-              .replace(/(\d)["”]/g, '$1°')
+              .replace(/(\d)["”*]/g, '$1°')
+              // the little icons in front of each (read as ©, @, *, or a C)
+              .replace(/(^|[.°]\s+)(?:[©®@*]\s*|C\s+(?=\p{Lu}))+/gu, '$1')
+              .replace(/(^|\s)[*©®@]+(?=\p{Lu})/gu, '$1')
               .split(/(?<=\.|°F?|["”]\.?)\s+(?=["“]?\p{Lu})/u)
               .map((x) => x.replace(/^["“”]+|["“”]+(?=\.?$)/g, '').trim())
               .filter(Boolean),
@@ -293,11 +316,18 @@ export function withoutSmallPrint(text: string): { text: string; swaps: string[]
         const small = lines.filter(isBoilerplate).length
         if (small && small >= lines.length / 2) return false
         if (custom) {
-          // a swap: its amount and its name ("10 oz | 20 oz" / "Ground Beef"), or its calories
-          if (lines.length <= 3 && lines.every((l) => /^calories\b/i.test(l) || /^[\d½¼¾⅓⅔ |.,]+\s*(?:oz|lbs?|g|pieces?|units?)?\b[\d½¼¾⅓⅔ |.,ozlbsg]*$/i.test(l) || /^[\p{L}][\p{L}\s'’*”"-]{2,40}$/u.test(l))) {
-            const amount = lines.find((l) => /\d/.test(l) && !/^calories/i.test(l))
-            const name = lines.find((l) => /^\p{L}/u.test(l) && !/^calories/i.test(l))
-            if (name) swaps.push(`${name.replace(/[*”"]+$/g, '').trim()}${amount ? ` (${amount})` : ''}`)
+          // swaps: each an amount and a name ("10 oz | 20 oz" / "Ground Beef"), maybe its calories – one
+          // under another, or side by side on the same lines (cells two spaces apart); the little icons
+          // in front of them (read as © @) don't count
+          const cells = lines.map((l) => l.replace(/(^|\s)[©®@]\s*/g, '$1').split(/\s{2,}/).map((c) => c.trim()).filter(Boolean))
+          const flat = cells.flat()
+          const isAmt = (c: string) => /^[\d½¼¾⅓⅔ |.,]+\s*(?:oz|lbs?|g|pieces?|units?)?\b[\d½¼¾⅓⅔ |.,ozlbsg]*$/i.test(c)
+          const isName = (c: string) => /^[\p{L}][\p{L}\s'’*”"-]{2,40}$/u.test(c) && !/^calories/i.test(c)
+          // (a swap's calories on their own)
+          if (flat.length <= 2 && flat.every((c) => /^calories\b/i.test(c))) return false
+          if (flat.length <= 9 && flat.every((c) => /^calories\b/i.test(c) || isAmt(c) || isName(c)) && flat.some(isName)) {
+            const amounts = flat.filter((c) => isAmt(c) && /\d/.test(c))
+            flat.filter(isName).forEach((name, i) => swaps.push(`${name.replace(/[*”"]+$/g, '').trim()}${amounts[i] ? ` (${amounts[i]})` : ''}`))
             return false
           }
           custom = false
@@ -332,7 +362,8 @@ export function bustOutItems(t: string): string[] | null {
   }
   items.push(cur)
   return items
-    .map((x) => tidyIngredient(x.replace(/\.$/, '')).text)
+    // (icons read as single letters after an item: "Cooking oil (1 TBSP | 1 TBSP) 0 e")
+    .map((x) => tidyIngredient(x.replace(/\.$/, '').replace(/(\))(?:\s+\S){1,3}\s*$/, '$1')).text)
     // a generic list the AI wrote of its own ("Salt, pepper, oil, butter you supply"): nothing the card says
     .filter((x) => !/^(?:salt|pepper|oil|butter)(?:\s+you supply)?$/i.test(x))
     // (leftovers of icons read as text: "0 e")
@@ -396,7 +427,7 @@ export async function recipeFromPhotos(
     } else reader ||= 'Apple text recognition (on the phone)'
     texts.push(text)
   }
-  const { text: all, swaps, safety } = withoutSmallPrint(texts.map((t, i) => `--- Page ${i + 1} ---\n${t}`).join('\n\n'))
+  const { text: all, swaps, safety } = withoutSmallPrint(texts.map((t, i) => `--- Page ${i + 1} ---\n${splitGridRows(t)}`).join('\n\n'))
   if (all.replace(/[^\p{L}]/gu, '').length < 40) throw new Error('No recipe text could be read in the photos – try clearer, closer photos in good light.')
 
   // 2. set out as a recipe

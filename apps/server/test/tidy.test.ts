@@ -345,7 +345,7 @@ describe('a meal-kit card’s lines', () => {
       'Zester',
       '2 Small bowls',
       'Kosher salt',
-      'Cooking oil (1 TBSP | 1 TBSP) 0 e',
+      'Cooking oil (1 TBSP | 1 TBSP)',
       'Olive oil (2 TBSP | 3 TBSP)',
     ])
     expect(bustOutItems('Toast the almonds')).toBeNull()

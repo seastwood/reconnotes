@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { colourBands, grayPng } from '../src/images'
 import { linesFromTsv, plainFractions, suspectLine, tidyPrint, withBanners, withoutScraps, closeUps, type PrintLine } from '../src/printReader'
-import { withoutSmallPrint } from '../src/photoRecipe'
+import { splitGridRows, withoutSmallPrint } from '../src/photoRecipe'
 
 const line = (text: string, conf = 90, x = 0.1, y = 0.1, w = 0.2, h = 0.02): PrintLine => ({ text, conf, x, y, w, h, words: [] })
 
@@ -136,7 +136,9 @@ describe('a meal-kit card’s small print', () => {
       lookAtPhoto: async (_d: Buffer, mime: string, prompt: string) => {
         asked.push(prompt)
         expect(mime).toBe('image/png')
-        return '<think>hm</think>{"1": "1 | 1", "2": "Add ¼ of the onion", "3": "Add a whole new sentence here", "4": "1 | 2"}'
+        return asked.length === 1
+          ? '<think>hm</think>{"1": "1 | 1", "2": "Add ¼ of the onion", "3": "Add a whole new sentence here", "4": "¼ oz | ¼ oz", "5": "7", "6": "½ Cup | 1 Cup"}'
+          : '{"1": "1 | 2"}'
       },
     }
     const photo = grayPng(200, 200, new Uint8Array(200 * 200).fill(200))
@@ -147,17 +149,48 @@ describe('a meal-kit card’s small print', () => {
       line('Zucchini', 95, 0.5, 0.13, 0.1),
       line('Add % of the onion', 80, 0.1, 0.5, 0.5),
       line('Stir in % cup water', 80, 0.1, 0.6, 0.5),
+      line('VY, OZ | Ve OZ', 80, 0.3, 0.1, 0.1),
+      line('1 | 1', 50, 0.1, 0.2, 0.05),
+      line('Y% Cup |1Cup', 80, 0.3, 0.3, 0.1),
     ]
     const out = await closeUps(ai as never, photo, 'image/png', lines)
-    expect(asked).toHaveLength(1)
-    expect(asked[0]).toContain('4: (nothing)')
+    // six at a time
+    expect(asked).toHaveLength(2)
+    expect(asked[0]).toContain('two amounts with a bar')
+    expect(asked[1]).toContain('1: (nothing)')
     const texts = out.map((l) => l.text)
     expect(texts).toContain('1 | 1')
     expect(texts).toContain('Add ¼ of the onion')
     // its words weren't Tesseract's: kept as read
     expect(texts).toContain('Stir in % cup water')
+    // a fraction misread as letters: put right; one amount for two columns ("7" for "1 | 1"): not taken
+    expect(texts).toContain('¼ oz | ¼ oz')
+    expect(texts).toContain('1 | 1')
+    expect(texts).not.toContain('7')
+    expect(texts).toContain('½ Cup | 1 Cup')
     const added = out.find((l) => l.text === '1 | 2')!
     expect(added.y).toBeCloseTo(0.1)
     expect(added.x + added.w / 2).toBeCloseTo(0.55)
+  })
+
+  it('swaps and footnotes as the phone reads them: side by side, with the icons read as letters', () => {
+    const text = [
+      '--- Page 1 ---',
+      'HelloCustom\nIf you chose to modify your meal, follow the\nHelloCustom instructions on the flip side of this card',
+      '10 oz | 20 oz  10 oz | 20 oz\n© Ground Beef**  @ Ground Turkey\nCalories: 1250  Calories: 1190',
+      'PREP: 10 MIN  COOK: 30 MIN  CALORIES: 930',
+      'C Ground Beef is fully cooked when internal temperature reaches 160°. © *Ground Turkey is fully cooked when internal temperature reaches 165*',
+    ].join('\n\n')
+    const r = withoutSmallPrint(text)
+    expect(r.swaps).toEqual(['Ground Beef (10 oz | 20 oz)', 'Ground Turkey (10 oz | 20 oz)'])
+    expect(r.safety).toEqual(['Ground Beef is fully cooked when internal temperature reaches 160°.', 'Ground Turkey is fully cooked when internal temperature reaches 165°'])
+    expect(r.text).toBe('--- Page 1 ---\n\nPREP: 10 MIN  COOK: 30 MIN  CALORIES: 930')
+  })
+
+  it('a grid’s cells read side by side, one under another', () => {
+    expect(splitGridRows('1 oz | 2 oz  1 tsp | 1 tsp\nDried Apricots  Hot Sauce\nSimmer  for 5 minutes')).toBe('1 oz | 2 oz\nDried Apricots\n\n1 tsp | 1 tsp\nHot Sauce\nSimmer  for 5 minutes')
+    // not a grid: as it was
+    expect(splitGridRows('2 cups  3 tbsp\nflour and sugar')).toBe('2 cups  3 tbsp\nflour and sugar')
+    expect(splitGridRows('Serves 4  Prep 10 min\nEasy  Quick')).toBe('Serves 4  Prep 10 min\nEasy  Quick')
   })
 })
