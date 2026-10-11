@@ -67,7 +67,7 @@ const STRUCTURE = (text: string) => `Below is the text read from photos of a rec
 - ingredients: only what goes into the dish, one per line, amount first ("10 oz Ground Beef"). Where amounts are given for different numbers of people (columns like "2-person | 4-person"), keep both exactly as on the card ("½ Cup | 1 Cup Jasmine Rice") and set servings to the first column's number of people. Each ingredient has its own amount on the card (on a grid of pictures, the amount is printed with the name) – keep it with its name. An ingredient whose amount you can't read: just its name. Not ingredients: column headings ("2 PERSON | 4 PERSON"), calories.
 - A card often shows the ingredients as a grid of pictures, each with its amount on one line and its name on the next ("1 | 1" then "Yellow Onion"): put each amount with its own name, one ingredient per line – never two in one. Leave out what's only the other side of the card's options ("HelloCustom", calories for a swap).
 - Not ingredients: the equipment ("Bust out", "You'll need": pans, pots, baking sheets, paper towels) and what you bring from home (salt, pepper, oil, butter you supply) – those go in notes ("You'll need: …", "From your pantry: …").
-- steps: in order, each with its title if it has one ("Cook the beef") and its text.
+- steps: in order, each with its title if it has one ("Cook the beef") and its text. Where the card numbers its steps ("1 PREP", "2 COOK RICE"), those are the steps, each title with the text under it – a tip box ("THE RICE IS RIGHT: …"), the "Bust out" list and the pantry list are notes, not steps.
 - notes: what else matters – what you'll need (pans, tools), what you bring from home (salt, oil, butter), tips. Never a "?" or a placeholder: leave out what you can't read.
 - Times as written ("30 min"), only the ones the text gives: don't work out a cook or total time yourself.
 - Reply with the JSON only.
@@ -258,7 +258,57 @@ export function amountFromReading(item: string, readLines: string[]): string {
 
 /** The card's own small print – not part of the recipe: social media, a phone number, packaging, the other side's options. */
 export const isBoilerplate = (t: string) =>
-  /hellofresh(?:pics|\.com)|share your|@\w{3,}|\(\d{3}\)\s*\d{3}-\d{4}|sustainab|rest assured|if you chose to modify|flip side of this card|scan here|issues with your order|get social|www\.|\.com\b/i.test(t)
+  /hellofresh(?:pics|\.com)|share your|@\w{3,}|\(\d{3}\)\s*\d{3}-\d{4}|sustainab|rest assured|if you chose to modify|flip side of this card|scan here|issues with your order|get social|www\.|\.com\b|^\W*hellocustom\W*$/i.test(t)
+
+/**
+ * The card's small print taken out of what was read, before the AI sets it out (it would otherwise
+ * end up among the ingredients): a block mostly of it goes, and so do the "HelloCustom" swaps under
+ * their heading (an amount and a protein, "Calories: 1250") – those come back as one note.
+ */
+export function withoutSmallPrint(text: string): { text: string; swaps: string[]; safety: string[] } {
+  const swaps: string[] = []
+  // the footnotes on when meat is cooked through: a note of their own (not a step, as they'd become)
+  const safety: string[] = []
+  const pages = text.split(/(?=^--- Page \d+ ---$)/m)
+  const kept = pages.map((page) => {
+    let custom = false
+    return page
+      .split(/\n\s*\n/)
+      .filter((block) => {
+        const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
+        if (!lines.length) return true
+        if (lines.some((l) => /^\W*hellocustom\W*$/i.test(l))) custom = true
+        if (/fully cooked when internal temperature/i.test(lines.join(' '))) {
+          safety.push(
+            ...lines
+              .join(' ')
+              // (the degree sign read as a quote: 160")
+              .replace(/(\d)["”]/g, '$1°')
+              .split(/(?<=\.|°F?|["”]\.?)\s+(?=["“]?\p{Lu})/u)
+              .map((x) => x.replace(/^["“”]+|["“”]+(?=\.?$)/g, '').trim())
+              .filter(Boolean),
+          )
+          return false
+        }
+        const small = lines.filter(isBoilerplate).length
+        if (small && small >= lines.length / 2) return false
+        if (custom) {
+          // a swap: its amount and its name ("10 oz | 20 oz" / "Ground Beef"), or its calories
+          if (lines.length <= 3 && lines.every((l) => /^calories\b/i.test(l) || /^[\d½¼¾⅓⅔ |.,]+\s*(?:oz|lbs?|g|pieces?|units?)?\b[\d½¼¾⅓⅔ |.,ozlbsg]*$/i.test(l) || /^[\p{L}][\p{L}\s'’*”"-]{2,40}$/u.test(l))) {
+            const amount = lines.find((l) => /\d/.test(l) && !/^calories/i.test(l))
+            const name = lines.find((l) => /^\p{L}/u.test(l) && !/^calories/i.test(l))
+            if (name) swaps.push(`${name.replace(/[*”"]+$/g, '').trim()}${amount ? ` (${amount})` : ''}`)
+            return false
+          }
+          custom = false
+        }
+        return true
+      })
+      .map((block) => block.split('\n').filter((l) => !isBoilerplate(l)).join('\n'))
+      .join('\n\n')
+  })
+  return { text: kept.join(''), swaps, safety }
+}
 
 /** A "Bust out" list as one note ("BUST OUT • Zester • 2 Small bowls • Kosher salt • Olive oil (2 TBSP | 3 TBSP)"): its items. */
 export function bustOutItems(t: string): string[] | null {
@@ -346,7 +396,7 @@ export async function recipeFromPhotos(
     } else reader ||= 'Apple text recognition (on the phone)'
     texts.push(text)
   }
-  const all = texts.map((t, i) => `--- Page ${i + 1} ---\n${t}`).join('\n\n')
+  const { text: all, swaps, safety } = withoutSmallPrint(texts.map((t, i) => `--- Page ${i + 1} ---\n${t}`).join('\n\n'))
   if (all.replace(/[^\p{L}]/gu, '').length < 40) throw new Error('No recipe text could be read in the photos – try clearer, closer photos in good light.')
 
   // 2. set out as a recipe
@@ -445,6 +495,8 @@ export async function recipeFromPhotos(
   if (fromHome.length) notes.push(`From your pantry: ${fromHome.join(', ')}`)
   if (allergens.size && !/\bcontains\b|allergen/i.test(said)) notes.push(`Contains: ${[...allergens].filter((a, i, all) => all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i).join(', ')}`)
   if (columns.length) notes.push(`Amounts for the other number of people on the card: ${columns.join(', ')}`)
+  if (swaps.length && !/hellocustom/i.test(said)) notes.push(`HelloCustom options: ${swaps.join(', ')}`)
+  for (const x of safety) if (!said.includes(x.toLowerCase().slice(0, 30))) notes.push(x)
   const nutrition = (s.nutrition ?? [])
     .map((x) => (Array.isArray(x) ? ([str(x[0]), str(x[1])] as [string, string]) : (['', ''] as [string, string])))
     .filter(([k, v]) => k && v && readNumbers.has((/\d+(?:\.\d+)?/.exec(v)?.[0] ?? '').replace(',', '.')))

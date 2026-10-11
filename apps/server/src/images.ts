@@ -424,3 +424,100 @@ export async function rotatePicture(data: Buffer, mime: string, quarters: number
     return null
   }
 }
+
+/** A grey picture (one byte a pixel, 0 black – 255 white) as a PNG. */
+export function grayPng(width: number, height: number, gray: Uint8Array): Buffer {
+  const raw = Buffer.alloc((width + 1) * height)
+  for (let y = 0; y < height; y++) {
+    raw[y * (width + 1)] = 0
+    raw.set(gray.subarray(y * width, (y + 1) * width), y * (width + 1) + 1)
+  }
+  return encodePng(width, height, raw)
+}
+
+/**
+ * Solid bands of colour with light writing on them – a recipe card's step titles ("1 PREP" on
+ * green), its times bar ("PREP: 10 MIN | COOK: 30 MIN") – as boxes in pixels. Tesseract often passes
+ * over these, taking them for part of a picture. A band is a rectangle: rows of coloured cells with
+ * the same left and right ends, a few rows tall, and much wider than tall; a photo's colours are
+ * ragged and don't make one.
+ */
+export function colourBands(img: { width: number; height: number; rgba: Uint8Array }): { x: number; y: number; w: number; h: number }[] {
+  const { width: W, height: H, rgba } = img
+  const s = Math.max(4, Math.round(Math.max(W, H) / 400))
+  const cw = Math.ceil(W / s)
+  const ch = Math.ceil(H / s)
+  const on = new Uint8Array(cw * ch)
+  const light = new Float32Array(cw * ch)
+  for (let cy = 0; cy < ch; cy++)
+    for (let cx = 0; cx < cw; cx++) {
+      let colour = 0
+      let white = 0
+      let n = 0
+      for (let y = cy * s; y < Math.min(H, cy * s + s); y++)
+        for (let x = cx * s; x < Math.min(W, cx * s + s); x++) {
+          const i = (y * W + x) * 4
+          const mx = Math.max(rgba[i], rgba[i + 1], rgba[i + 2])
+          const mn = Math.min(rgba[i], rgba[i + 1], rgba[i + 2])
+          if (mx - mn >= 45 && mx >= 60) colour++
+          else if (mn >= 170) white++
+          n++
+        }
+      // a cell of the band, or of the writing on it (part colour, part white)
+      on[cy * cw + cx] = colour >= n * 0.3 && colour + white >= n * 0.85 ? 1 : 0
+      light[cy * cw + cx] = white / n
+    }
+  // each row's longest run of coloured cells (a gap of a letter's width is still the band)
+  const runs: ({ a: number; b: number } | null)[] = []
+  for (let cy = 0; cy < ch; cy++) {
+    let best: { a: number; b: number } | null = null
+    let a = -1
+    let gap = 0
+    for (let cx = 0; cx <= cw; cx++) {
+      if (cx < cw && on[cy * cw + cx]) {
+        if (a < 0) a = cx
+        gap = 0
+      } else if (a >= 0 && (cx === cw || ++gap > 10)) {
+        const b = cx - gap
+        if (!best || b - a > best.b - best.a) best = { a, b }
+        a = -1
+        gap = 0
+      }
+    }
+    runs.push(best && best.b - best.a >= cw * 0.1 ? best : null)
+  }
+  const out: { x: number; y: number; w: number; h: number }[] = []
+  let cy = 0
+  while (cy < ch) {
+    const r = runs[cy]
+    if (!r) {
+      cy++
+      continue
+    }
+    // (a photo of a card is seldom quite straight: the ends may drift a little from row to row)
+    let end = cy + 1
+    let lo = r.a
+    let hi = r.b
+    while (end < ch && runs[end] && Math.abs(runs[end]!.a - runs[end - 1]!.a) <= 2 && Math.abs(runs[end]!.b - runs[end - 1]!.b) <= 2) {
+      lo = Math.min(lo, runs[end]!.a)
+      hi = Math.max(hi, runs[end]!.b)
+      end++
+    }
+    const rows = end - cy
+    const wCells = hi - lo
+    if (rows >= 3 && rows * s >= H * 0.008 && rows * s <= H * 0.08 && wCells >= rows * 4) {
+      let filled = 0
+      let lightish = 0
+      for (let y = cy; y < end; y++)
+        for (let x = lo; x < hi; x++) {
+          filled += on[y * cw + x]
+          lightish += light[y * cw + x]
+        }
+      const area = rows * wCells
+      // solid, with something light written on it
+      if (filled >= area * 0.7 && lightish >= area * 0.03) out.push({ x: lo * s, y: cy * s, w: wCells * s, h: rows * s })
+    }
+    cy = end
+  }
+  return out
+}
