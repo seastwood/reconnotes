@@ -1,8 +1,9 @@
 # ReconNotes
 
 Offline-first notes for **iPhone, iPad and the web**, with **Apple Pencil** drawing, a
-**self-hosted Linux server** for sync and backups, and **AI handwriting recognition**
-(Claude or your own local Ollama model).
+**self-hosted Linux server** for sync and backups, and AI that can run entirely on your own
+hardware (Ollama, Whisper, Tesseract) – or Claude, if you'd like. It reads handwriting, photos of
+pages and recordings, imports web pages, recipes and manuals, and answers questions from your notes.
 
 It's built for one person's daily notes, and anyone can run it.
 
@@ -28,13 +29,52 @@ It's built for one person's daily notes, and anyone can run it.
 - **Undo** is always one tap away, in the toolbar and in the drawing tools. Text and ink share one
   undo history.
 - **Search everything.** One search covers typed text, handwriting (recognised automatically),
-  text in images, screenshots and charts, PDFs, and audio transcripts. Search works offline too.
+  text in images, screenshots and charts, PDFs, and audio transcripts. Search works offline too,
+  forgives typos, and – with an embedding model – also finds notes **by meaning** ("safety
+  equipment" finds "safety glasses"). *Find* in a note (⌘F) highlights matches inside handwriting,
+  pictures and transcripts, and can replace text.
+- **Organise and connect.** `#tags` (with a Tags section in the sidebar), `[[links]]` between notes
+  with *Linked from* at the bottom of each, templates (*Save as template*, then *New from template*),
+  version history to look back at or restore any earlier state, and pinned notes.
+- **Read-only notes and folders.** Lock a note or a whole folder so you can't change it by
+  accident: the editing toolbar goes away until you switch it off again in the ⋯ menu.
+- **Import from the web.** Paste a link: an article, guide or manual becomes a note with its
+  headings, lists, tables, code and pictures – or a whole multi-page guide becomes a folder of notes.
+  A PDF manual can be split at its chapters, with a *Contents* note linking them. *Check for
+  updates* fetches the page again later and brings the note up to date. Rule numbers in a manual
+  ("G301") are searchable and linkable.
+- **Import photos of pages.** Take or pick photos and say what they are – or let *Auto* work it out:
+  a **recipe** (a meal-kit card, a cookbook page, the back of a box), **handwriting**, a **printed
+  page** (book, magazine, newspaper), **directions** (a trail guide, instructions), or just a
+  **general note**. Photos taken sideways or upside down are turned the right way up. On the iPhone
+  and iPad, Apple's text recognition reads them on the device; from a browser, the server reads the
+  print with Tesseract and checks small print like fractions with your vision model.
+- **Recipes and cook mode.** Recipes (from photos or web pages) are set out with servings, times,
+  ingredients to tick off and numbered steps; amounts for a different number of people, equipment
+  and pantry items go into notes. **Cook mode** shows every step as a tile with its ingredients, or
+  one step at a time, big, with the screen kept on.
+- **Share folders with others.** Give someone a read-only link to a folder (*⋯ › Share folder…*):
+  they see everything in it – notes, pictures, recordings, files – always up to date, with cook mode
+  on recipes. Each person gets their own link, with an optional passcode, and shared links are
+  served on a separate port that exposes nothing else of your server. See
+  [`docs/setup/Sharing folders.md`](docs/setup/Sharing%20folders.md).
 - **AI.** *Convert to text* turns a drawing (or just the writing you lasso) into clean typed text.
-  *Compile* turns a whole note, handwriting and typing, into a tidy new document. *Ask your notes*
-  (or *Ask about this note* in the ⋯ menu) answers from your own notes as it's written, with
-  sources and follow-up questions. Under each note, *Related notes* are found by meaning.
+  *Compile* turns a whole note, handwriting and typing, into a tidy new document. *Summarise*,
+  *Extract to-dos* and *Clean up wording* work on any note. *Ask your notes* (or *Ask about this
+  note*, or *Ask this folder*) answers from your own notes as it's written, with sources that open
+  at the passage it used, and follow-up questions. Under each note, *Related notes* are found by
+  meaning.
+- **AI that gets better at your words.** Names and terms you list (*Settings › Handwriting &
+  speech › Your words*) are spelled right in handwriting and transcripts, and a word you correct
+  after a job is remembered for next time. Uncertain words are marked for you to check.
+- **AI that keeps working.** Each AI task has its own list of agents: if one fails, the next takes
+  over. A health check shows which agents and models are reachable and what's loaded on the GPU
+  (one card or several), a test bench compares models on your own samples, and a monthly spending
+  cap guards a Claude API key.
 - **Meetings.** *New meeting* (the people icon above the note list) makes a meeting note and starts
-  recording; when you stop, you get a summary, decisions and action items with due dates.
+  recording; when you stop, you get a summary, decisions and action items with due dates, each
+  point linked to where it was said in the recording. With the speaker service, the transcript is
+  told apart by voice, and voices you've named are recognised in later meetings.
 - **Every day and week.** *Today* opens your daily note, with yesterday's unfinished to-dos carried
   over. *Tasks* lists every checklist item in every note. Your dated to-dos can appear in Apple or
   Google Calendar (*Settings › Calendar & weekly digest*), and a weekly digest note sums up the
@@ -92,7 +132,8 @@ It's built for one person's daily notes, and anyone can run it.
 | `apps/server` | The self-hosted sync, backup, search and AI server (Node.js, SQLite) |
 | `apps/web` | The app (React + TipTap). Runs in a browser, installs as a PWA, and is wrapped for iOS |
 | `apps/web/ios` | The native iOS/iPadOS project (Capacitor), including the Apple Pencil side-button bridge |
-| `deploy/` | systemd unit |
+| `deploy/` | systemd unit, the speaker-label service (`diarize.py`) and the GPU memory monitor (`gpu-stats.py`) |
+| `docs/setup` | Step-by-step setup guides (also added to the app as notes on first start) |
 | `docs/ARCHITECTURE.md` | How sync, conflict handling, ink, search and AI work |
 
 ## Quick start (development)
@@ -211,7 +252,10 @@ on the server and never sent back to your devices.
 | Clean up converted text | Second pass: a general model fixes misread words, rejoins wrapped lines and tidies lists and headings. With no agent here, *Convert to text* uses a *Compile notes* text model that isn't also a handwriting reader |
 | Text from images | Reads text in photos, screenshots and charts so search finds them |
 | Text from PDFs | Extracts PDF text for search (Claude only) |
-| Compile notes | Turns a whole note into a clean document |
+| Compile notes | Turns a whole note into a clean document; also sets out imported recipes and pages |
+| Ask your notes | Answers questions from your notes (uses *Compile notes* agents when empty) |
+| Audio to text | Transcribes recordings and meetings (a Whisper server; see *Audio to text* below) |
+| Search by meaning | An embedding model (e.g. `nomic-embed-text`) for search by meaning, related notes and Ask |
 
   The first enabled agent in a list is tried first. If it fails (unreachable, timed out, wrong
   model, refused), the next one takes over automatically. The last error shows on the agent's
@@ -222,6 +266,23 @@ on the server and never sent back to your devices.
   Unchanged lines are not re-read. *Whole page* suits general vision models like Claude.
 - Agents that can't read images still work for *Compile*: the server transcribes the
   handwriting with your handwriting agents first and hands them text.
+
+- **The GPU.** On a small card, ReconNotes unloads one model before loading the next so nothing
+  runs half on the CPU. With more than one card (or a bigger one), models that fit stay loaded side
+  by side. Run `deploy/gpu-stats.py` on the Ollama machine so it can see each card's memory (the
+  *In memory* bar in *Jobs*); see the Speaches guide.
+
+### Photos of pages
+
+*Import › Photos of pages* reads photos of recipes, handwriting, printed pages and directions. In
+the iPhone/iPad app the text is read on the device by Apple's text recognition. From a browser,
+the server reads the print with [Tesseract](https://github.com/tesseract-ocr/tesseract)
+(`sudo apt install tesseract-ocr`; the log says "Tesseract found" on start) – exact words with
+where each one is, so columns and grids are read in order – and shows doubtful bits (small
+fractions, tiny amounts) close up to your vision model. Without Tesseract, the vision model reads
+the photos. A text model then sets the text out as a recipe, steps or a note, and what it writes is
+checked against what was read, so nothing is made up. For pages in other languages, install their
+packs (e.g. `tesseract-ocr-fra`) and set `RECON_TESSERACT_LANG=eng+fra`.
 
 ### Connecting your Ollama machine
 
@@ -403,7 +464,7 @@ allow offline app caching on secure origins.
 ## Tests
 
 ```bash
-npm test                 # core + server: CRDT merges, folders, search, attachments, backups, restore, export/import, device keys, share links
+npm test                 # core + server: CRDT merges, folders, search, attachments, backups, restore, export/import, device keys, sharing, imports, recipes
 npm run build && npm run e2e   # browser test: two devices, offline edits, drawing, undo, search
 ```
 
