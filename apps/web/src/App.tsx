@@ -13,7 +13,7 @@ import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet, useStore } from './lib/store'
-import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, openAskChat, toggleAskChat } from './lib/askChat'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, openAskChat, openChatRef, toggleAskChat } from './lib/askChat'
 import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
@@ -309,6 +309,7 @@ export function App() {
   onLink.current = (a) => {
     if (a.kind === 'open') return openFromReminder.current(a.noteId, a.find)
     if (a.kind === 'search') return showSearch(a.query)
+    if (a.kind === 'chat') return openChatRef(a)
     const id = createNote(workspaceDoc, { folderId: nav.view.kind === 'folder' ? nav.view.folderId : null })
     if (a.text) {
       const { handle, close } = sync.open(noteDocName(id))
@@ -581,7 +582,7 @@ export function App() {
   const appRef = useRef({ nav, showView, openNote, showSearch, setTheme: (t: 'light' | 'dark' | 'system') => settings.set({ theme: t }) })
   appRef.current = { nav, showView, openNote, showSearch, setTheme: (t) => settings.set({ theme: t }) }
   // the buttons on "job finished" messages
-  useEffect(() => setJobNavigator({ openNote: (id) => appRef.current.openNote(id), showJobs: () => appRef.current.showView({ kind: 'jobs' }), showSearch: (q) => appRef.current.showSearch(q) }), [])
+  useEffect(() => setJobNavigator({ openNote: (id) => appRef.current.openNote(id), showJobs: () => appRef.current.showView({ kind: 'jobs' }) }), [])
   const templatesKey = ws.notes.filter((n) => n.template && !n.trashedAt).map((n) => `${n.id}:${n.title}`).join('|')
   const openNoteMeta = note && !note.trashedAt ? note : null
   useEffect(() => {

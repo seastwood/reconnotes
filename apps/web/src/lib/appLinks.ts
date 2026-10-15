@@ -11,6 +11,7 @@ import { applyConnectData } from './connectLink'
  *   reconnotes://scan          a new note, scanning straight away
  *   reconnotes://open?note=ID[&find=…]  open a note (at that text)
  *   reconnotes://search?q=…    search
+ *   reconnotes://chat?thread=ID[&note=ID|&folder=ID]  a chat at a conversation (an answer)
  *   reconnotes://connect?data= connect to a server (setup link)
  *
  * They come from the Home Screen / Lock Screen widget and Siri / Shortcuts
@@ -22,6 +23,7 @@ export type LinkAction =
   | { kind: 'new'; text?: string; then?: 'record' | 'scan' }
   | { kind: 'open'; noteId: string; find?: string }
   | { kind: 'search'; query: string }
+  | { kind: 'chat'; thread: string; note?: string; folder?: string }
 
 interface AppLinksPlugin {
   take(): Promise<{ urls: string[] }>
@@ -69,6 +71,8 @@ export function parseLink(raw: string): LinkAction | 'connected' | null {
       return p.get('note') ? { kind: 'open', noteId: p.get('note')!, find: p.get('find') ?? undefined } : null
     case 'search':
       return { kind: 'search', query: p.get('q') ?? '' }
+    case 'chat':
+      return p.get('thread') ? { kind: 'chat', thread: p.get('thread')!, note: p.get('note') ?? undefined, folder: p.get('folder') ?? undefined } : null
     case 'connect':
       return p.get('data') && applyConnectData(p.get('data')!) ? 'connected' : null
     default:

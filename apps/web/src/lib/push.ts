@@ -1,3 +1,4 @@
+import { openChatRef } from './askChat'
 import { Capacitor } from '@capacitor/core'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { api } from './api'
@@ -79,8 +80,10 @@ export async function disablePush(): Promise<void> {
 export function startPush(open: { note(id: string): void; search(q: string): void }) {
   if (!pushSupported()) return
   void PushNotifications.addListener('pushNotificationActionPerformed', (a) => {
-    const d = (a.notification.data ?? {}) as { noteId?: string; question?: string }
-    if (d.question) open.search(d.question)
+    const d = (a.notification.data ?? {}) as { noteId?: string; question?: string; thread?: string; chatNote?: string; chatFolder?: string }
+    // an answer: its chat (a server from before sent only the question: a search for it)
+    if (d.thread) openChatRef({ thread: d.thread, note: d.chatNote || undefined, folder: d.chatFolder || undefined })
+    else if (d.question) open.search(d.question)
     else if (d.noteId) open.note(d.noteId)
   })
   if (pushOn() && isSyncConfigured())

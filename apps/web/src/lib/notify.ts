@@ -1,3 +1,4 @@
+import { openChatRef, type ChatRef } from './askChat'
 import { Capacitor } from '@capacitor/core'
 import { LocalNotifications } from '@capacitor/local-notifications'
 
@@ -26,18 +27,20 @@ export async function askNotificationPermission(): Promise<boolean> {
 
 let nextId = 1_000_000_000 + Math.floor(Math.random() * 1e6)
 
-export async function showNotification(title: string, body: string, noteId: string | null, open: (id: string) => void) {
+export async function showNotification(title: string, body: string, noteId: string | null, open: (id: string) => void, chat?: ChatRef) {
   if (native()) {
     const p = await LocalNotifications.checkPermissions()
     if (p.display !== 'granted') return
-    await LocalNotifications.schedule({ notifications: [{ id: nextId++, title, body, extra: noteId ? { noteId } : undefined }] })
+    await LocalNotifications.schedule({ notifications: [{ id: nextId++, title, body, extra: chat ? { chat } : noteId ? { noteId } : undefined }] })
     return
   }
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
-  const n = new Notification(title, { body, tag: noteId ?? undefined })
+  const n = new Notification(title, { body, tag: chat?.thread ?? noteId ?? undefined })
   n.onclick = () => {
     window.focus()
-    if (noteId) open(noteId)
+    // an answer: its chat
+    if (chat) openChatRef(chat)
+    else if (noteId) open(noteId)
     n.close()
   }
 }

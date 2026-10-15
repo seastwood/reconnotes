@@ -1,3 +1,4 @@
+import { chatRefOf, openChatRef } from './askChat'
 import { Capacitor } from '@capacitor/core'
 import { newId } from '@reconnotes/core'
 import { Store, useStore } from './store'
@@ -266,7 +267,7 @@ export async function deleteJob(id: string) {
 
 // --- telling you when it's done -------------------------------------------------
 
-type Navigator = { openNote(id: string): void; showJobs(): void; showSearch?(query: string): void }
+type Navigator = { openNote(id: string): void; showJobs(): void }
 let nav: Navigator | null = null
 /** The app tells us how to open a note or the job list (for the toasts' buttons). */
 export function setJobNavigator(n: Navigator) {
@@ -300,19 +301,21 @@ function announce(j: Job) {
   if (document.hidden) {
     if (settings.get().jobNotifications && !pushOn() && !(Capacitor.isNativePlatform() && serverPush) && (j.status === 'done' || j.status === 'failed')) {
       const note = j.status === 'done' ? productNote(j) : j.noteId
+      const chat = j.kind === 'ask' && j.status === 'done' ? chatRefOf(j) : null
       void showNotification(
-        `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,
+        chat ? 'Your notes have an answer' : `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,
         j.status === 'done' ? j.title : `${j.title}: ${j.error ?? ''}`.slice(0, 200),
-        note,
+        chat ? null : note,
         (id) => nav?.openNote(id),
+        chat ?? undefined,
       ).catch(() => {})
     }
     return
   }
   if (awaited.has(j.id)) return
-  if (j.status === 'done' && j.kind === 'ask' && nav?.showSearch) {
-    const q = String(j.input.question ?? '')
-    showActionToast('Your notes have an answer', 'Show', () => nav?.showSearch?.(q))
+  if (j.status === 'done' && j.kind === 'ask') {
+    // the answer: in its chat (the search only had the question)
+    showActionToast('Your notes have an answer', 'Show', () => openChatRef(chatRefOf(j)))
   } else if (j.status === 'done') {
     const note = productNote(j)
     if (note) showActionToast(`${label} finished – ${j.title}`, 'Open', () => nav?.openNote(note))

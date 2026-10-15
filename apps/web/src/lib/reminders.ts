@@ -1,3 +1,4 @@
+import { openChatRef, type ChatRef } from './askChat'
 import { Capacitor } from '@capacitor/core'
 import { findTextFor } from './findText'
 import { LocalNotifications } from '@capacitor/local-notifications'
@@ -81,8 +82,9 @@ async function reschedule(ws: WorkspaceSnapshot) {
 export function startReminders(openNote: (noteId: string, find?: string) => void) {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('LocalNotifications')) return
   void LocalNotifications.addListener('localNotificationActionPerformed', (e) => {
-    const extra = e.notification.extra as { noteId?: string; find?: string } | undefined
-    if (extra?.noteId) openNote(extra.noteId, extra.find)
+    const extra = e.notification.extra as { noteId?: string; find?: string; chat?: ChatRef } | undefined
+    if (extra?.chat?.thread) openChatRef(extra.chat)
+    else if (extra?.noteId) openNote(extra.noteId, extra.find)
   })
   const run = (ws: WorkspaceSnapshot) => {
     if (timer) clearTimeout(timer)

@@ -111,3 +111,12 @@ describe('notifications when jobs finish', () => {
     expect(JSON.parse(pushes[0].body).data.url).toBe('reconnotes://open')
   })
 })
+
+describe('where an answer’s notification goes', () => {
+  it('to its conversation: the chat it’s in, and what it was asked about', async () => {
+    const { chatOf } = await import('../src/notify')
+    expect(chatOf({ id: 'j1', input: { question: 'q', notes: ['n1'] } })).toEqual({ thread: 'j1', note: 'n1' })
+    expect(chatOf({ id: 'j2', input: { question: 'q', folders: ['f1'], thread: 'j0' } })).toEqual({ thread: 'j0', folder: 'f1' })
+    expect(chatOf({ id: 'j3', input: { question: 'q', folders: [] } })).toEqual({ thread: 'j3' })
+  })
+})

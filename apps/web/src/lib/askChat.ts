@@ -1,4 +1,6 @@
+import { getNotes, listFolders, readNote } from '@reconnotes/core'
 import { Store, safeLocalGet, safeLocalSet } from './store'
+import { workspaceDoc } from './workspace'
 
 /**
  * The Ask chat: which note (or folder, or all your notes) the open chat is about, which chat was
@@ -84,4 +86,38 @@ export function toggleAskChat(fallback: AskChatTarget | null) {
   const t = last ?? fallback
   if (t) openAskChat(t)
   else browseChats()
+}
+
+/**
+ * Where a question's conversation is: its chat (the first question's job) and what it was asked
+ * about – one note, one folder, or (neither) all your notes. In notifications and links.
+ */
+export interface ChatRef {
+  thread: string
+  note?: string
+  folder?: string
+}
+
+/** A question's conversation, from the job that asked it. */
+export function chatRefOf(job: { id: string; input: Record<string, unknown> }): ChatRef {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : [])
+  const notes = list(job.input.notes)
+  const folders = list(job.input.folders)
+  const thread = typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id
+  if (notes.length === 1) return { thread, note: notes[0] }
+  if (!notes.length && folders.length === 1) return { thread, folder: folders[0] }
+  return { thread }
+}
+
+/** Open the chat at that conversation (its subject's name looked up here). */
+export function openChatRef(ref: ChatRef) {
+  if (ref.note) {
+    const m = getNotes(workspaceDoc).get(ref.note)
+    return openChatAt({ noteId: ref.note, title: m ? readNote(m).title : '' }, ref.thread)
+  }
+  if (ref.folder) {
+    const f = listFolders(workspaceDoc).find((x) => x.id === ref.folder)
+    return openChatAt({ folderId: ref.folder, title: f?.name ?? 'Folder' }, ref.thread)
+  }
+  openChatAt(ALL_NOTES, ref.thread)
 }

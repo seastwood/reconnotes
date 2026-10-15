@@ -99,10 +99,16 @@ export class Notifier {
     // the device that asked is open: it shows its own notification
     if (Date.now() - (this.watching.get(job.device ?? '') ?? 0) < 40_000) return
     const note = job.kind === 'compile' && typeof job.result?.noteId === 'string' ? job.result.noteId : job.noteId
+    // an answer: its conversation (the chat it's in, and what it was asked about)
+    const chat = job.kind === 'ask' && job.status === 'done' ? chatOf(job) : null
     const notice: Notice = {
-      title: job.kind === 'ask' && job.status === 'done' ? 'Your notes have an answer' : job.status === 'done' ? `${label} finished` : `${label} failed`,
+      title: chat ? 'Your notes have an answer' : job.status === 'done' ? `${label} finished` : `${label} failed`,
       message: job.status === 'done' ? job.title : `${job.title}: ${job.error ?? 'failed'}`.slice(0, 400),
-      link: note ? `reconnotes://open?note=${note}` : null,
+      link: chat
+        ? `reconnotes://chat?thread=${encodeURIComponent(chat.thread)}${chat.note ? `&note=${chat.note}` : chat.folder ? `&folder=${chat.folder}` : ''}`
+        : note
+          ? `reconnotes://open?note=${note}`
+          : null,
       failed: job.status === 'failed',
     }
     // the app on the device that asked, straight through Apple
@@ -110,6 +116,11 @@ export class Notifier {
       const data: Record<string, string> = { jobId: job.id }
       if (note) data.noteId = note
       if (job.kind === 'ask') data.question = String(job.input.question ?? '')
+      if (chat) {
+        data.thread = chat.thread
+        if (chat.note) data.chatNote = chat.note
+        if (chat.folder) data.chatFolder = chat.folder
+      }
       void this.apns
         .send({ title: notice.title, body: notice.message, data }, this.pushTargets(job.device))
         .catch((err) => log.warn(`push notification failed: ${(err as Error).message}`))
@@ -164,4 +175,15 @@ export class Notifier {
 /** ntfy reads RFC 2047 encoded headers, so titles with emoji or accents survive. */
 function encodeHeader(v: string): string {
   return /^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${Buffer.from(v).toString('base64')}?=`
+}
+
+/** A question's conversation: its chat (the first question's job) and what it was about – one note, one folder, or all. */
+export function chatOf(job: { id: string; input: Record<string, unknown> }): { thread: string; note?: string; folder?: string } {
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : [])
+  const notes = list(job.input.notes)
+  const folders = list(job.input.folders)
+  const thread = typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id
+  if (notes.length === 1) return { thread, note: notes[0] }
+  if (!notes.length && folders.length === 1) return { thread, folder: folders[0] }
+  return { thread }
 }
