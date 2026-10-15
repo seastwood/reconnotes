@@ -43,6 +43,11 @@ It's built for one person's daily notes, and anyone can run it.
   A PDF manual can be split at its chapters, with a *Contents* note linking them. *Check for
   updates* fetches the page again later and brings the note up to date. Rule numbers in a manual
   ("G301") are searchable and linkable.
+- **Import documents.** *Import › Documents*: Word, Excel, PowerPoint, OpenDocument, PDF, RTF, HTML,
+  CSV and text files become notes you can edit – headings, lists, tables, links and pictures kept; a
+  spreadsheet as tables, a presentation a section per slide. With LibreOffice on the server, older
+  Office files (.doc, .xls, .ppt) and Apple's Pages, Numbers and Keynote too. Anything else is kept as
+  a file you can open.
 - **Import photos of pages.** Take or pick photos and say what they are – or let *Auto* work it out:
   a **recipe** (a meal-kit card, a cookbook page, the back of a box), **handwriting**, a **printed
   page** (book, magazine, newspaper), **directions** (a trail guide, instructions), or just a
@@ -98,7 +103,7 @@ It's built for one person's daily notes, and anyone can run it.
   like.
 - **Never locked in.** *Settings › Export & import*: every note as Markdown in its folders, with
   pictures, files and drawings, in one zip. It imports Markdown or zips back, including from
-  Obsidian, Bear and Notion, with folders, checklists, tables and `[[links]]`.
+  Obsidian, Bear and Notion, with folders, checklists, tables and `[[links]]` – and documents, as above.
 - **A key per device.** *Settings › Devices*: give each device its own key and switch a lost one
   off on its own. Setup links connect a new device in one tap.
 - **Quick and versatile.** ⌘K runs any command or opens any note. You can select several notes, or
@@ -165,7 +170,11 @@ in a **ReconNotes Setup** folder (each once; edit or delete them freely – an e
 You need Node.js 20 or newer (or Docker). Without Docker, also install `ffmpeg` if you'll transcribe
 recordings with a Wyoming (Home Assistant) Whisper server, and `tesseract-ocr` to read photos of
 printed pages imported from a browser: `sudo apt update && sudo apt install ffmpeg tesseract-ocr`.
-(The Docker image already has both.)
+(The Docker image already has both.) To import older Office files (.doc, .xls, .ppt) and Pages,
+Numbers and Keynote files as notes, also install LibreOffice without its desktop parts:
+`sudo apt install libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui` – the
+server finds `soffice` by itself (or set `RECON_SOFFICE` to its path). Without it those still come in:
+Pages, Numbers and Keynote as their preview, the rest as files.
 
 ### Option A: Docker
 

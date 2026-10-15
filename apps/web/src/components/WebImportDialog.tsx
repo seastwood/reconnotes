@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BookOpen, Camera, ChefHat, FileText, Globe, Loader2, Sparkles, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
+import { BookOpen, Camera, ChefHat, FileText, FileUp, Globe, Loader2, Sparkles, PenLine, Plus, RotateCw, ScanLine, Signpost, X, type LucideIcon } from 'lucide-react'
 import { isFinished, submitJob, useJobs, watchingJob } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
 import { addAttachment, flushUploads } from '../lib/attachments'
 import { trashNotes } from '../lib/noteActions'
+import { IMPORT_KINDS, importFiles, importSummary } from '../lib/importFiles'
 import { preferServerOcr, recognizeImageOnDevice, recognizePageOnDevice, useDeviceOcr } from '../lib/deviceOcr'
 import { scanDocument, scannerAvailable } from '../lib/scanner'
 import { rotateImage, uprightPhoto } from '../lib/rotate'
 
-export type ImportTab = 'web' | 'photos'
+export type ImportTab = 'web' | 'photos' | 'files'
 export type PhotoKind = 'auto' | 'general' | 'recipe' | 'handwriting' | 'printed' | 'directions'
 
 /** What photos of pages can be, and what each becomes. */
@@ -253,7 +254,7 @@ export function WebImportDialog({
         }}
       >
         <h2>
-          {tab === 'web' ? <Globe size={18} /> : <Camera size={18} />} Import
+          {tab === 'web' ? <Globe size={18} /> : tab === 'files' ? <FileUp size={18} /> : <Camera size={18} />} Import
         </h2>
         {!isSyncConfigured() ? (
           <p className="hint">Importing is done by your ReconNotes server – connect one in Settings.</p>
@@ -265,6 +266,9 @@ export function WebImportDialog({
               </button>
               <button type="button" role="tab" aria-selected={tab === 'photos'} className={tab === 'photos' ? 'on' : ''} onClick={() => setTab('photos')}>
                 <Camera size={15} /> Photos of pages
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'files'} className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>
+                <FileUp size={15} /> Documents
               </button>
             </div>
             {tab === 'web' ? (
@@ -360,6 +364,8 @@ export function WebImportDialog({
               </button>
             </div>
             </>
+            ) : tab === 'files' ? (
+              <DocumentsTab folderId={folderId} onClose={onClose} onOpen={onOpen} />
             ) : (
             <>
             <div className="photo-kinds" role="radiogroup" aria-label="What’s in the photos?">
@@ -528,5 +534,55 @@ export function WebImportDialog({
       </form>
     </div>,
     document.body,
+  )
+}
+
+/** Documents from this device – Word, Excel, Pages, PDF, text… – each made a note in this folder. */
+function DocumentsTab({ folderId, onClose, onOpen }: { folderId: string | null; onClose: () => void; onOpen: (noteId: string) => void }) {
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const go = async (files: File[]) => {
+    if (!files.length) return
+    setBusy(true)
+    setMessage(null)
+    const r = await importFiles(files, folderId)
+    setBusy(false)
+    // one note made, nothing to say: open it
+    if (r.noteIds.length === 1 && !r.skipped.length && !r.errors.length) {
+      onOpen(r.noteIds[0])
+      onClose()
+      return
+    }
+    setMessage(importSummary(r))
+  }
+  return (
+    <>
+      <p className="hint">
+        {IMPORT_KINDS} files become notes you can edit – their headings, lists, tables, links and pictures kept; a spreadsheet as tables, a
+        presentation a section per slide. A zip of them keeps its folders. Any other file is kept as a file you can open.
+      </p>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          void go(Array.from(e.target.files ?? []))
+          e.target.value = ''
+        }}
+      />
+      <div className="photo-pick">
+        <button type="button" disabled={busy} onClick={() => input.current?.click()}>
+          {busy ? <Loader2 size={16} className="spin" /> : <FileUp size={16} />} {busy ? 'Importing…' : 'Choose files'}
+        </button>
+      </div>
+      {message && <p className="hint import-result">{message}</p>}
+      <div className="row">
+        <button type="button" onClick={onClose}>
+          {message ? 'Done' : 'Cancel'}
+        </button>
+      </div>
+    </>
   )
 }

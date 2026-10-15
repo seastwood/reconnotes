@@ -937,10 +937,8 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     try {
       files = unpack(name, data)
     } catch {
-      throw new HttpError(400, 'That file couldn’t be read. Import Markdown (.md) files or a .zip of them.')
+      throw new HttpError(400, 'That zip couldn’t be read.')
     }
-    if (!files.some((f) => /\.(md|markdown|mdown|txt)$/i.test(f.path)) && files.length === 1)
-      throw new HttpError(400, 'That isn’t a Markdown file. To add other files to a folder, use “Add files” in the notes list.')
     json(res, 200, await importNotes(config, store, ai, sync, files, folderId))
   })
 

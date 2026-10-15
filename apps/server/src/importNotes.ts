@@ -19,6 +19,7 @@ import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import { initialTextStatus, queueAttachment } from './attachments'
 import { readZip } from './zip'
+import { convertDocuments } from './docImport'
 
 /**
  * Strikethrough only between double tildes (~~gone~~): a single one is "about"
@@ -77,7 +78,8 @@ const mimeOf = (name: string) => MIME[/\.(\w+)$/.exec(name)?.[1]?.toLowerCase() 
 
 /** The files in an upload: a zip's contents, or the file itself. */
 export function unpack(name: string, data: Buffer): ImportFile[] {
-  if (/\.zip$/i.test(name) || (data.length > 4 && data.readUInt32LE(0) === 0x04034b50 && !MD.test(name))) {
+  // (a Word, Excel or Pages file is a zip too: a document, not a folder of them)
+  if (/\.zip$/i.test(name) || (data.length > 4 && data.readUInt32LE(0) === 0x04034b50 && !/\.[a-z0-9]{1,8}$/i.test(name))) {
     return readZip(data)
       .filter((e) => !e.name.endsWith('/') && !/(^|\/)(__MACOSX|\.[^/]+)(\/|$)/.test(e.name))
       .map((e) => ({ path: e.name, data: e.data() }))
@@ -92,8 +94,11 @@ export async function importNotes(
   sync: SyncEngine,
   input: ImportFile[],
   targetFolderId: string | null,
-): Promise<{ notes: number; files: number; noteIds: string[] }> {
+): Promise<{ notes: number; files: number; noteIds: string[]; skipped: string[] }> {
   let files = input.map((f) => ({ ...f, path: f.path.replace(/\\/g, '/').replace(/^\/+/, '') }))
+  // Word, Excel, PowerPoint, Pages, PDF, RTF, HTML, CSV, text…: notes too
+  const docs = await convertDocuments(files)
+  files = docs.files
   // one folder around everything (like "ReconNotes/" or "My Vault/"): drop it
   const tops = new Set(files.map((f) => (f.path.includes('/') ? f.path.split('/')[0] : '')))
   if (tops.size === 1 && !tops.has('')) {
@@ -185,7 +190,9 @@ export async function importNotes(
       // the first line is a note's title: keep the file name if the text doesn't start with it
       const first = nodes[0] ? plain(nodes[0]).trim() : ''
       const title = baseTitle(f.path)
-      if (first.toLowerCase() !== title.toLowerCase() && !/^untitled/i.test(title)) nodes.unshift(para([text(title)]))
+      // (a document that opens with its own heading has its title already)
+      const ownTitle = docs.made.has(f.path) && nodes[0]?.nodeName === 'heading' && first.length > 0
+      if (first.toLowerCase() !== title.toLowerCase() && !/^untitled/i.test(title) && !ownTitle) nodes.unshift(para([text(title)]))
       if (nodes.length) getContent(doc).insert(0, nodes)
     })
     const doc = sync.getDoc(noteDocName(id))
@@ -214,7 +221,7 @@ export async function importNotes(
     fileNotes++
   }
   sync.reindexAll()
-  return { notes: notesIn.length + templatesIn.length, files: attached.size, noteIds: [...ids.values()] }
+  return { notes: notesIn.length + templatesIn.length, files: attached.size, noteIds: [...ids.values()], skipped: docs.skipped }
 }
 
 const baseTitle = (p: string) => path.posix.basename(p).replace(MD, '').trim() || 'Untitled'

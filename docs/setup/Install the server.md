@@ -50,4 +50,6 @@ If you'll transcribe recordings with a Home Assistant Whisper server, also insta
 
 To import photos of printed pages (recipe cards, book pages) from a browser – Safari on a phone or a laptop – also install Tesseract: `sudo apt install tesseract-ocr`. It reads the print on your server, exactly and with where each word is, as the iPhone and iPad app does on the device; without it, your AI's vision model reads the photos, which is less exact with small print and fractions. The server finds it by itself (the log says "Tesseract found" when it starts). For pages in other languages, add their packs (e.g. `tesseract-ocr-fra`) and set `RECON_TESSERACT_LANG=eng+fra`.
 
+To import older Office files (.doc, .xls, .ppt) and Apple's Pages, Numbers and Keynote files as notes you can edit, also install LibreOffice without its desktop parts: `sudo apt install libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui`. The server finds it by itself (or set `RECON_SOFFICE` to the path of `soffice`). Word, Excel, PowerPoint, OpenDocument, PDF, RTF, HTML, CSV and text files are read without it.
+
 Next: [[Connect your devices]].

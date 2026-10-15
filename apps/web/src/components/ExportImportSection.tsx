@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Download, Upload } from 'lucide-react'
 import { apiUrl, authHeaders } from '../lib/settings'
 import { saveBlob } from '../lib/files'
+import { IMPORT_KINDS, importFiles, importSummary } from '../lib/importFiles'
 
 /**
  * Settings › Your notes: export everything as Markdown (with pictures, files
@@ -28,54 +29,36 @@ export function ExportImportSection() {
     }
   }
 
-  const importFiles = async (files: File[]) => {
+  const importAll = async (files: File[]) => {
     if (!files.length) return
     setBusy('import')
     setMessage(null)
-    let notes = 0
-    const errors: string[] = []
-    for (const f of files) {
-      try {
-        const res = await fetch(apiUrl('/api/import'), {
-          method: 'POST',
-          headers: { ...authHeaders(), 'Content-Type': f.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(f.name) },
-          body: f,
-        })
-        const body = (await res.json().catch(() => ({}))) as { notes?: number; error?: string }
-        if (!res.ok) throw new Error(body.error ?? `Server error ${res.status}`)
-        notes += body.notes ?? 0
-      } catch (e) {
-        errors.push(`${f.name}: ${(e as Error).message}`)
-      }
-    }
+    const r = await importFiles(files)
     setBusy(null)
-    setMessage(
-      [notes ? `✅ Imported ${notes} note${notes === 1 ? '' : 's'}.` : '', ...errors.map((e) => `❌ ${e}`)].filter(Boolean).join('\n') ||
-        'Nothing to import.',
-    )
+    setMessage(importSummary(r))
   }
 
   return (
     <div>
       <p className="hint">
-        Your notes are never locked in. Export everything as Markdown files in their folders – they open in any notes or text app – or import
-        Markdown files or a zip of them (from ReconNotes, Obsidian, Bear, Notion…). Folders, pictures, checklists and [[links]] come along.
+        Your notes are never locked in. Export everything as Markdown files in their folders – they open in any notes or text app. Import
+        Markdown or a zip of it (from ReconNotes, Obsidian, Bear, Notion…) – folders, pictures, checklists and [[links]] come along – or documents
+        ({IMPORT_KINDS}): each becomes a note you can edit, with its headings, lists, tables and pictures. Anything else is kept as a file.
       </p>
       <div className="row">
         <button onClick={() => void exportAll()} disabled={busy !== null}>
           <Download size={15} /> {busy === 'export' ? 'Exporting…' : 'Export everything'}
         </button>
         <button onClick={() => input.current?.click()} disabled={busy !== null}>
-          <Upload size={15} /> {busy === 'import' ? 'Importing…' : 'Import Markdown or zip…'}
+          <Upload size={15} /> {busy === 'import' ? 'Importing…' : 'Import notes or documents…'}
         </button>
         <input
           ref={input}
           type="file"
           hidden
           multiple
-          accept=".md,.markdown,.txt,.zip,text/markdown,text/plain,application/zip"
           onChange={(e) => {
-            void importFiles([...(e.target.files ?? [])])
+            void importAll([...(e.target.files ?? [])])
             e.target.value = ''
           }}
         />

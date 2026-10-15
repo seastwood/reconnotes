@@ -337,7 +337,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
               </>
             )}
             {view.kind !== 'templates' && (
-              <button className="icon" onClick={() => setWebImport(true)} aria-label="Import" title="Import a web page, a PDF, or photos of pages (a recipe, handwriting, a book, directions)">
+              <button className="icon" onClick={() => setWebImport(true)} aria-label="Import" title="Import a web page, a PDF, photos of pages, or documents (Word, Excel, Pages…)">
                 <Import size={19} />
               </button>
             )}

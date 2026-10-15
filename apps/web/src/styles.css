@@ -6935,3 +6935,7 @@ button.ask-chat-title:disabled {
 .ask-browser-group .ask-chat-row:first-of-type {
   border-top: 1px solid var(--line);
 }
+
+.import-result {
+  white-space: pre-wrap;
+}

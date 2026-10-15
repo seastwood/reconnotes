@@ -346,6 +346,20 @@ function bestSrc(img: El, base: URL): string | null {
   }
 }
 
+/**
+ * A document's HTML (made from a Word file, a PDF…) as Markdown. `picture`: a picture's address
+ * (relative ones come as file:///path) → its place in the import, or null to leave it out.
+ */
+export function htmlToMarkdown(html: string, picture: (src: string) => string | null): string {
+  const { document } = parseHTML(/<(html|body)[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`)
+  return pageToMarkdown(document.body as unknown as El, {
+    base: new URL('file:///'),
+    picture: (src) => (src.startsWith('file:///') ? decodeURI(src.slice('file:///'.length)) : picture(src)),
+    link: (href) => (/^(https?:|mailto:)/i.test(href) ? { url: href } : null),
+    svg: () => null,
+  })
+}
+
 function pageToMarkdown(main: El, conv: Conv): string {
   const inline = (node: Node, inPre = false): string => {
     if (node.nodeType === 3) {
