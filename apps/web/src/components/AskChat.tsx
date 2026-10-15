@@ -8,7 +8,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { api } from '../lib/api'
 import { useMedia } from '../lib/media'
 import { useWorkspace } from '../lib/workspace'
-import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
 import { Popover } from './Popover'
 import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
@@ -47,10 +47,11 @@ export function AskChatHost({
   currentRef.current = current
   const onScreenRef = useRef(noteOnScreen)
   onScreenRef.current = noteOnScreen
+  // the swipe, like the chat button: the chat about the note on screen
   useChatSlide(docked, () => {
     if (!onScreenRef.current) return null
     const c = currentRef.current
-    return lastChatTarget() ?? (c ? { noteId: c.noteId, title: c.title } : null)
+    return c ? { noteId: c.noteId, title: c.title } : null
   })
   if (!target && !browsing) return null
   const inner = browsing || !target ? (
