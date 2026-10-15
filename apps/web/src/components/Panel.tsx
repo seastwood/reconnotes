@@ -15,6 +15,7 @@ export function Panel({
   dir = 'fwd',
   className = '',
   style,
+  instant = false,
   children,
 }: {
   show: boolean
@@ -22,6 +23,8 @@ export function Panel({
   dir?: 'fwd' | 'back'
   className?: string
   style?: React.CSSProperties
+  /** shown or hidden without its own animation (a finger already moved it there) */
+  instant?: boolean
   children: React.ReactNode
 }) {
   const [mounted, setMounted] = useState(show)
@@ -35,7 +38,7 @@ export function Panel({
       first.current = false
       return
     }
-    if (mode === 'none') {
+    if (mode === 'none' || instant) {
       setMounted(show)
       setPhase('idle')
       return

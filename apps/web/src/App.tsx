@@ -65,16 +65,16 @@ function useTheme() {
  * (→ onClose), or rightwards starting on one (→ onOpen). Pencil and mouse are
  * ignored, and so are mostly-vertical moves (scrolling).
  */
-function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void, onOpen: () => void) {
-  const handlers = useRef({ onLeftEdge, onRightEdge, onClose, onOpen })
-  handlers.current = { onLeftEdge, onRightEdge, onClose, onOpen }
+function useEdgeSwipe(enabled: boolean, onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void, onOpen: () => void) {
+  const handlers = useRef({ enabled, onLeftEdge, onRightEdge, onClose, onOpen })
+  handlers.current = { enabled, onLeftEdge, onRightEdge, onClose, onOpen }
   useEffect(() => {
     const EDGE = 28
     let start: { x: number; y: number; fromEdge: boolean; fromRight: boolean; onPanel: boolean; t: number } | null = null
     const touchType = (t: Touch) => (t as Touch & { touchType?: string }).touchType
     const onStart = (e: TouchEvent) => {
       const t = e.touches[0]
-      if (e.touches.length !== 1 || touchType(t) === 'stylus') {
+      if (!handlers.current.enabled || e.touches.length !== 1 || touchType(t) === 'stylus') {
         start = null
         return
       }
@@ -116,6 +116,124 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
       window.removeEventListener('touchstart', onStart, { capture: true })
       window.removeEventListener('touchend', onEnd, { capture: true })
       window.removeEventListener('touchcancel', onCancel, { capture: true })
+    }
+  }, [])
+}
+
+type Pane = 'folders' | 'list' | 'note'
+const PANE_CLASS: Record<Pane, string> = { folders: '.panel-sidebar', list: '.panel-list', note: '.panel-editor' }
+
+/**
+ * Phones: the screens – folders › notes › note (› chat, AskChat.tsx) – move with the finger, like
+ * iOS: swipe right (from the left edge, or anywhere on the folders or notes) and the screen slides
+ * away to show the one before underneath; swipe left (from the right edge, or anywhere on the
+ * folders or notes) and the next slides in over it. Let go far enough along (or with a flick) and
+ * it goes there; else it slides back. On a note reached through links, the left edge goes back
+ * along the links first.
+ */
+function usePaneSwipe(
+  enabled: boolean,
+  api: {
+    current: () => Pane
+    prev: () => Pane | null
+    next: () => Pane | null
+    /** a note reached by a link: back to that note (no sliding), if there is one */
+    linkBack: () => boolean
+    begin: (p: Pane) => void
+    finish: (p: Pane | null) => void
+  },
+) {
+  const ref = useRef({ enabled, api })
+  ref.current = { enabled, api }
+  useEffect(() => {
+    const EDGE = 24
+    type Drag = { x0: number; y0: number; edge: 'left' | 'right' | null; onPanel: boolean; locked: null | { dir: 'back' | 'fwd'; to: Pane | 'link' }; last: { x: number; t: number }[] }
+    let d: Drag | null = null
+    const W = () => innerWidth
+    const els = (to: Pane) => [document.querySelector<HTMLElement>(PANE_CLASS[ref.current.api.current()]), document.querySelector<HTMLElement>(PANE_CLASS[to])] as const
+    const paint = (dir: 'back' | 'fwd', to: Pane, p: number, animate: boolean) => {
+      const [cur, other] = els(to)
+      const tr = animate ? 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 220ms' : 'none'
+      for (const e of [cur, other]) if (e) e.style.transition = tr
+      if (dir === 'back') {
+        if (cur) Object.assign(cur.style, { transform: `translateX(${p * W()}px)`, zIndex: '3', boxShadow: '-8px 0 24px rgba(0,0,0,0.12)' })
+        if (other) Object.assign(other.style, { transform: `translateX(${-28 * (1 - p)}%)`, opacity: String(0.7 + 0.3 * p), zIndex: '1' })
+      } else {
+        if (other) Object.assign(other.style, { transform: `translateX(${(1 - p) * W()}px)`, zIndex: '3', boxShadow: '-8px 0 24px rgba(0,0,0,0.12)' })
+        if (cur) Object.assign(cur.style, { transform: `translateX(${-28 * p}%)`, opacity: String(1 - 0.3 * p), zIndex: '1' })
+      }
+    }
+    const clear = () =>
+      document.querySelectorAll<HTMLElement>('.app.narrow > .panel').forEach((e) => {
+        for (const k of ['transition', 'transform', 'opacity', 'zIndex', 'boxShadow'] as const) e.style[k] = ''
+      })
+    const down = (e: TouchEvent) => {
+      d = null
+      const t = e.touches[0]
+      if (!ref.current.enabled || e.touches.length !== 1 || !t || (t as Touch & { touchType?: string }).touchType === 'stylus') return
+      const el = e.target as Element
+      // the chat, the picture viewer and cook mode have their own gestures
+      if (el.closest?.('.ask-chat, .image-viewer, .cook-mode, .dialog, .menu') || document.querySelector('.ask-chat:not(.docked)')) return
+      const edge = t.clientX <= EDGE ? 'left' : t.clientX >= W() - EDGE ? 'right' : null
+      const onPanel = Boolean(el.closest?.('.sidebar, .list-col')) && !el.closest?.('input, textarea, [contenteditable="true"]')
+      if (!edge && !onPanel) return
+      d = { x0: t.clientX, y0: t.clientY, edge, onPanel, locked: null, last: [] }
+    }
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (!d || !t) return
+      const dx = t.clientX - d.x0
+      const dy = t.clientY - d.y0
+      if (!d.locked) {
+        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) return void (d = null) // scrolling
+        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+        const dir = dx > 0 ? 'back' : 'fwd'
+        const cur = ref.current.api.current()
+        // the note's right edge is the chat's
+        if (dir === 'fwd' && (cur === 'note' || !(d.edge === 'right' || d.onPanel))) return void (d = null)
+        if (dir === 'back' && !(d.edge === 'left' || d.onPanel)) return void (d = null)
+        if (dir === 'back' && cur === 'note' && d.edge === 'left' && ref.current.api.linkBack()) {
+          d.locked = { dir, to: 'link' }
+          return
+        }
+        const to = dir === 'back' ? ref.current.api.prev() : ref.current.api.next()
+        if (!to) return void (d = null)
+        d.locked = { dir, to }
+        ref.current.api.begin(to)
+      }
+      if (e.cancelable) e.preventDefault()
+      if (d.locked.to === 'link') return
+      d.last = [...d.last.slice(-4), { x: t.clientX, t: performance.now() }]
+      const p = Math.max(0, Math.min(1, Math.abs(dx) / W()))
+      paint(d.locked.dir, d.locked.to, (d.locked.dir === 'back') === dx > 0 ? p : 0, false)
+    }
+    const up = (e: TouchEvent) => {
+      const drag = d
+      d = null
+      if (!drag?.locked) return
+      const { dir, to } = drag.locked
+      if (to === 'link') return // went back along the links already
+      const t = e.changedTouches[0]
+      const dx = (t?.clientX ?? drag.x0) - drag.x0
+      const a = drag.last[0]
+      const b = drag.last[drag.last.length - 1]
+      const v = a && b && b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0
+      const go = Math.abs(dx) > W() * 0.35 ? (dir === 'back') === dx > 0 : dir === 'back' ? v > 0.45 : v < -0.45
+      paint(dir, to, go ? 1 : 0, true)
+      setTimeout(() => {
+        ref.current.api.finish(go ? to : null)
+        requestAnimationFrame(() => requestAnimationFrame(clear))
+      }, 230)
+    }
+    window.addEventListener('touchstart', down, { passive: true })
+    window.addEventListener('touchmove', move, { passive: false })
+    window.addEventListener('touchend', up, { passive: true })
+    window.addEventListener('touchcancel', up, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', down)
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', up)
+      window.removeEventListener('touchcancel', up)
     }
   }, [])
 }
@@ -374,7 +492,31 @@ export function App() {
   }
   /** the note is on screen, so the edge swipes walk the link trail first */
   const noteShown = Boolean(nav.noteId) && (narrow ? pane === 'note' : true)
+  // phones: screens that follow the finger
+  const [peek, setPeek] = useState<Pane | null>(null)
+  const [instant, setInstant] = useState(false)
+  // where a screen being pulled in starts (before the finger moves it: no flash in place)
+  const peekStyle = (p: Pane): React.CSSProperties | undefined =>
+    peek !== p ? undefined : depth[p] > depth[pane] ? { transform: 'translateX(100%)', zIndex: 3 } : { transform: 'translateX(-28%)', opacity: 0.7, zIndex: 1 }
+  useEffect(() => {
+    if (!instant) return
+    const t = setTimeout(() => setInstant(false), 60)
+    return () => clearTimeout(t)
+  }, [instant])
+  usePaneSwipe(narrow, {
+    current: () => pane,
+    prev: () => (pane === 'note' ? (fromSearch && search.trim() ? 'folders' : 'list') : pane === 'list' ? 'folders' : null),
+    next: () => (pane === 'folders' ? 'list' : pane === 'list' && nav.noteId && isOpenable(nav.noteId) ? 'note' : null),
+    linkBack: () => step('back'),
+    begin: (p) => (setInstant(true), setPeek(p)),
+    finish: (p) => {
+      setInstant(true)
+      if (p) setPane(p)
+      setPeek(null)
+    },
+  })
   useEdgeSwipe(
+    !narrow,
     () => {
       if (!(noteShown && step('back'))) openNext()
     },
@@ -500,10 +642,12 @@ export function App() {
   return (
     <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}${!narrow && listExpanded && listVisible ? ' list-expanded' : ''}`}>
       <Panel
-        show={sidebarVisible}
+        show={sidebarVisible || peek === 'folders'}
         mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
         dir={navDir.current}
         className="panel-sidebar"
+        instant={narrow && (instant || peek !== null)}
+        style={peekStyle('folders')}
       >
         {overlay && !sidebarInline && <div className="sidebar-backdrop" onClick={() => setOverlay(false)} />}
         <Sidebar
@@ -529,7 +673,7 @@ export function App() {
           }}
         />
       </Panel>
-      <Panel show={listVisible} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list">
+      <Panel show={listVisible || peek === 'list'} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list" instant={narrow && (instant || peek !== null)} style={peekStyle('list')}>
         <div className="list-col">
           {nav.view.kind === 'jobs' ? (
             <JobsPanel
@@ -554,7 +698,7 @@ export function App() {
           )}
         </div>
       </Panel>
-      <Panel show={editorVisible} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor">
+      <Panel show={editorVisible || peek === 'note'} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor" instant={narrow && (instant || peek !== null)} style={peekStyle('note')}>
         <main className="editor-col">
           {noteLockedBy ? (
             <LockedScreen folderId={noteLockedBy} what="note" />
