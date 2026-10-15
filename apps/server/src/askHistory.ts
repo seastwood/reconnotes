@@ -43,7 +43,17 @@ function table(store: Store) {
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS ask_history_scope ON ask_history (scope, updated_at)`)
+  // when the chat was last read (answers since then are unread); chats kept before this count as read
+  if (!seenColumn.has(store)) {
+    const cols = store.db.prepare('PRAGMA table_info(ask_history)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'seen_at')) {
+      store.db.exec('ALTER TABLE ask_history ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0')
+      store.db.exec('UPDATE ask_history SET seen_at = updated_at')
+    }
+    seenColumn.add(store)
+  }
 }
+const seenColumn = new WeakSet<Store>()
 
 /** What a question was about, as a key: "note:<id>", "folders:<ids>", or "" for everything. */
 export function scopeKey(input: Record<string, unknown>): string {
@@ -84,14 +94,26 @@ export function listConversations(store: Store, scope: string, limit = 50): Conv
   return rows.map((r) => ({ id: r.id, scope: r.scope, turns: JSON.parse(r.turns), createdAt: r.created_at, updatedAt: r.updated_at }))
 }
 
-/** Every chat, newest first, in brief: what it's about, its first question, how many questions. */
-export function listAllChats(store: Store, limit = 300): { id: string; scope: string; question: string; questions: number; updatedAt: number }[] {
+/** Every chat, newest first, in brief: what it's about, its first question, how many questions, how many answers not read yet. */
+export function listAllChats(store: Store, limit = 300): { id: string; scope: string; question: string; questions: number; unread: number; updatedAt: number }[] {
   table(store)
-  const rows = store.db.prepare('SELECT id, scope, turns, updated_at FROM ask_history ORDER BY updated_at DESC LIMIT ?').all(limit) as { id: string; scope: string; turns: string; updated_at: number }[]
+  const rows = store.db.prepare('SELECT id, scope, turns, updated_at, seen_at FROM ask_history ORDER BY updated_at DESC LIMIT ?').all(limit) as {
+    id: string
+    scope: string
+    turns: string
+    updated_at: number
+    seen_at: number
+  }[]
   return rows.map((r) => {
     const turns = JSON.parse(r.turns) as AskTurnSaved[]
-    return { id: r.id, scope: r.scope, question: turns[0]?.question ?? '', questions: turns.length, updatedAt: r.updated_at }
+    return { id: r.id, scope: r.scope, question: turns[0]?.question ?? '', questions: turns.length, unread: turns.filter((t) => t.at > r.seen_at).length, updatedAt: r.updated_at }
   })
+}
+
+/** The chat was read (on any device): its answers so far aren't unread any more. */
+export function markChatSeen(store: Store, id: string) {
+  table(store)
+  store.db.prepare('UPDATE ask_history SET seen_at = MAX(seen_at, updated_at) WHERE id = ?').run(id)
 }
 
 export function deleteConversation(store: Store, id: string) {

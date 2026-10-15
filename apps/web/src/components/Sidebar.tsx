@@ -58,6 +58,7 @@ import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/sea
 import { useSavedSearches } from '../lib/searchHistory'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 import { askChat, browseChats, closeAskChat, openAskChat } from '../lib/askChat'
+import { useUnreadChats } from '../lib/chatList'
 import { checkForUpdates } from '../lib/webImport'
 import { refreshShares, useShares } from '../lib/shares'
 import { ShareWithDialog } from './ShareWithDialog'
@@ -614,6 +615,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         {isSyncConfigured() && (
           <div className={`folder-row special${chatsOpen ? ' active' : ''}`} onClick={() => (chatsOpen ? closeAskChat() : browseChats())} title="Every chat with your AI – about all your notes, a folder or a note">
             <MessagesSquare size={16} /> <span className="folder-name">Chats</span>
+            <UnreadChats />
           </div>
         )}
         {smart.length > 0 && (
@@ -756,4 +758,14 @@ function JobsRow({ active, onClick }: { active: boolean; onClick: () => void }) 
       )}
     </div>
   )
+}
+
+/** Beside Chats: how many chats have an answer not read yet. */
+function UnreadChats() {
+  const n = useUnreadChats()
+  return n ? (
+    <span className="ask-unread" aria-label={`${n} chat${n === 1 ? '' : 's'} with new answers`} title={`${n} chat${n === 1 ? '' : 's'} with new answers`}>
+      {n}
+    </span>
+  ) : null
 }

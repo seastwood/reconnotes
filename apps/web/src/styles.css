@@ -6840,3 +6840,98 @@ button.ask-chat-title:disabled {
 .menu .color-panel .swatch:disabled {
   opacity: 0.4;
 }
+
+/* the list of chats: question and time, then what it's about and new answers */
+.ask-browser .ask-chat-row {
+  align-items: stretch;
+  padding: 10px 12px;
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+}
+.ask-browser .ask-chat-row-text {
+  gap: 3px;
+}
+.ask-chat-row-top,
+.ask-chat-row-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ask-browser .ask-chat-row-q {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+.ask-chat-row.unread .ask-chat-row-q {
+  font-weight: 600;
+}
+.ask-chat-row-time {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ask-chat-row.unread .ask-chat-row-time {
+  color: var(--accent-text);
+}
+.ask-chat-row-bottom {
+  min-height: 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ask-chat-row-bottom .ask-chat-row-about {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.ask-chat-row-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-unread {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent);
+  color: #1c1c1e;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.folder-row .ask-unread {
+  margin-left: auto;
+}
+.ask-chat-row-delete.icon {
+  flex: none;
+  width: 26px;
+  height: 22px;
+  min-width: 0;
+  padding: 0;
+  color: var(--muted);
+  opacity: 0.55;
+}
+.ask-chat-row-delete.icon:hover {
+  opacity: 1;
+  color: var(--danger);
+}
+@media (hover: hover) {
+  .ask-chat-row-delete.icon {
+    opacity: 0;
+  }
+  .ask-chat-row:hover .ask-chat-row-delete.icon,
+  .ask-chat-row-delete.icon:focus-visible {
+    opacity: 0.7;
+  }
+}
+.ask-browser-group .ask-chat-row:first-of-type {
+  border-top: 1px solid var(--line);
+}

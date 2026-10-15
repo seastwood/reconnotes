@@ -5,7 +5,7 @@ import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
-import { api } from '../lib/api'
+import { chatList, forgetChat, markChatSeen, refreshChats, type ChatBrief } from '../lib/chatList'
 import { useMedia } from '../lib/media'
 import { useWorkspace } from '../lib/workspace'
 import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
@@ -79,7 +79,7 @@ export function AskChatHost({
 const DOCK_WIDTH = 'reconnotes.chatWidth'
 /** how the list of chats is sorted (kept on this device) */
 const CHAT_SORT = 'reconnotes.chatSort'
-type ChatSort = 'subject' | 'recent' | 'oldest'
+type ChatSort = 'subject' | 'recent' | 'oldest' | 'unread'
 
 /** The panel beside the note: its left edge dragged to make it wider or narrower (remembered). */
 function ChatDock({ children }: { children: ReactNode }) {
@@ -244,6 +244,11 @@ function AskChat({
   const chatId = useStore(askChat, (s) => s.chat[key] ?? null)
   const setChat = (id: string | null) => askChat.set((s) => ({ chat: { ...s.chat, [key]: id } }))
   const history = useAskHistory(target.all ? {} : target.folderId ? { folderId: target.folderId } : { noteId: target.noteId })
+  // on screen: its answers are read
+  const unread = useStore(chatList, (s) => (chatId ? (s.list?.find((c) => c.id === chatId)?.unread ?? 0) : 0))
+  useEffect(() => {
+    if (chatId && unread && document.visibilityState === 'visible') markChatSeen(chatId)
+  }, [chatId, unread])
   // what it answers from: your notes, or anything (the AI's own answer: a recipe for the Recipes
   // folder) – kept for each chat window (a note's, a folder's, all notes')
   const [mode, setModeState] = useState<'notes' | 'general'>(() => safeLocalGet<Record<string, 'notes' | 'general'>>(MODES, {})[key] ?? 'notes')
@@ -608,14 +613,6 @@ function NewChatMenu({
   )
 }
 
-interface ChatBrief {
-  id: string
-  scope: string
-  question: string
-  questions: number
-  updatedAt: number
-}
-
 /** A chat's subject from what it was asked about ("note:<id>", "folders:<id>", "" for all). Null: several notes or folders. */
 function subjectOf(scope: string, names: { note: (id: string) => string | null; folder: (id: string) => string | null }): AskChatTarget | null {
   if (!scope) return ALL_NOTES
@@ -632,20 +629,11 @@ function subjectOf(scope: string, names: { note: (id: string) => string | null; 
 function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: string; title: string; folderId: string | null } | null }) {
   const ws = useWorkspace()
   const jobs = useJobs((s) => s.jobs)
-  const finished = jobs.filter((j) => j.kind === 'ask' && isFinished(j)).length
-  const [list, setList] = useState<ChatBrief[] | null>(null)
+  const list = useStore(chatList, (s) => s.list)
+  const error = useStore(chatList, (s) => s.error)
   const [query, setQuery] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const target = useStore(askChat, (s) => s.target)
-  useEffect(() => {
-    let alive = true
-    api<{ chats: ChatBrief[] }>('GET', '/api/ask/chats')
-      .then((r) => alive && setList(r.chats))
-      .catch((e) => alive && (setList([]), setError((e as Error).message)))
-    return () => {
-      alive = false
-    }
-  }, [finished])
+  useEffect(() => void refreshChats(), [])
   const names = useMemo(
     () => ({
       note: (id: string) => {
@@ -670,7 +658,7 @@ function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: 
   const all: ChatBrief[] = [
     ...busy
       .filter((j) => !(typeof j.input.thread === 'string' && j.input.thread) && !list?.some((c) => c.id === j.id))
-      .map((j) => ({ id: j.id, scope: scopeOfJob(j), question: String(j.input.question), questions: 1, updatedAt: j.createdAt })),
+      .map((j) => ({ id: j.id, scope: scopeOfJob(j), question: String(j.input.question), questions: 1, unread: 0, updatedAt: j.createdAt })),
     ...(list ?? []),
   ]
   const q = query.trim().toLowerCase()
@@ -695,52 +683,64 @@ function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: 
   }
   const flat = [...groups.values()]
     .flatMap((g) => g.chats.map((c) => ({ c, subject: g.subject })))
-    .sort((a, b) => (sort === 'oldest' ? a.c.updatedAt - b.c.updatedAt : b.c.updatedAt - a.c.updatedAt))
-  const remove = (id: string) => {
-    setList((l) => l?.filter((c) => c.id !== id) ?? null)
-    void api('DELETE', `/api/ask/history/${id}`).catch(() => {})
-  }
+    .sort((a, b) =>
+      sort === 'oldest'
+        ? a.c.updatedAt - b.c.updatedAt
+        : sort === 'unread'
+          ? Number(b.c.unread > 0) - Number(a.c.unread > 0) || b.c.updatedAt - a.c.updatedAt
+          : b.c.updatedAt - a.c.updatedAt,
+    )
+  const remove = forgetChat
   const newBtn = useRef<HTMLButtonElement>(null)
   const [newMenu, setNewMenu] = useState(false)
   const icon = (t: AskChatTarget) => (t.all ? <Library size={14} /> : t.folderId ? <Folder size={14} /> : <FileText size={14} />)
 
-  const row = (c: ChatBrief, subject: AskChatTarget, withSubject: boolean) => (
-    <div key={c.id} className="ask-chat-row" onClick={() => openChatAt(subject, c.id)}>
-      <div className="ask-chat-row-text">
-        <span className="ask-chat-row-q">{c.question}</span>
-        <span className="ask-chat-row-meta">
-          {busyIds.has(c.id) ? (
-            <>
-              <Loader2 size={11} className="spin" /> Answering…
-            </>
-          ) : (
-            <>
-              {withSubject && (
-                <span className="ask-chat-row-about">
-                  {icon(subject)} {subject.all ? 'All your notes' : subject.title} ·{' '}
-                </span>
+  const row = (c: ChatBrief, subject: AskChatTarget, withSubject: boolean) => {
+    const answering = busyIds.has(c.id)
+    return (
+      <div key={c.id} className={`ask-chat-row${c.unread ? ' unread' : ''}`} onClick={() => openChatAt(subject, c.id)}>
+        <div className="ask-chat-row-text">
+          <div className="ask-chat-row-top">
+            <span className="ask-chat-row-q">{c.question}</span>
+            <span className="ask-chat-row-time">{answering ? <Loader2 size={12} className="spin" /> : when(c.updatedAt)}</span>
+          </div>
+          <div className="ask-chat-row-bottom">
+            <span className="ask-chat-row-about">
+              {answering ? (
+                'Answering…'
+              ) : withSubject ? (
+                <>
+                  {icon(subject)} <span className="ask-chat-row-subject">{subject.all ? 'All your notes' : subject.title}</span>
+                </>
+              ) : c.questions > 1 ? (
+                `${c.questions} questions`
+              ) : (
+                ''
               )}
-              {c.questions > 1 ? `${c.questions} questions · ` : ''}
-              {when(c.updatedAt)}
-            </>
-          )}
-        </span>
+            </span>
+            {!answering && (
+              <button
+                className="icon ask-chat-row-delete"
+                aria-label="Delete this chat"
+                title="Delete this chat"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (confirm('Delete this chat?')) remove(c.id)
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            {c.unread > 0 && (
+              <span className="ask-unread" aria-label={`${c.unread} new answer${c.unread === 1 ? '' : 's'}`} title={`${c.unread} new answer${c.unread === 1 ? '' : 's'}`}>
+                {c.unread}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
-      {!busyIds.has(c.id) && (
-        <button
-          className="icon"
-          aria-label="Delete this chat"
-          title="Delete this chat"
-          onClick={(e) => {
-            e.stopPropagation()
-            if (confirm('Delete this chat?')) remove(c.id)
-          }}
-        >
-          <Trash2 size={15} />
-        </button>
-      )}
-    </div>
-  )
+    )
+  }
 
   return (
     <div className={`ask-chat ask-browser${docked ? ' docked' : ''}`} role={docked ? 'complementary' : 'dialog'} aria-label="Chats">
@@ -785,6 +785,7 @@ function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: 
             <option value="subject">By subject</option>
             <option value="recent">Most recent</option>
             <option value="oldest">Oldest</option>
+            <option value="unread">Unread first</option>
           </select>
         </label>
       </div>

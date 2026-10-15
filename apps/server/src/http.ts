@@ -45,7 +45,7 @@ import { aiHealth } from './health'
 import { aiSkips, noteFilter, scopeFromQuery } from './access'
 import { definesRule, ruleIds } from './sections'
 import { findReferences, setIgnoredRef } from './references'
-import { askRefs, deleteConversation, listAllChats, listConversations, scopeKey, setAskRefs } from './askHistory'
+import { askRefs, deleteConversation, listAllChats, markChatSeen, listConversations, scopeKey, setAskRefs } from './askHistory'
 import { Tasks } from './tasks'
 import { caCertificate, loadTls } from './tls'
 import { digestSettings, type DigestSettings } from './digest'
@@ -321,6 +321,10 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
   // every chat in brief, for the chats browser
   route('GET', '/api/ask/chats', (_req, res) => json(res, 200, { chats: listAllChats(store) }))
+  route('POST', `/api/ask/history/${ID}/seen`, (_req, res, [id]) => {
+    markChatSeen(store, id)
+    json(res, 200, { ok: true })
+  })
   route('DELETE', `/api/ask/history/${ID}`, (_req, res, [id]) => {
     deleteConversation(store, id)
     json(res, 200, { ok: true })
