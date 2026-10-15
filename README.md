@@ -75,8 +75,7 @@ It's built for one person's daily notes, and anyone can run it.
   recording; when you stop, you get a summary, decisions and action items with due dates, each
   point linked to where it was said in the recording. With the speaker service, the transcript is
   told apart by voice, and voices you've named are recognised in later meetings.
-- **Every day and week.** *Today* opens your daily note, with yesterday's unfinished to-dos carried
-  over. *Tasks* lists every checklist item in every note. Your dated to-dos can appear in Apple or
+- **Every day and week.** *Tasks* lists every checklist item in every note. Your dated to-dos can appear in Apple or
   Google Calendar (*Settings › Calendar & weekly digest*), and a weekly digest note sums up the
   week.
 - **Jobs.** Every AI request and processing step is a job in one queue on the server (one at a

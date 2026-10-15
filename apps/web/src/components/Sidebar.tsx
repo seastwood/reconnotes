@@ -17,7 +17,6 @@ import {
   Hash,
   LayoutTemplate,
   CalendarDays,
-  CalendarCheck,
   ListChecks,
   SearchCheck,
   CloudDownload,
@@ -54,7 +53,6 @@ import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { lockFolder, useFolderAccess } from '../lib/folderLock'
 import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useSavedSearches } from '../lib/searchHistory'
-import { openDailyNote } from '../lib/daily'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 import { openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
@@ -612,9 +610,6 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             </span>
           </div>
         )}
-        <div className="folder-row special" onClick={() => void openDailyNote().then((id) => onOpenResult(id))} title="Today’s daily note – made for you the first time, with yesterday’s unfinished to-dos">
-          <CalendarCheck size={16} /> <span className="folder-name">Today</span>
-        </div>
         {isSyncConfigured() && (
           <div className={`folder-row special${view.kind === 'tasks' ? ' active' : ''}`} onClick={() => onView({ kind: 'tasks' })} title="Every checklist item in every note">
             <ListChecks size={16} /> <span className="folder-name">Tasks</span>

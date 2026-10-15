@@ -90,7 +90,7 @@ export function CalendarDigestSection() {
       <h4>Weekly digest</h4>
       <p className="hint">
         Once a week, a note about your week: a short summary by your AI, the notes you wrote or edited, what’s overdue and what’s due next. It goes in your Daily
-        notes folder, and you’re notified like for other jobs.
+        notes folder if you have one (otherwise with the notes not in a folder), and you’re notified like for other jobs.
       </p>
       {digest && (
         <>

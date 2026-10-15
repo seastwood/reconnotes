@@ -1,4 +1,4 @@
-import { WORKSPACE_DOC, effectiveFolderId, folderPaths, getSettings, listFolders, noteDocName, noteToMarkdown } from '@reconnotes/core'
+import { WORKSPACE_DOC, effectiveFolderId, folderPaths, getFolders, getSettings, listFolders, readFolder, noteDocName, noteToMarkdown } from '@reconnotes/core'
 import type { Ai } from './ai'
 import type { Jobs } from './jobs'
 import type { Store } from './store'
@@ -15,7 +15,7 @@ import { shortDate, startOfToday } from './timeRange'
  * Once a week (the day and hour you choose), a note about the week that was:
  * a short summary written by your AI (when one is set up), the notes you
  * wrote or edited (linked), what's overdue and what's due in the week ahead.
- * It goes in your Daily notes folder, and you're notified like any job.
+ * It goes in your Daily notes folder (if you have one), and you're notified like any job.
  * Locked folders are left out.
  */
 
@@ -212,8 +212,10 @@ Notes:${context}`,
   return { title, markdown: md.join('\n').trim(), noteFor: (t) => idOf.get(t) ?? null, agent }
 }
 
-/** Where digests go: the Daily notes folder, when there is one. */
+/** Where digests go: the Daily notes folder, when there is one (and it hasn't been deleted). */
 export function digestFolder(sync: SyncEngine): string | null {
   const ws = sync.getDoc(WORKSPACE_DOC)
-  return ws ? ((getSettings(ws).get('dailyFolder') as string | undefined) ?? null) : null
+  const id = ws ? ((getSettings(ws).get('dailyFolder') as string | undefined) ?? null) : null
+  const m = id && ws ? getFolders(ws).get(id) : undefined
+  return m && !readFolder(m).trashedAt ? id : null
 }
