@@ -1,6 +1,6 @@
 import { generateJSON, getSchema, type JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
-import { TaskList } from '@tiptap/extension-task-list'
+import { KindedTaskList as TaskList } from '../editor/checklistKind'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { prosemirrorJSONToYXmlFragment } from '@tiptap/y-tiptap'
@@ -88,7 +88,8 @@ export async function noteFromMarkdown(markdown: string, fileName: string, folde
     // pictures in the file can't come along: keep a link (web) or the description
     .replace(/!\[([^\]]*)\]\((https?:[^)\s]+)[^)]*\)/g, (_m, alt: string, url: string) => `[${alt || 'Picture'}](${url})`)
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt: string) => (alt ? `[${alt}]` : ''))
-  const json = generateJSON(markdownToHtml(md), extensions) as JSONContent
+  // "<!-- list -->" before a checklist: a plain one (shopping, packing), not to-dos
+  const json = generateJSON(markdownToHtml(md).replace(/<!--\s*list\s*-->\s*<ul/gi, '<ul data-kind="list"'), extensions) as JSONContent
   const titles = new Map<string, string>()
   getNotes(sync.workspace.doc).forEach((m, id) => {
     const n = readNote(m)

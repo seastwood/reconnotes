@@ -69,6 +69,8 @@ export function noteToMarkdown(
       case 'bulletList':
       case 'orderedList':
       case 'taskList': {
+        // a plain checklist (not to-dos): said in a comment Markdown apps leave unseen, read back on import
+        if (name === 'taskList' && el.getAttribute('kind') === 'list' && !listMarker && !indent.trim()) out.push('<!-- list -->')
         let n = Number(el.getAttribute('start') ?? 1)
         for (const item of el.toArray()) {
           if (!(item instanceof Y.XmlElement)) continue

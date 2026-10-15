@@ -168,6 +168,8 @@ export function recipeCard(r: Recipe, picture: string | null, esc: (s: string) =
     '',
     '## Ingredients',
     '',
+    // ticked off while cooking or shopping – not to-dos
+    '<!-- list -->',
     ...r.ingredients.map((i) => `- [ ] ${esc(i)}`),
     '',
     '## Steps',

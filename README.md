@@ -21,9 +21,12 @@ It's built for one person's daily notes, and anyone can run it.
   eraser, previous tool, or palette). **Squeeze** on Apple Pencil Pro opens a palette with
   undo/redo, tools, colours and sizes. The Pencil can start a drawing anywhere in a note, or you
   can use iPadOS Scribble instead.
-- **Typing.** Title, Heading, Subheading, Body and Monospaced styles; bold, italic, underline and
-  strikethrough; bulleted, numbered and **checklist** items (type `[ ] ` to start one), and block
-  quotes.
+- **Typing.** Title, Heading, Subheading, Body and Monospaced styles; bold, italic, underline,
+  strikethrough, text colours and a highlighter; bulleted and numbered lists, and block quotes.
+- **To-dos and checklists.** A *to-do list* (square boxes; type `[ ] ` to start one) holds tasks –
+  they show in *Tasks*, *Due* and reminders. A *checklist* (round checks) is a list you tick
+  through – shopping, packing, a recipe's ingredients – and never counts as tasks; *Uncheck all*
+  makes it ready to use again.
 - **Pictures, screenshots, audio and files.** Paste, drag in, pick from Photos or Files, take a
   photo, or record audio. Attachments are stored offline and uploaded later.
 - **Undo** is always one tap away, in the toolbar and in the drawing tools. Text and ink share one
@@ -70,7 +73,9 @@ It's built for one person's daily notes, and anyone can run it.
   at the passage it used, and follow-up questions. On a computer or iPad the chat sits beside the note
   (drag its edge to resize) and stays open as you move between notes; on iPhone, swipe in from the
   right edge. *Chats* in the sidebar lists every chat – about all your notes, a folder or a note –
-  to carry on any of them. Under each note, *Related notes* are found by meaning.
+  to carry on any of them. Switch a note's chat to *Edit* and tell it what to change – "make the
+  groceries a checklist", "put these steps in order" – and it changes the note; *Revert* puts back
+  exactly what it changed. Under each note, *Related notes* are found by meaning.
 - **AI that gets better at your words.** Names and terms you list (*Settings › Handwriting &
   speech › Your words*) are spelled right in handwriting and transcripts, and a word you correct
   after a job is remembered for next time. Uncertain words are marked for you to check.
@@ -82,7 +87,7 @@ It's built for one person's daily notes, and anyone can run it.
   recording; when you stop, you get a summary, decisions and action items with due dates, each
   point linked to where it was said in the recording. With the speaker service, the transcript is
   told apart by voice, and voices you've named are recognised in later meetings.
-- **Every day and week.** *Tasks* lists every checklist item in every note. Your dated to-dos can appear in Apple or
+- **Every day and week.** *Tasks* lists every to-do in every note. Your dated to-dos can appear in Apple or
   Google Calendar (*Settings › Calendar & weekly digest*), and a weekly digest note sums up the
   week.
 - **Jobs.** Every AI request and processing step is a job in one queue on the server (one at a

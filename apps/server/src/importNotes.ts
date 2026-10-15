@@ -370,7 +370,12 @@ function paragraphs(tokens: Token[] | undefined, ctx: Ctx): Y.XmlElement[] {
 
 function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
   const out: Y.XmlElement[] = []
+  // "<!-- list -->" before a checklist: a plain one (shopping, packing), not to-dos
+  let plain = false
   for (const tok of tokens) {
+    if (tok.type === 'space') continue
+    const wasPlain = plain
+    plain = false
     switch (tok.type) {
       case 'heading': {
         const h = tok as Tokens.Heading
@@ -390,7 +395,7 @@ function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
           if (!inner.length || inner[0].nodeName !== 'paragraph') inner.unshift(para([]))
           return el(task ? 'taskItem' : 'listItem', task ? { checked: Boolean(i.checked) } : {}, inner)
         })
-        out.push(el(task ? 'taskList' : l.ordered ? 'orderedList' : 'bulletList', l.ordered && !task && l.start !== 1 && l.start !== '' ? { start: Number(l.start) } : {}, items))
+        out.push(el(task ? 'taskList' : l.ordered ? 'orderedList' : 'bulletList', task && wasPlain ? { kind: 'list' } : l.ordered && !task && l.start !== 1 && l.start !== '' ? { start: Number(l.start) } : {}, items))
         break
       }
       case 'blockquote': {
@@ -417,6 +422,10 @@ function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
         break
       }
       case 'html': {
+        if (/^\s*<!--\s*list\s*-->\s*$/i.test((tok as Tokens.HTML).text)) {
+          plain = true
+          break
+        }
         const t = (tok as Tokens.HTML).text.replace(/<[^>]+>/g, '').trim()
         if (t) out.push(para([text(decode(t))]))
         break

@@ -64,3 +64,14 @@ describe('editing a note with AI', () => {
     expect(revertEdit(f, record)).toBe(false)
   })
 })
+
+describe('plain checklists in Markdown', () => {
+  it('reads "<!-- list -->" before a checklist as a plain one', async () => {
+    const { markdownToNodes } = await import('../src/importNotes')
+    const d = new Y.Doc()
+    const ctx = { attach: () => null, noteFor: () => null }
+    d.getXmlFragment('content').insert(0, markdownToNodes('Shopping\n\n<!-- list -->\n\n- [ ] milk\n- [x] eggs\n\nTo do\n\n- [ ] call mom', ctx))
+    const lists = d.getXmlFragment('content').toArray().filter((n) => (n as Y.XmlElement).nodeName === 'taskList') as Y.XmlElement[]
+    expect(lists.map((l) => l.getAttribute('kind') ?? null)).toEqual(['list', null])
+  })
+})

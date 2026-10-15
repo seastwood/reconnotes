@@ -6990,3 +6990,8 @@ button.ask-chat-title:disabled {
   align-items: center;
   gap: 5px;
 }
+
+/* a plain checklist (shopping, packing – not tasks): round checks */
+.note-content ul[data-type='taskList'][data-kind='list'] input[type='checkbox'] {
+  border-radius: 50%;
+}

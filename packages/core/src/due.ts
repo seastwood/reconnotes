@@ -185,6 +185,9 @@ export function daysUntil(date: string, now = new Date()): number {
   return Math.round((new Date(y, m - 1, d).getTime() - today.getTime()) / 86_400_000)
 }
 
+/** A plain checklist (round checks: shopping, packing): its items aren't tasks, and its dates aren't due. */
+export const isPlainList = (el: Y.XmlElement) => el.nodeName === 'taskList' && el.getAttribute('kind') === 'list'
+
 /** Every due date in a note, with the text of the item it belongs to. */
 export function extractDue(doc: Y.Doc): DueItem[] {
   const out: DueItem[] = []
@@ -198,7 +201,7 @@ export function extractDue(doc: Y.Doc): DueItem[] {
   }
   const walk = (el: Y.XmlElement | Y.XmlFragment, item: { el: Y.XmlElement; done: boolean } | null) => {
     for (const c of el.toArray()) {
-      if (!(c instanceof Y.XmlElement)) continue
+      if (!(c instanceof Y.XmlElement) || isPlainList(c)) continue
       if (c.nodeName === 'dueDate') {
         const date = c.getAttribute('date') as string | undefined
         const id = c.getAttribute('id') as string | undefined
@@ -274,7 +277,10 @@ export interface TaskItem {
   repeat?: Repeat | null
 }
 
-/** Every checklist item in a note, in order (nested ones too). */
+/**
+ * Every to-do in a note, in order (nested ones too) – not the items of a plain checklist. `i` counts
+ * every checklist item, so it finds the item again (setTaskDone).
+ */
 export function extractTasks(doc: Y.Doc): TaskItem[] {
   const out: TaskItem[] = []
   const own = (el: Y.XmlElement): { text: string; due?: string; repeat?: Repeat | null } => {
@@ -296,18 +302,20 @@ export function extractTasks(doc: Y.Doc): TaskItem[] {
     walk(el)
     return { text: text.replace(/\s+/g, ' ').trim(), due, repeat }
   }
-  const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+  let n = -1
+  const walk = (el: Y.XmlElement | Y.XmlFragment, plain: boolean) => {
     for (const c of el.toArray()) {
       if (!(c instanceof Y.XmlElement)) continue
       if (c.nodeName === 'taskItem') {
+        n++
         const checked = c.getAttribute('checked') as unknown
         const o = own(c)
-        out.push({ i: out.length, text: o.text, done: checked === true || checked === 'true', ...(o.due ? { due: o.due } : {}), ...(o.repeat ? { repeat: o.repeat } : {}) })
+        if (!plain) out.push({ i: n, text: o.text, done: checked === true || checked === 'true', ...(o.due ? { due: o.due } : {}), ...(o.repeat ? { repeat: o.repeat } : {}) })
       }
-      walk(c)
+      walk(c, plain || isPlainList(c))
     }
   }
-  walk(getContent(doc))
+  walk(getContent(doc), false)
   return out
 }
 
@@ -316,7 +324,7 @@ export function extractTasks(doc: Y.Doc): TaskItem[] {
  * (the note may have changed since). Returns whether it was found.
  */
 export function setTaskDone(doc: Y.Doc, i: number, text: string, done: boolean): boolean {
-  const t = extractTasks(doc)[i]
+  const t = extractTasks(doc).find((x) => x.i === i)
   if (!t || t.text !== text) return false
   let n = -1
   let hit: Y.XmlElement | null = null

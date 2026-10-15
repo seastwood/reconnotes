@@ -153,7 +153,7 @@ export async function addToShoppingList(editor: Editor, recipeTitle: string): Pr
   })
   const heading = `For ${recipeTitle || 'a recipe'}`
   if (!id) {
-    const md = `# Shopping list\n\n**${heading}**\n\n${items.map((i) => `- [ ] ${i.text.replace(/([\\[\]*_])/g, '\\$1')}`).join('\n')}`
+    const md = `# Shopping list\n\n**${heading}**\n\n<!-- list -->\n${items.map((i) => `- [ ] ${i.text.replace(/([\\[\]*_])/g, '\\$1')}`).join('\n')}`
     return { noteId: await noteFromMarkdown(md, 'Shopping list.md', null), added: items.length }
   }
   const { handle, close } = sync.open(noteDocName(id))
@@ -163,6 +163,8 @@ export async function addToShoppingList(editor: Editor, recipeTitle: string): Pr
       const label = new Y.XmlElement('paragraph')
       label.insert(0, [new Y.XmlText(`${heading}:`)])
       const list = new Y.XmlElement('taskList')
+      // a shopping list: ticked through, not to-dos
+      list.setAttribute('kind', 'list')
       list.insert(
         0,
         items.map((i) => {

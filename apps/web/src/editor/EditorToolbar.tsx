@@ -64,10 +64,13 @@ import {
   ScanLine,
   Lock,
   LockOpen,
+  CircleCheck,
+  RotateCcw,
 } from 'lucide-react'
 import { setNoteReadOnly, type ReadOnlyState } from '../lib/readOnly'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
+import { checklistInfo, setChecklistKind, uncheckAll } from './checklistKind'
 import { HIGHLIGHTS, TEXT_COLORS, highlight, highlightColor, lastHighlight, setTextColor, textColor } from './colors'
 import { insertFiles } from './nodes'
 import { saveBlob } from '../lib/files'
@@ -112,7 +115,7 @@ interface Props {
   readOnly?: ReadOnlyState
 }
 
-type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'quote'
+type StyleKey = 'title' | 'heading' | 'subheading' | 'body' | 'mono' | 'bullet' | 'numbered' | 'check' | 'list' | 'quote'
 
 type Chain = ReturnType<Editor['chain']>
 const TABLE_ACTIONS: ('-' | { label: string; run: (c: Chain) => Chain; danger?: boolean; close?: boolean })[] = [
@@ -141,10 +144,11 @@ export const STYLES: { key: StyleKey; label: string; className: string }[] = [
   { key: 'quote', label: '▍ Block quote', className: 'st-body' },
 ]
 
-const LISTS: { key: 'bullet' | 'numbered' | 'check'; label: string; icon: typeof List }[] = [
+const LISTS: { key: 'bullet' | 'numbered' | 'check' | 'list'; label: string; hint?: string; icon: typeof List }[] = [
   { key: 'bullet', label: 'Bulleted list', icon: List },
   { key: 'numbered', label: 'Numbered list', icon: ListOrdered },
-  { key: 'check', label: 'Checklist', icon: ListChecks },
+  { key: 'check', label: 'To-do list', hint: 'Shows in Tasks', icon: ListChecks },
+  { key: 'list', label: 'Checklist', hint: 'Shopping, packing – not tasks', icon: CircleCheck },
 ]
 
 /** Indent (1) or outdent (-1) what's at the cursor: a list item nests; other text moves a step. */
@@ -181,7 +185,18 @@ function convertWholeList(editor: Editor, key: keyof typeof LIST_TYPES): boolean
 }
 
 export function applyStyle(editor: Editor, key: StyleKey) {
-  if ((key === 'bullet' || key === 'numbered' || key === 'check') && convertWholeList(editor, key)) return true
+  // a checklist's kind: to-do (tasks) or a plain list – switched in place
+  if (key === 'check' || key === 'list') {
+    const info = checklistInfo(editor)
+    const want = key === 'list' ? 'list' : 'todo'
+    if (info && info.kind !== want) return setChecklistKind(editor, want)
+    if (!info) {
+      if (!convertWholeList(editor, 'check')) editor.chain().focus().toggleTaskList().run()
+      return key === 'list' ? setChecklistKind(editor, 'list') : true
+    }
+    return editor.chain().focus().toggleTaskList().run()
+  }
+  if ((key === 'bullet' || key === 'numbered') && convertWholeList(editor, key)) return true
   const c = editor.chain().focus()
   switch (key) {
     case 'title':
@@ -198,8 +213,6 @@ export function applyStyle(editor: Editor, key: StyleKey) {
       return c.toggleBulletList().run()
     case 'numbered':
       return c.toggleOrderedList().run()
-    case 'check':
-      return c.toggleTaskList().run()
     case 'quote':
       return c.toggleBlockquote().run()
   }
@@ -235,7 +248,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       strike: e.isActive('strike'),
       color: (e.getAttributes('textStyle').color as string | undefined) ?? null,
       highlight: e.isActive('highlight') ? ((e.getAttributes('highlight').color as string | undefined) ?? highlightColor('yellow')) : null,
-      list: e.isActive('taskList') ? 'check' : e.isActive('orderedList') ? 'numbered' : e.isActive('bulletList') ? 'bullet' : null,
+      list: e.isActive('taskList') ? (checklistInfo(e)?.kind === 'list' ? 'list' : 'check') : e.isActive('orderedList') ? 'numbered' : e.isActive('bulletList') ? 'bullet' : null,
+      ticked: checklistInfo(e)?.ticked ?? 0,
       canIndent: canIndentAt(e, 1),
       canOutdent: canIndentAt(e, -1),
       table: e.isActive('table'),
@@ -488,7 +502,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
               { label: 'Colours', icon: Palette, on: Boolean(state.color), run: () => setTimeout(() => setMenu('color')) },
               { label: 'Bulleted', icon: List, on: state.list === 'bullet', run: () => applyStyle(editor, 'bullet') },
               { label: 'Numbered', icon: ListOrdered, on: state.list === 'numbered', run: () => applyStyle(editor, 'numbered') },
-              { label: 'Checklist', icon: ListChecks, on: state.list === 'check', run: () => applyStyle(editor, 'check') },
+              { label: 'To-do', icon: ListChecks, on: state.list === 'check', run: () => applyStyle(editor, 'check') },
+              { label: 'Checklist', icon: CircleCheck, on: state.list === 'list', run: () => applyStyle(editor, 'list') },
               { label: 'Outdent', icon: IndentDecrease, disabled: !state.canOutdent, run: () => indent(editor, -1) },
               { label: 'Indent', icon: IndentIncrease, disabled: !state.canIndent, run: () => indent(editor, 1) },
               { label: state.table ? 'Table…' : 'Table', icon: Table2, on: state.table, run: () => (state.table ? setTimeout(() => setMenu('table')) : editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()) },
@@ -518,15 +533,20 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
         aria-label="Lists and indent"
         title="Bulleted, numbered and check lists; indent"
       >
-        {state.list === 'bullet' ? <List size={20} /> : state.list === 'numbered' ? <ListOrdered size={20} /> : <ListChecks size={20} />}
+        {state.list === 'bullet' ? <List size={20} /> : state.list === 'numbered' ? <ListOrdered size={20} /> : state.list === 'list' ? <CircleCheck size={20} /> : <ListChecks size={20} />}
       </button>
       {menu === 'lists' && (
         <Popover anchorRef={listsBtn} onClose={() => setMenu(null)} keepFocus>
           {LISTS.map((l) => (
-            <button key={l.key} className={state.list === l.key ? 'checked' : ''} onClick={() => (applyStyle(editor, l.key), setMenu(null))}>
+            <button key={l.key} className={state.list === l.key ? 'checked' : ''} onClick={() => (applyStyle(editor, l.key), setMenu(null))} title={l.hint}>
               <l.icon size={16} /> {l.label}
             </button>
           ))}
+          {(state.list === 'check' || state.list === 'list') && (
+            <button disabled={!state.ticked} onClick={() => (uncheckAll(editor), setMenu(null))} title="Untick every item – ready to use again">
+              <RotateCcw size={16} /> Uncheck all
+            </button>
+          )}
           <div className="menu-sep" />
           <button disabled={!state.canIndent} onClick={() => indent(editor, 1)}>
             <IndentIncrease size={16} /> Indent <span className="menu-shortcut">Tab</span>

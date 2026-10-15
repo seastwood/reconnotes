@@ -659,6 +659,7 @@ Write back the WHOLE note with the request carried out, and nothing else changed
 - Keep each line like ⟦IMAGE:…⟧, ⟦DRAWING:…⟧, ⟦AUDIO:…⟧ or ⟦FILE:…⟧ exactly, on its own line – they are pictures, drawings, recordings and files. Move one only if asked; remove one only if asked.
 - Keep [[links]], #tags and dates like !2026-10-14 as they are.
 - Markdown: "# " headings, "- " bullets, "1. " numbered lists, "- [ ] " checklist items ("- [x] " ticked), | tables |, **bold**, *italic*.
+- Checklists come in two kinds: to-dos (tasks to do), and plain checklists for things to tick through – a shopping or packing list – which have a line "<!-- list -->" just before them. Keep each list's kind; for a new checklist of things to buy, pack or bring, put "<!-- list -->" on the line before it.
 - Don't add anything the request doesn't ask for: no notes, no explanations, no code fences.
 
 After the note, write a line with only "===CHANGED===" and then one short sentence saying what you changed (e.g. "Made the groceries a checklist.").

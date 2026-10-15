@@ -66,7 +66,7 @@ export class Tasks {
   async setDone(noteId: string, i: number, text: string, done: boolean): Promise<boolean> {
     let ok = false
     await this.sync.change(noteDocName(noteId), (doc) => {
-      const t = extractTasks(doc)[i]
+      const t = extractTasks(doc).find((x) => x.i === i)
       if (done && t?.text === text && t.repeat && t.due) {
         // the due date's id: complete it the way the Due view does
         const id = dueIdAt(doc, i)

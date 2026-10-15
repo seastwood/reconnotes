@@ -476,11 +476,13 @@ export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: nu
       case 'listItem':
         return `<li>${children(el)}</li>`
       case 'taskList':
-        return `<ul class="tasks">${children(el)}</ul>`
+        return `<ul class="tasks${el.getAttribute('kind') === 'list' ? ' plain' : ''}">${children(el)}</ul>`
       case 'taskItem': {
         const c = el.getAttribute('checked') as unknown
         const done = c === true || c === 'true'
-        return `<li class="${done ? 'done' : ''}"><span class="box">${done ? '☑' : '☐'}</span><div>${children(el)}</div></li>`
+        // (a plain checklist – shopping, packing – has round checks)
+        const plain = el.parent instanceof Y.XmlElement && el.parent.getAttribute('kind') === 'list'
+        return `<li class="${done ? 'done' : ''}"><span class="box">${plain ? (done ? '◉' : '○') : done ? '☑' : '☐'}</span><div>${children(el)}</div></li>`
       }
       case 'blockquote':
         return `<blockquote>${children(el)}</blockquote>`

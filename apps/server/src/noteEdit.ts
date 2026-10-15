@@ -18,7 +18,7 @@ export function blockKey(node: Y.XmlElement | Y.XmlText): string {
       for (const op of n.toDelta() as { insert: unknown }[]) if (typeof op.insert === 'string') parts.push(op.insert)
       return
     }
-    parts.push(`<${n.nodeName}${n.nodeName === 'taskItem' ? (n.getAttribute('checked') ? '+' : '-') : ''}${n.nodeName === 'heading' ? n.getAttribute('level') : ''}>`)
+    parts.push(`<${n.nodeName}${n.nodeName === 'taskItem' ? (n.getAttribute('checked') ? '+' : '-') : ''}${n.nodeName === 'heading' ? n.getAttribute('level') : ''}${n.nodeName === 'taskList' && n.getAttribute('kind') === 'list' ? 'o' : ''}>`)
     // links to notes, due dates, pictures and recordings: what they point at
     for (const a of ['noteId', 'date', 'attachmentId', 'drawingId']) {
       const v = n.getAttribute(a)
