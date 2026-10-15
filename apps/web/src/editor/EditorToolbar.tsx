@@ -46,6 +46,8 @@ import {
   Trash2,
   Type,
   Underline,
+  Highlighter,
+  Palette,
   Undo2,
   ImagePlus,
   Download,
@@ -66,6 +68,7 @@ import {
 import { setNoteReadOnly, type ReadOnlyState } from '../lib/readOnly'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
 import { useUndoManager, useUndoState } from './undo'
+import { HIGHLIGHTS, TEXT_COLORS, highlight, highlightColor, lastHighlight, setTextColor, textColor } from './colors'
 import { insertFiles } from './nodes'
 import { saveBlob } from '../lib/files'
 import { checkForUpdates } from '../lib/webImport'
@@ -208,7 +211,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const onLinkNote = readOnly ? undefined : linkNote
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
-  const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | null>(null)
+  const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | 'color' | null>(null)
   // the chat open on this note (the button shows it's on, and closes it)
   const chatOpen = useStore(askChat, (s) => Boolean(s.target?.noteId === noteId && !s.browsing && !s.hidden))
   const [busy, setBusy] = useState<string | null>(null)
@@ -219,6 +222,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const tableBtn = useRef<HTMLButtonElement>(null)
   const listsBtn = useRef<HTMLButtonElement>(null)
   const formatBtn = useRef<HTMLButtonElement>(null)
+  const colorBtn = useRef<HTMLButtonElement>(null)
   const photoRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -229,6 +233,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       italic: e.isActive('italic'),
       underline: e.isActive('underline'),
       strike: e.isActive('strike'),
+      color: (e.getAttributes('textStyle').color as string | undefined) ?? null,
+      highlight: e.isActive('highlight') ? ((e.getAttributes('highlight').color as string | undefined) ?? highlightColor('yellow')) : null,
       list: e.isActive('taskList') ? 'check' : e.isActive('orderedList') ? 'numbered' : e.isActive('bulletList') ? 'bullet' : null,
       canIndent: canIndentAt(e, 1),
       canOutdent: canIndentAt(e, -1),
@@ -404,6 +410,63 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
       <button className={`tb hide-sm${state.strike ? ' on' : ''}`} onClick={() => editor.chain().focus().toggleStrike().run()} aria-label="Strikethrough">
         <Strikethrough size={18} />
       </button>
+      <button
+        className={`tb hide-sm${state.highlight ? ' on' : ''}`}
+        onClick={() => highlight(editor)}
+        aria-label="Highlight"
+        title="Highlight (⌘⇧H) – again takes it off"
+      >
+        <Highlighter size={18} />
+        <span className="tb-swatch" style={{ background: highlightColor(lastHighlight()) }} />
+      </button>
+      <button
+        ref={colorBtn}
+        className={`tb hide-sm${menu === 'color' ? ' on' : ''}`}
+        onClick={() => setMenu(menu === 'color' ? null : 'color')}
+        aria-label="Text and highlight colours"
+        title="Text and highlight colours"
+      >
+        <Palette size={18} />
+        {state.color && <span className="tb-swatch" style={{ background: state.color }} />}
+      </button>
+      {menu === 'color' && (
+        <Popover anchorRef={colorBtn.current?.offsetParent ? colorBtn : formatBtn} onClose={() => setMenu(null)} keepFocus>
+          <div className="color-panel">
+            <div className="menu-label">Highlight</div>
+            <div className="swatches">
+              {HIGHLIGHTS.map((h) => (
+                <button
+                  key={h.key}
+                  className={`swatch hl${state.highlight === highlightColor(h.key) ? ' on' : ''}`}
+                  style={{ background: highlightColor(h.key) }}
+                  onClick={() => highlight(editor, h.key)}
+                  aria-label={`${h.label} highlight`}
+                  title={h.label}
+                />
+              ))}
+              <button className="swatch none" disabled={!state.highlight} onClick={() => editor.chain().focus().unsetHighlight().run()} aria-label="No highlight" title="No highlight" />
+            </div>
+            <div className="menu-label">Text colour</div>
+            <div className="swatches">
+              <button className={`swatch text${!state.color ? ' on' : ''}`} onClick={() => setTextColor(editor, null)} aria-label="Default colour" title="Default">
+                A
+              </button>
+              {TEXT_COLORS.map((c) => (
+                <button
+                  key={c.key}
+                  className={`swatch text${state.color === textColor(c.key) ? ' on' : ''}`}
+                  style={{ color: textColor(c.key) }}
+                  onClick={() => setTextColor(editor, c.key)}
+                  aria-label={`${c.label} text`}
+                  title={c.label}
+                >
+                  A
+                </button>
+              ))}
+            </div>
+          </div>
+        </Popover>
+      )}
       {/* narrow: what doesn't fit is a tap away, in one panel */}
       <button
         ref={formatBtn}
@@ -421,6 +484,8 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
               { label: 'Italic', icon: Italic, on: state.italic, run: () => editor.chain().focus().toggleItalic().run() },
               { label: 'Underline', icon: Underline, on: state.underline, run: () => editor.chain().focus().toggleUnderline().run() },
               { label: 'Strike', icon: Strikethrough, on: state.strike, run: () => editor.chain().focus().toggleStrike().run() },
+              { label: 'Highlight', icon: Highlighter, on: Boolean(state.highlight), run: () => highlight(editor) },
+              { label: 'Colours', icon: Palette, on: Boolean(state.color), run: () => setTimeout(() => setMenu('color')) },
               { label: 'Bulleted', icon: List, on: state.list === 'bullet', run: () => applyStyle(editor, 'bullet') },
               { label: 'Numbered', icon: ListOrdered, on: state.list === 'numbered', run: () => applyStyle(editor, 'numbered') },
               { label: 'Checklist', icon: ListChecks, on: state.list === 'check', run: () => applyStyle(editor, 'check') },

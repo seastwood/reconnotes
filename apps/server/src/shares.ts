@@ -402,6 +402,8 @@ export function drawingSvg(doc: Y.Doc, drawingId: string, overlay = false): stri
 }
 
 export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+const SHARE_TEXT_COLORS: Record<string, string> = { red: '#d92d20', orange: '#d66a00', green: '#1f8a3b', blue: '#1a66d6', purple: '#8a3ccf', gray: '#77736c' }
+const SHARE_HIGHLIGHTS: Record<string, string> = { yellow: '#fff08a', green: '#c7f0c2', blue: '#c8e1ff', pink: '#ffd0e6', orange: '#ffdcb0', purple: '#e3d2ff' }
 const safeHref = (h: string) => (/^(https?:|mailto:)/i.test(h.trim()) ? h.trim() : null)
 
 /**
@@ -426,6 +428,13 @@ export function sharePage(base: string, title: string, doc: Y.Doc, updatedAt: nu
           if (a.italic) t = `<em>${t}</em>`
           if (a.underline) t = `<u>${t}</u>`
           if (a.strike) t = `<s>${t}</s>`
+          // text and highlighter colours (kept as the app's theme colours)
+          const tc = /^var\(--tc-([a-z]+)\)$/.exec(String((a.textStyle as { color?: string } | undefined)?.color ?? ''))?.[1]
+          if (tc && SHARE_TEXT_COLORS[tc]) t = `<span style="color:${SHARE_TEXT_COLORS[tc]}">${t}</span>`
+          if (a.highlight) {
+            const hl = /^var\(--hl-([a-z]+)\)$/.exec(String((a.highlight as { color?: string }).color ?? ''))?.[1]
+            t = `<mark style="background:${SHARE_HIGHLIGHTS[hl ?? ''] ?? SHARE_HIGHLIGHTS.yellow};color:#1c1c1e">${t}</mark>`
+          }
           const href = a.link?.href ? safeHref(a.link.href) : null
           if (href) t = `<a href="${esc(href)}" rel="noopener noreferrer nofollow" target="_blank">${t}</a>`
           s += t

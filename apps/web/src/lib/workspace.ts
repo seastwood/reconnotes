@@ -19,10 +19,12 @@ export interface WorkspaceSnapshot {
   /** notes in a password-protected folder (locked or unlocked) */
   lockedNoteIds: Set<string>
   rootSort: SortMode
+  /** the top folders' order turned around */
+  rootSortReverse: boolean
   loaded: boolean
 }
 
-let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, allNotes: [], lockedNoteIds: new Set(), rootSort: 'manual', loaded: false }
+let snapshot: WorkspaceSnapshot = { folders: [], notes: [], hiddenNotes: 0, allNotes: [], lockedNoteIds: new Set(), rootSort: 'manual', rootSortReverse: false, loaded: false }
 const listeners = new Set<() => void>()
 const doc = sync.workspace.doc
 
@@ -59,6 +61,7 @@ function recompute() {
     allNotes: all,
     lockedNoteIds: new Set(all.filter((n) => rules.get(effectiveFolderId(n, live) ?? '')?.lockedBy).map((n) => n.id)),
     rootSort: (getSettings(doc).get('rootSort') as SortMode) ?? 'manual',
+    rootSortReverse: Boolean(getSettings(doc).get('rootSortReverse')),
     loaded: true,
   }
   listeners.forEach((l) => l())

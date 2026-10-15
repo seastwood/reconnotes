@@ -700,6 +700,7 @@ export function App() {
             onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
             onMoveNotes={(ids) => setMoving({ kind: 'notes', ids })}
+            onOpenFolder={(folderId) => showView({ kind: 'folder', folderId })}
           />
           )}
         </div>

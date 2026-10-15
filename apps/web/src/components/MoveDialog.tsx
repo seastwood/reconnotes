@@ -9,7 +9,7 @@ export type MoveTarget = { kind: 'note' | 'folder'; id: string } | { kind: 'note
 
 export function MoveDialog({ target, onClose }: { target: MoveTarget; onClose: () => void }) {
   const ws = useWorkspace()
-  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
+  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort, ws.rootSortReverse), [ws.folders, ws.rootSort, ws.rootSortReverse])
   const blocked = useMemo(
     () => (target.kind === 'folder' ? descendantFolderIds(ws.folders, target.id) : new Set<string>()),
     [ws.folders, target],

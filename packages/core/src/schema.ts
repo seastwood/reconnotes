@@ -46,6 +46,8 @@ export interface FolderData {
   createdAt: number
   /** how the folder's children are sorted */
   sort: SortMode
+  /** that order turned around: oldest first, Z to A */
+  sortReverse: boolean
   trashedAt: number | null
   /** a password is needed to open it (and its subfolders) – see folderRules */
   lock: FolderLock | null
@@ -111,6 +113,7 @@ export function readFolder(m: FolderMap): FolderData {
     order: (m.get('order') as string) ?? 'a0',
     createdAt: (m.get('createdAt') as number) ?? 0,
     sort: (m.get('sort') as SortMode) ?? 'manual',
+    sortReverse: Boolean(m.get('sortReverse')),
     trashedAt: (m.get('trashedAt') as number | null) ?? null,
     lock: (m.get('lock') as FolderLock | null | undefined) ?? null,
     noSearch: Boolean(m.get('noSearch')),

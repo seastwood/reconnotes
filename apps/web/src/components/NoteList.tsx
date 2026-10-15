@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { PenOff, ArrowUpDown, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
+import { PenOff, ArrowUpDown, Folder, Lock, ChevronRight, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -21,6 +21,7 @@ import {
   type SortMode,
   folderRules,
   noteReadOnly,
+  sortFolders,
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { newNoteFromTemplate } from '../lib/templates'
@@ -29,7 +30,8 @@ import { DueList } from './DueList'
 import { TasksList } from './TasksList'
 import { useProgressive } from '../lib/progressive'
 import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
-import { SORT_LABELS, getDrag, setDrag, type View } from './Sidebar'
+import { getDrag, setDrag, type View } from './Sidebar'
+import { SORT_LABELS, SortChoices, sortDirection } from './SortChoices'
 import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 import { duplicateNote, saveAsTemplate } from '../lib/templates'
@@ -52,6 +54,8 @@ interface Props {
   onMoveNote: (id: string) => void
   /** move several notes (pick a folder) */
   onMoveNotes: (ids: string[]) => void
+  /** a subfolder was tapped */
+  onOpenFolder?: (folderId: string) => void
 }
 
 function formatDate(ts: number) {
@@ -63,7 +67,7 @@ function formatDate(ts: number) {
   return d.toLocaleDateString()
 }
 
-export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expanded, onToggleExpand, onMoveNote, onMoveNotes }: Props) {
+export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expanded, onToggleExpand, onMoveNote, onMoveNotes, onOpenFolder }: Props) {
   // how many references each note has (the notes Ask reads with it)
   const allRefs = useStore(refsStore, (s) => s.all)
   useEffect(() => void loadRefs(), [])
@@ -102,6 +106,8 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
   const lockedBy = view.kind === 'folder' && access.lockedFolder(view.folderId) ? access.lockOwner(view.folderId) : null
   const allSort = (getSettings(workspaceDoc).get('allSort') as SortMode) ?? 'updated'
   const sort: SortMode = folder ? folder.sort : view.kind === 'all' || view.kind === 'unfiled' ? allSort : 'updated'
+  const allReverse = Boolean(getSettings(workspaceDoc).get('allSortReverse'))
+  const reverse = folder ? folder.sortReverse : view.kind === 'all' || view.kind === 'unfiled' ? allReverse : false
 
   const notes: NoteData[] = useMemo(() => {
     if (view.kind === 'trash') return sortNotes(ws.notes.filter((n) => n.trashedAt), 'updated')
@@ -109,13 +115,36 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
     if (view.kind === 'folder')
       return sortNotes(
         ws.notes.filter((n) => !n.trashedAt && !n.template && effectiveFolderId(n, liveFolders) === view.folderId),
-        sort === 'manual' ? 'manual' : sort,
+        sort,
+        reverse,
       )
-    if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template), sort)
-    if (view.kind === 'unfiled') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && !effectiveFolderId(n, liveFolders)), sort)
+    if (view.kind === 'all') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template), sort, reverse)
+    if (view.kind === 'unfiled') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && !effectiveFolderId(n, liveFolders)), sort, reverse)
     if (view.kind === 'tag') return sortNotes(ws.notes.filter((n) => !n.trashedAt && !n.template && n.tags.includes(view.tag)), 'updated')
     return []
-  }, [ws.notes, view, sort, liveFolders])
+  }, [ws.notes, view, sort, reverse, liveFolders])
+
+  // a folder's own folders, listed above its notes
+  const subfolders = useMemo(() => {
+    if (view.kind !== 'folder') return []
+    return sortFolders(
+      ws.folders.filter((f) => !f.trashedAt && f.parentId === view.folderId),
+      folder?.sort ?? 'manual',
+      folder?.sortReverse,
+    )
+  }, [ws.folders, view, folder?.sort, folder?.sortReverse])
+  const inFolder = useMemo(() => {
+    const count = new Map<string, number>()
+    if (!subfolders.length) return count
+    for (const n of ws.notes) {
+      if (n.trashedAt || n.template) continue
+      const f = effectiveFolderId(n, liveFolders)
+      if (f) count.set(f, (count.get(f) ?? 0) + 1)
+    }
+    for (const f of ws.folders) if (!f.trashedAt && f.parentId) count.set(`/${f.parentId}`, (count.get(`/${f.parentId}`) ?? 0) + 1)
+    return count
+  }, [ws.notes, ws.folders, subfolders.length, liveFolders])
+  const [dropOn, setDropOn] = useState<string | null>(null)
 
   const title =
     view.kind === 'all'
@@ -134,9 +163,9 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
                 ? 'Tasks'
               : (folder?.name ?? 'Folder')
 
-  const setSort = (m: SortMode) => {
-    if (folder) updateFolder(workspaceDoc, folder.id, { sort: m })
-    else getSettings(workspaceDoc).set('allSort', m)
+  const setSort = (m: SortMode, turned: boolean) => {
+    if (folder) updateFolder(workspaceDoc, folder.id, { sort: m, sortReverse: turned })
+    else workspaceDoc.transact(() => (getSettings(workspaceDoc).set('allSort', m), getSettings(workspaceDoc).set('allSortReverse', turned)))
   }
 
   const newNote = () => {
@@ -253,19 +282,13 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
         )}
         {view.kind !== 'trash' && view.kind !== 'templates' && view.kind !== 'tag' && view.kind !== 'due' && view.kind !== 'tasks' && (
           <div className="menu-anchor">
-            <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}`}>
+            <button ref={sortBtn} className="icon" onClick={() => setSortMenu(!sortMenu)} aria-label="Sort" title={`Sorted by ${SORT_LABELS[sort]}${sort === 'manual' ? '' : ` (${sortDirection(sort, reverse).toLowerCase()})`}`}>
               <ArrowUpDown size={18} />
             </button>
             {sortMenu && (
               <Popover anchorRef={sortBtn} align="right" onClose={() => setSortMenu(false)}>
                 <div className="menu-label">Sort notes by</div>
-                {(Object.keys(SORT_LABELS) as SortMode[])
-                  .filter((m) => m !== 'manual' || view.kind === 'folder')
-                  .map((m) => (
-                    <button key={m} className={sort === m ? 'checked' : ''} onClick={() => setSort(m)}>
-                      {SORT_LABELS[m]}
-                    </button>
-                  ))}
+                <SortChoices sort={sort} reverse={reverse} onChange={setSort} manual={view.kind === 'folder'} />
               </Popover>
             )}
           </div>
@@ -348,6 +371,40 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           </li>
         ))}
 
+        {!selecting &&
+          subfolders.map((f) => {
+            const notesIn = inFolder.get(f.id) ?? 0
+            const foldersIn = inFolder.get(`/${f.id}`) ?? 0
+            const locked = access.lockedFolder(f.id)
+            return (
+              <li
+                key={f.id}
+                className={`note-row subfolder-row${dropOn === f.id ? ' drop-into' : ''}`}
+                onClick={() => onOpenFolder?.(f.id)}
+                onDragOver={(e) => (e.preventDefault(), setDropOn(f.id))}
+                onDragLeave={() => setDropOn(null)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDropOn(null)
+                  const p = getDrag(e)
+                  if (p?.kind === 'note') moveNotes(p.ids ?? [p.id], f.id)
+                }}
+              >
+                <div className="note-title">
+                  <Folder size={15} className="file-mark" /> {f.name}
+                  {locked && <Lock size={12} className="pin" aria-label="Locked" />}
+                </div>
+                <div className="note-meta">
+                  <span className="note-snippet">
+                    {locked
+                      ? 'Locked'
+                      : [foldersIn ? `${foldersIn} folder${foldersIn === 1 ? '' : 's'}` : '', `${notesIn} note${notesIn === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+                <ChevronRight size={16} className="subfolder-go" />
+              </li>
+            )
+          })}
         {notes.slice(0, shown.limit).map((n, i) => (
           <NoteRow
             key={n.id}
@@ -418,7 +475,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           </NoteRow>
         ))}
         {shown.limit < notes.length && <li ref={shown.sentinel} className="empty-hint">Loading more notes…</li>}
-        {view.kind !== 'due' && view.kind !== 'tasks' && !notes.length && !trashedFolders.length && (
+        {view.kind !== 'due' && view.kind !== 'tasks' && !notes.length && !trashedFolders.length && !subfolders.length && (
           <li className="empty-hint">{view.kind === 'trash' ? 'Nothing here.' : 'No notes yet.'}</li>
         )}
         {view.kind === 'folder' && notes.length > 0 && (

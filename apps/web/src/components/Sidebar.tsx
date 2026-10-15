@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
+import { SortChoices } from './SortChoices'
 import { SearchResults, SearchSuggestions } from './SearchResults'
 import { ErrorBoundary } from './ErrorBoundary'
 import {
@@ -94,12 +95,7 @@ interface Props {
   activeNoteId: string | null
 }
 
-export const SORT_LABELS: Record<SortMode, string> = {
-  manual: 'Manual (drag to reorder)',
-  title: 'Title',
-  created: 'Date created',
-  updated: 'Date edited',
-}
+export { SORT_LABELS } from './SortChoices'
 
 const DND_TYPE = 'application/x-reconnotes'
 
@@ -149,7 +145,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const scope = useSearchScope()
   const scopeName = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
   const scopeLabel = scope.length === 1 ? `Search in ${scopeName(scope[0])}` : scope.length ? `Search in ${scope.length} folders` : 'Search everything'
-  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
+  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort, ws.rootSortReverse), [ws.folders, ws.rootSort, ws.rootSortReverse])
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => safeLocalGet('reconnotes.collapsed', {}))
   const searchBox = useRef<HTMLTextAreaElement>(null)
   /** the search box has the cursor: show saved and recent searches under it */
@@ -422,11 +418,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                   </button>
                 )}
                 <div className="menu-label">Sort subfolders &amp; notes by</div>
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
-                  <button key={m} className={f.sort === m ? 'checked' : ''} onClick={() => updateFolder(workspaceDoc, f.id, { sort: m })}>
-                    {SORT_LABELS[m]}
-                  </button>
-                ))}
+                <SortChoices sort={f.sort} reverse={f.sortReverse} onChange={(sort, sortReverse) => updateFolder(workspaceDoc, f.id, { sort, sortReverse })} />
                 <div className="menu-sep" />
                 <button
                   onClick={() => {
@@ -651,11 +643,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             {menuFor === 'root' && (
               <Popover anchorRef={menuAnchor} align="right" onClose={() => setMenuFor(null)}>
                 <div className="menu-label">Sort folders by</div>
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
-                  <button key={m} className={ws.rootSort === m ? 'checked' : ''} onClick={() => getSettings(workspaceDoc).set('rootSort', m)}>
-                    {SORT_LABELS[m]}
-                  </button>
-                ))}
+                <SortChoices
+                  sort={ws.rootSort}
+                  reverse={ws.rootSortReverse}
+                  onChange={(m, reverse) => workspaceDoc.transact(() => (getSettings(workspaceDoc).set('rootSort', m), getSettings(workspaceDoc).set('rootSortReverse', reverse)))}
+                />
               </Popover>
             )}
           </div>

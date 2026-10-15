@@ -31,36 +31,38 @@ export function compareByOrder(a: { order: string; id: string }, b: { order: str
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
-export function sortFolders(folders: FolderData[], mode: SortMode): FolderData[] {
+export function sortFolders(folders: FolderData[], mode: SortMode, reverse = false): FolderData[] {
   const out = [...folders]
+  const dir = reverse && mode !== 'manual' ? -1 : 1
   switch (mode) {
     case 'title':
-      return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+      return out.sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
     case 'created':
-      return out.sort((a, b) => b.createdAt - a.createdAt)
     case 'updated': // folders have no updated time; fall back to newest first
-      return out.sort((a, b) => b.createdAt - a.createdAt)
+      return out.sort((a, b) => dir * (b.createdAt - a.createdAt))
     default:
       return out.sort(compareByOrder)
   }
 }
 
-export function sortNotes(notes: NoteData[], mode: SortMode): NoteData[] {
+/** Notes in order (pinned ones first). `reverse`: oldest first, Z to A (not for manual order). */
+export function sortNotes(notes: NoteData[], mode: SortMode, reverse = false): NoteData[] {
   const out = [...notes]
   const pinnedFirst = (a: NoteData, b: NoteData) => Number(b.pinned) - Number(a.pinned)
+  const dir = reverse && mode !== 'manual' ? -1 : 1
   switch (mode) {
     case 'title':
       return out.sort(
         (a, b) =>
           pinnedFirst(a, b) ||
-          (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' }),
+          dir * (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' }),
       )
     case 'created':
-      return out.sort((a, b) => pinnedFirst(a, b) || b.createdAt - a.createdAt)
+      return out.sort((a, b) => pinnedFirst(a, b) || dir * (b.createdAt - a.createdAt))
     case 'manual':
       return out.sort((a, b) => pinnedFirst(a, b) || compareByOrder(a, b))
     default:
-      return out.sort((a, b) => pinnedFirst(a, b) || b.updatedAt - a.updatedAt)
+      return out.sort((a, b) => pinnedFirst(a, b) || dir * (b.updatedAt - a.updatedAt))
   }
 }
 
@@ -73,7 +75,7 @@ export function sortNotes(notes: NoteData[], mode: SortMode): NoteData[] {
  * anything whose parent chain is broken or cyclic is shown at the top level,
  * so nothing ever becomes unreachable.
  */
-export function buildTree(folders: FolderData[], rootSort: SortMode = 'manual'): TreeNode[] {
+export function buildTree(folders: FolderData[], rootSort: SortMode = 'manual', rootReverse = false): TreeNode[] {
   const live = folders.filter((f) => !f.trashedAt)
   const byId = new Map(live.map((f) => [f.id, f]))
 
@@ -89,13 +91,13 @@ export function buildTree(folders: FolderData[], rootSort: SortMode = 'manual'):
     childrenOf.get(p)!.push(f)
   }
 
-  const build = (parentId: string | null, mode: SortMode): TreeNode[] =>
-    sortFolders(childrenOf.get(parentId) ?? [], mode).map((folder) => ({
+  const build = (parentId: string | null, mode: SortMode, reverse = false): TreeNode[] =>
+    sortFolders(childrenOf.get(parentId) ?? [], mode, reverse).map((folder) => ({
       folder,
-      children: build(folder.id, folder.sort),
+      children: build(folder.id, folder.sort, folder.sortReverse),
     }))
 
-  return build(null, rootSort)
+  return build(null, rootSort, rootReverse)
 }
 
 function resolveParent(f: FolderData, byId: Map<string, FolderData>): string | null {

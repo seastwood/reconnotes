@@ -11,6 +11,7 @@ import { BlockIndent } from './indent'
 import { Uncertain } from './uncertain'
 import { ChecklistClipboard } from './checklistCopy'
 import { ItemCopyButton } from './ItemCopyButton'
+import { ColorMarks } from './colors'
 import { BlockClipboard } from './blockClipboard'
 import type * as Y from 'yjs'
 import { CONTENT_FIELD, getTranscripts, newId } from '@reconnotes/core'
@@ -119,6 +120,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         }),
         Collaboration.configure({ document: doc, field: CONTENT_FIELD, yUndoOptions: { undoManager } }),
         LinkOpener,
+        ColorMarks,
         CodeCopy,
         ListenButtons,
         TaskList,

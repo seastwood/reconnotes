@@ -116,7 +116,7 @@ export function SearchResults({ query, activeNoteId, onOpen }: { query: string; 
     for (const name of parsed.folders) for (const id of foldersNamedIn(name, ws.folders).ids) ids.add(id)
     return ids
   }, [parsed.folders, ws.folders])
-  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
+  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort, ws.rootSortReverse), [ws.folders, ws.rootSort, ws.rootSortReverse])
   /** the chosen folders and everything inside them ('none': notes in no folder) */
   const inFolder = useMemo(() => {
     if (!scope.length) return null

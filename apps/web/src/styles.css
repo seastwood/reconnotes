@@ -6706,3 +6706,137 @@ button.ask-chat-title:disabled {
   display: grid;
   place-items: center;
 }
+
+/* the chosen order in a Sort menu: which way it runs */
+.menu button .sort-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--accent-text);
+}
+.menu button .sort-dir small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.menu button.sort-on {
+  font-weight: 600;
+}
+
+/* a folder's own folders, above its notes */
+.subfolder-row {
+  position: relative;
+  cursor: pointer;
+  padding-right: 32px;
+}
+.subfolder-row .note-title svg.file-mark {
+  color: var(--accent-text);
+}
+.subfolder-row .subfolder-go {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+}
+.subfolder-row.drop-into {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* text and highlighter colours: kept in notes as these names, so they suit light and dark */
+:root {
+  --tc-red: #d92d20;
+  --tc-orange: #d66a00;
+  --tc-green: #1f8a3b;
+  --tc-blue: #1a66d6;
+  --tc-purple: #8a3ccf;
+  --tc-gray: #77736c;
+  --hl-yellow: #fff08a;
+  --hl-green: #c7f0c2;
+  --hl-blue: #c8e1ff;
+  --hl-pink: #ffd0e6;
+  --hl-orange: #ffdcb0;
+  --hl-purple: #e3d2ff;
+}
+:root[data-theme='dark'] {
+  --tc-red: #ff6b5e;
+  --tc-orange: #ff9f45;
+  --tc-green: #5fd47a;
+  --tc-blue: #6aa8ff;
+  --tc-purple: #c08bff;
+  --tc-gray: #a19d96;
+  --hl-yellow: #6b5a00;
+  --hl-green: #1f5a2a;
+  --hl-blue: #1d3f6e;
+  --hl-pink: #6e2448;
+  --hl-orange: #6e3d0c;
+  --hl-purple: #46306e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --tc-red: #ff6b5e;
+    --tc-orange: #ff9f45;
+    --tc-green: #5fd47a;
+    --tc-blue: #6aa8ff;
+    --tc-purple: #c08bff;
+    --tc-gray: #a19d96;
+    --hl-yellow: #6b5a00;
+    --hl-green: #1f5a2a;
+    --hl-blue: #1d3f6e;
+    --hl-pink: #6e2448;
+    --hl-orange: #6e3d0c;
+    --hl-purple: #46306e;
+  }
+}
+.note-content mark {
+  background: var(--hl-yellow);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.tb {
+  position: relative;
+}
+.tb .tb-swatch {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+}
+.color-panel {
+  padding: 2px 4px 6px;
+  min-width: 232px;
+}
+.color-panel .swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 8px 8px;
+}
+.menu .color-panel .swatch {
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-size: 15px;
+  background: var(--paper);
+}
+.menu .color-panel .swatch.on {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent);
+}
+.menu .color-panel .swatch.none {
+  background: linear-gradient(135deg, transparent 45%, var(--danger) 45%, var(--danger) 55%, transparent 55%), var(--paper);
+}
+.menu .color-panel .swatch:disabled {
+  opacity: 0.4;
+}

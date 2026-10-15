@@ -22,7 +22,7 @@ export function SaveAsNoteDialog({
   onOpen: (noteId: string) => void
 }) {
   const ws = useWorkspace()
-  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort), [ws.folders, ws.rootSort])
+  const tree = useMemo(() => buildTree(ws.folders, ws.rootSort, ws.rootSortReverse), [ws.folders, ws.rootSort, ws.rootSortReverse])
   const suggested = useMemo(() => suggestFolder(turns, about), [turns, about])
   const [folder, setFolder] = useState<string | null>(suggested)
   const [title, setTitle] = useState(() => turns[0]?.question.replace(/\s+/g, ' ').trim().slice(0, 120) ?? '')

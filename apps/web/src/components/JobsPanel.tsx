@@ -180,8 +180,8 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders, expanded = fals
           </button>
           {menu && (
             <Popover anchorRef={menuBtn} align="right" onClose={() => setMenu(false)}>
-              <button className={showAuto ? 'checked' : ''} onClick={() => (setShowAuto(!showAuto), setMenu(false))}>
-                Show background work
+              <button onClick={() => (setShowAuto(!showAuto), setMenu(false))}>
+                {showAuto ? 'Hide background work' : 'Show background work'}
               </button>
               <button
                 disabled={!jobs.some(isFinished)}
@@ -219,6 +219,11 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders, expanded = fals
         {!showAuto && hiddenAuto > 0 && (
           <button className="text jobs-show-auto" onClick={() => setShowAuto(true)}>
             Show {hiddenAuto} background job{hiddenAuto === 1 ? '' : 's'} (reading handwriting and files for search)
+          </button>
+        )}
+        {showAuto && jobs.some((j) => j.origin === 'auto' && isFinished(j)) && (
+          <button className="text jobs-show-auto" onClick={() => setShowAuto(false)}>
+            Hide background jobs
           </button>
         )}
       </div>
