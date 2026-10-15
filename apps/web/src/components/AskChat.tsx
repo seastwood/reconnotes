@@ -184,7 +184,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
     .map((j) => {
       const r = j.result as unknown as AskResult
-      return { question: String(j.input.question), answer: r.answer, sources: r.sources }
+      return { question: String(j.input.question), answer: r.answer, sources: r.sources, cites: r.cites }
     })
   /** an answer from the notes that found nothing in them: the same question, answered without them */
   const notFound = (r: { answer: string; sources: unknown[]; general?: boolean }) =>
@@ -194,7 +194,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
       <Sparkles size={14} /> Answer without my notes
     </button>
   )
-  const allTurns: TurnToSave[] = [...saved.map((t) => ({ question: t.question, answer: t.answer, sources: t.sources })), ...doneLive]
+  const allTurns: TurnToSave[] = [...saved.map((t) => ({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })), ...doneLive]
   const saveButton = (t: TurnToSave) => (
     <button className="text ask-save" onClick={() => setSaving([t])}>
       <FilePlus2 size={14} /> Save as note
@@ -324,7 +324,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                 </div>
                 <div className="ask-chat-a ask-panel">
                   <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
-                  {saveButton({ question: t.question, answer: t.answer, sources: t.sources })}
+                  {saveButton({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })}
                   {notFound(t) && i === saved.length - 1 && !live.length && withoutNotes(t.question)}
                 </div>
               </div>

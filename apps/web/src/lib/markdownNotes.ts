@@ -38,12 +38,30 @@ const makeExtensions = () => [
 let extensions: ReturnType<typeof makeExtensions> | null = null
 let schema: ReturnType<typeof getSchema> | null = null
 
-/** "[[Title]]" text → links to the notes with those titles. */
-function linkNotes(node: JSONContent, titles: Map<string, string>): JSONContent[] {
-  if (node.type === 'text' && node.text?.includes('[[')) {
+/** A link made by whoever wrote the Markdown, put in at "⟦L<n>⟧" (an Ask answer's [1] citations). */
+export interface MadeLink {
+  noteId: string
+  title: string
+  /** what the link shows ("1") */
+  label: string
+  /** where in the note it opens */
+  find?: string
+}
+
+/** "[[Title]]" text → links to the notes with those titles; "⟦L<n>⟧" → the link made for it. */
+function linkNotes(node: JSONContent, titles: Map<string, string>, made: MadeLink[] = []): JSONContent[] {
+  if (node.type === 'text' && (node.text?.includes('[[') || node.text?.includes('⟦L'))) {
     const out: JSONContent[] = []
     let last = 0
-    for (const m of node.text.matchAll(/\[\[([^\]|#\n]+)(?:\|([^\]\n]+))?\]\]/g)) {
+    for (const m of node.text.matchAll(/\[\[([^\]|#\n]+)(?:\|([^\]\n]+))?\]\]|⟦L(\d+)⟧/g)) {
+      if (m[3] !== undefined) {
+        const l = made[Number(m[3])]
+        if (m.index! > last) out.push({ ...node, text: node.text.slice(last, m.index) })
+        // (not given: the token goes)
+        if (l) out.push({ type: 'noteLink', attrs: { noteId: l.noteId, title: l.title, label: l.label, find: l.find ?? '' } })
+        last = m.index! + m[0].length
+        continue
+      }
       // [[id:<note id>|label]]: that note, whatever its title (Ask's sources)
       const byId = /^id:([a-z0-9]{8,64})$/i.exec(m[1].trim())
       const id = byId ? byId[1] : titles.get(m[1].trim().toLowerCase())
@@ -57,11 +75,11 @@ function linkNotes(node: JSONContent, titles: Map<string, string>): JSONContent[
     return out
   }
   if (node.type === 'codeBlock' || !node.content) return [node]
-  return [{ ...node, content: node.content.flatMap((c) => linkNotes(c, titles)) }]
+  return [{ ...node, content: node.content.flatMap((c) => linkNotes(c, titles, made)) }]
 }
 
 /** Markdown text → a new note in `folderId`. Returns its id. */
-export async function noteFromMarkdown(markdown: string, fileName: string, folderId: string | null): Promise<string> {
+export async function noteFromMarkdown(markdown: string, fileName: string, folderId: string | null, made: MadeLink[] = []): Promise<string> {
   extensions ??= makeExtensions()
   schema ??= getSchema(extensions)
   const md = markdown
@@ -76,7 +94,7 @@ export async function noteFromMarkdown(markdown: string, fileName: string, folde
     const n = readNote(m)
     if (!n.trashedAt && n.title) titles.set(n.title.trim().toLowerCase(), id)
   })
-  const doc = linkNotes(json, titles)[0]
+  const doc = linkNotes(json, titles, made)[0]
   // the first line is the note's title: start with the file name unless the text already does
   const name = fileName.replace(/\.[^.]+$/, '').trim() || 'Untitled'
   const first = doc.content?.[0]
