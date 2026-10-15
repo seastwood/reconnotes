@@ -5042,6 +5042,104 @@ a.button {
   align-items: center;
   text-align: center;
 }
+button.ask-chat-title {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.ask-chat-title:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.1);
+}
+button.ask-chat-title:disabled {
+  cursor: default;
+  opacity: 1;
+}
+/* the chat beside the note (big screens): part of the page, not over it */
+.ask-dock {
+  flex: none;
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+}
+.ask-dock .ask-chat.docked {
+  position: static;
+  width: auto;
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  box-shadow: none;
+  border-left: 0;
+  z-index: auto;
+}
+.ask-dock .ask-chat-head {
+  padding-top: 6px;
+}
+.ask-dock-edge {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.ask-dock-edge:hover,
+.resizing-chat .ask-dock-edge {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.resizing-chat {
+  cursor: col-resize;
+  user-select: none;
+}
+/* the list of every chat */
+.ask-browser-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+}
+.ask-browser-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.ask-browser-group {
+  margin-bottom: 14px;
+}
+.ask-browser-group .menu-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ask-browser-here {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--active);
+  color: var(--accent-text);
+  text-transform: none;
+  letter-spacing: 0;
+}
 .ask-chat-kicker {
   display: inline-flex;
   align-items: center;

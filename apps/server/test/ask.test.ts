@@ -481,6 +481,9 @@ describe('long notes (a manual)', () => {
     // not mixed with questions about everything
     const all = await fetch(`${base}/api/ask/history`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())
     expect(all.conversations.some((c: { id: string }) => c.id === first.id)).toBe(false)
+    // every chat, in brief, for the chats browser: what it's about, its first question, how many
+    const { chats } = await fetch(`${base}/api/ask/chats`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())
+    expect(chats.find((c: { id: string }) => c.id === first.id)).toMatchObject({ scope: 'note:manualnote00001', question: 'is g302 a minor or major foul?', questions: 2 })
     // and it can be deleted
     await fetch(`${base}/api/ask/history/${first.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${TOKEN}` } })
     expect((await fetch(`${base}/api/ask/history?noteId=manualnote00001`, { headers: { Authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())).conversations).toEqual([])

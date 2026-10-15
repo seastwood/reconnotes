@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, PanelLeft, X } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
@@ -13,7 +13,7 @@ import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { settings, useSettings } from './lib/settings'
 import { usePencilInteractions } from './drawing/PencilPalette'
 import { safeLocalGet, safeLocalSet, useStore } from './lib/store'
-import { ALL_NOTES, askChat, openAskChat } from './lib/askChat'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, openAskChat, toggleAskChat } from './lib/askChat'
 import { startReminders } from './lib/reminders'
 import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
@@ -39,18 +39,8 @@ import { quickAction, startAppLinks, type LinkAction } from './lib/appLinks'
 import * as Y from 'yjs'
 import { getContent, noteDocName } from '@reconnotes/core'
 import { sync } from './lib/sync'
+import { useMedia } from './lib/media'
 import { startMeeting } from './lib/meeting'
-
-function useMedia(q: string) {
-  const [m, setM] = useState(() => matchMedia(q).matches)
-  useEffect(() => {
-    const mq = matchMedia(q)
-    const on = () => setM(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [q])
-  return m
-}
 
 function useTheme() {
   const theme = useSettings((s) => s.theme)
@@ -409,6 +399,31 @@ export function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // the chat beside the note: if that leaves the note too narrow, the folders (then the notes list)
+  // step aside – and come back when the chat closes
+  const chatOpen = useStore(askChat, (s) => Boolean(s.target || s.browsing))
+  const roomForChat = useMedia(DOCK_MEDIA)
+  const chatDocked = chatOpen && roomForChat && !narrow
+  const madeRoomFrom = useRef<1 | 2 | 3 | null>(null)
+  useLayoutEffect(() => {
+    if (!chatDocked) {
+      if (madeRoomFrom.current !== null) setLayout(madeRoomFrom.current)
+      madeRoomFrom.current = null
+      return
+    }
+    // worked out from the columns' widths (measuring mid-animation would take away too much)
+    const css = getComputedStyle(document.querySelector('.app') ?? document.documentElement)
+    const px = (name: string, fallback: number) => parseFloat(css.getPropertyValue(name)) || fallback
+    const chatW = document.querySelector('.ask-dock')?.getBoundingClientRect().width ?? 420
+    const noteW = (l: 1 | 2 | 3) => innerWidth - chatW - (l >= 3 ? px('--sidebar-w', 260) : 0) - (l >= 2 ? px('--list-w', 320) : 0)
+    let fit = layout
+    while (fit > 1 && noteW(fit) < 460) fit = (fit - 1) as 1 | 2
+    if (fit !== layout) {
+      madeRoomFrom.current ??= layout
+      setLayout(fit)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatDocked])
   const showView = (view: View) => {
     setNav({ ...nav, view })
     if (narrow) setPane('list')
@@ -428,6 +443,8 @@ export function App() {
     const commands = [
       { id: 'new-note', label: 'New note', section: N, keywords: 'create add', run: () => a().openNote(createNote(workspaceDoc, { folderId: folderNow() })) },
       { id: 'ask-chat', label: 'Ask your notes (chat)', section: N, keywords: 'question ai chat answer', run: () => openAskChat(ALL_NOTES) },
+      { id: 'chat-toggle', label: 'Show or hide the chat', section: N, keywords: 'ask ai panel side', run: () => toggleAskChat(null) },
+      { id: 'chats', label: 'All chats', section: N, keywords: 'ask ai history conversations', run: () => browseChats() },
       { id: 'new-meeting', label: 'New meeting', section: N, keywords: 'record minutes agenda action items', run: () => void startMeeting(folderNow()).then((id) => a().openNote(id)) },
       {
         id: 'new-folder',
@@ -578,6 +595,12 @@ export function App() {
           )}
         </main>
       </Panel>
+      {/* the chat: beside the note on a big screen (or over it, on a phone) */}
+      <AskChatHost
+        onOpen={followLink}
+        onShowFolder={(folderId) => showView({ kind: 'folder', folderId })}
+        current={note && nav.noteId && !note.trashedAt ? { noteId: nav.noteId, title: note.title, folderId: note.folderId ?? null } : null}
+      />
       {settingsOpen && <SettingsDialog tab={settingsOpen === true ? undefined : settingsOpen} onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
       {/* the way back from a link: centred on the whole screen, where "Back to chat" sits (above it when both show) */}
@@ -600,7 +623,7 @@ export function App() {
       <HideKeyboardButton />
       <RecordingPill shownNoteId={editorVisible ? nav.noteId : null} onOpen={(id) => openFromReminder.current(id)} />
       <ImageViewerHost />
-      <AskChatHost onOpen={followLink} />
+
       <ReferencesHost onOpen={followLink} />
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen('sync')} />}
       {webImport && <WebImportDialog folderId={webImport.folderId} startOn={webImport.startOn} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}

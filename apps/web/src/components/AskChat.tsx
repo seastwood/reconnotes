@@ -1,11 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, BookOpen, ChevronLeft, FilePlus2, History, Loader2, MessageCircleQuestion, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, BookOpen, ChevronLeft, FileText, FilePlus2, Folder, History, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
-import { askChat, chatKey, closeAskChat, hideAskChat, showAskChat, type AskChatTarget } from '../lib/askChat'
+import { api } from '../lib/api'
+import { useMedia } from '../lib/media'
+import { useWorkspace } from '../lib/workspace'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, openChatAt, showAskChat, stopBrowsing, toggleAskChat, type AskChatTarget } from '../lib/askChat'
+import { Popover } from './Popover'
 import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
 import { ReferencesBar } from './References'
@@ -13,17 +17,43 @@ import { SaveAsNoteDialog } from './SaveAsNoteDialog'
 import type { TurnToSave } from '../lib/askToNote'
 
 /**
- * "Ask about this note" (and "Ask this folder"): a chat window of its own,
- * over the note. Every chat about the note is kept (on the server), to read
- * again or carry on; an answer's sources open the note at the line with the
- * answer – the chat steps aside, and "Back to chat" brings it back. Closing
- * the chat is back to the note.
+ * The Ask chat ("Ask about this note", "Ask this folder", "Ask your notes").
+ *
+ * On a big screen it's a panel beside the note (drag its edge to make it wider): it stays on its
+ * chat as you go from note to note, so you can read it and write a note at once, and its sources
+ * open in the note beside it. On a phone it covers the note; a source opens the note and the chat
+ * steps aside ("Back to chat" brings it back). Swiping in from the right edge opens it; swiping
+ * right from its left edge closes it. Every chat is kept (on the server): the list of chats shows
+ * them all – about all your notes, each folder, each note – to read again or carry on.
  */
-export function AskChatHost({ onOpen }: { onOpen: (noteId: string, find?: string) => void }) {
+export function AskChatHost({
+  onOpen,
+  onShowFolder,
+  current,
+}: {
+  onOpen: (noteId: string, find?: string) => void
+  onShowFolder: (folderId: string) => void
+  /** the note open now (a new chat can be about it, or its folder) */
+  current: { noteId: string; title: string; folderId: string | null } | null
+}) {
   const target = useStore(askChat, (s) => s.target)
   const hidden = useStore(askChat, (s) => s.hidden)
-  if (!target) return null
-  if (hidden)
+  const browsing = useStore(askChat, (s) => s.browsing)
+  const docked = useMedia(DOCK_MEDIA)
+  const currentRef = useRef(current)
+  currentRef.current = current
+  useEdgeSwipes(Boolean(target || browsing), () => {
+    const c = currentRef.current
+    toggleAskChat(c ? { noteId: c.noteId, title: c.title } : null)
+  })
+  if (!target && !browsing) return null
+  const inner = browsing || !target ? (
+    <ChatBrowser docked={docked} current={current} />
+  ) : (
+    <AskChat target={target} docked={docked} current={current} onOpen={onOpen} onShowFolder={onShowFolder} />
+  )
+  if (docked) return <ChatDock>{inner}</ChatDock>
+  if (hidden && target && !browsing)
     return createPortal(
       <div className="ask-chat-pill">
         <button className="ask-chat-pill-open" onClick={showAskChat}>
@@ -35,16 +65,101 @@ export function AskChatHost({ onOpen }: { onOpen: (noteId: string, find?: string
       </div>,
       document.body,
     )
-  return <AskChat target={target} onOpen={onOpen} />
+  return createPortal(inner, document.body)
 }
 
-function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: string, find?: string) => void }) {
+const DOCK_WIDTH = 'reconnotes.chatWidth'
+
+/** The panel beside the note: its left edge dragged to make it wider or narrower (remembered). */
+function ChatDock({ children }: { children: ReactNode }) {
+  const [width, setWidth] = useState(() => safeLocalGet<number>(DOCK_WIDTH, 420))
+  const clamp = (w: number) => Math.round(Math.max(320, Math.min(w, innerWidth * 0.6)))
+  const drag = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const start = width
+    let now = start
+    const move = (m: PointerEvent) => {
+      now = clamp(start + (startX - m.clientX))
+      setWidth(now)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.classList.remove('resizing-chat')
+      safeLocalSet(DOCK_WIDTH, now)
+    }
+    document.body.classList.add('resizing-chat')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return (
+    <aside className="ask-dock" style={{ width: clamp(width) }}>
+      <div className="ask-dock-edge" onPointerDown={drag} role="separator" aria-orientation="vertical" aria-label="Drag to resize the chat" title="Drag to resize" />
+      {children}
+    </aside>
+  )
+}
+
+/**
+ * Touch screens: a swipe in from the right edge opens the chat (the last one, or a new one about the
+ * note); with it open, a swipe right from its left edge closes it.
+ */
+function useEdgeSwipes(open: boolean, toggle: () => void) {
+  const openRef = useRef(open)
+  openRef.current = open
+  const toggleRef = useRef(toggle)
+  toggleRef.current = toggle
+  useEffect(() => {
+    let start: { x: number; y: number; from: 'right' | 'chat' } | null = null
+    const down = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (e.touches.length !== 1 || !t) return void (start = null)
+      if (!openRef.current && t.clientX > innerWidth - 22) start = { x: t.clientX, y: t.clientY, from: 'right' }
+      else if (openRef.current) {
+        // the chat's own left edge (a panel at the side, or the whole screen on a phone)
+        const chat = document.querySelector('.ask-dock, .ask-chat:not(.ask-dock .ask-chat)')?.getBoundingClientRect()
+        start = chat && t.clientX >= chat.left && t.clientX < chat.left + 24 ? { x: t.clientX, y: t.clientY, from: 'chat' } : null
+      } else start = null
+    }
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (!start || !t) return
+      const dx = t.clientX - start.x
+      const dy = Math.abs(t.clientY - start.y)
+      if (dy > 40) return void (start = null)
+      if ((start.from === 'right' && dx < -60) || (start.from === 'chat' && dx > 70)) {
+        start = null
+        toggleRef.current()
+      }
+    }
+    window.addEventListener('touchstart', down, { passive: true })
+    window.addEventListener('touchmove', move, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', down)
+      window.removeEventListener('touchmove', move)
+    }
+  }, [])
+}
+
+function AskChat({
+  target,
+  docked,
+  current,
+  onOpen,
+  onShowFolder,
+}: {
+  target: AskChatTarget
+  docked: boolean
+  current: { noteId: string; title: string; folderId: string | null } | null
+  onOpen: (noteId: string, find?: string) => void
+  onShowFolder: (folderId: string) => void
+}) {
   const access = useFolderAccess()
   const key = chatKey(target)
   const chatId = useStore(askChat, (s) => s.chat[key] ?? null)
   const setChat = (id: string | null) => askChat.set((s) => ({ chat: { ...s.chat, [key]: id } }))
   const history = useAskHistory(target.all ? {} : target.folderId ? { folderId: target.folderId } : { noteId: target.noteId })
-  const [listOpen, setListOpen] = useState(false)
   // what it answers from: your notes, or anything (the AI's own answer: a recipe for the Recipes
   // folder) – kept for each chat window (a note's, a folder's, all notes')
   const [mode, setModeState] = useState<'notes' | 'general'>(() => safeLocalGet<Record<string, 'notes' | 'general'>>(MODES, {})[key] ?? 'notes')
@@ -62,8 +177,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
         .filter((j) => !saved.some((t) => t.question === j.input.question && t.at >= j.createdAt))
         .sort((a, b) => a.createdAt - b.createdAt)
     : []
-  // chats about this note with a question still being answered: listed (and
-  // opened) before they're kept – a new chat is only kept once answered
+  // chats about this with a question still being answered (a new chat is only kept once answered)
   const ofThis = (j: Job) => {
     const notes = Array.isArray(j.input.notes) ? j.input.notes.map(String) : []
     const folders = Array.isArray(j.input.folders) ? j.input.folders.map(String) : []
@@ -72,28 +186,6 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
   }
   const answering = jobs.filter((j) => j.kind === 'ask' && !isFinished(j) && ofThis(j)).sort((a, b) => b.createdAt - a.createdAt)
   const rootOf = (j: Job) => (typeof j.input.thread === 'string' && j.input.thread ? j.input.thread : j.id)
-  const busyChats = new Set(answering.map(rootOf))
-  const kept = history.list ?? []
-  const chats: Conversation[] = [
-    ...[...busyChats]
-      .filter((id) => !kept.some((c) => c.id === id))
-      .map((id) => {
-        const first = jobs.find((j) => j.id === id) ?? answering.find((j) => rootOf(j) === id)!
-        return {
-          id,
-          turns: [
-            {
-              question: String(first.input.question),
-              answer: '',
-              sources: [],
-              at: first.createdAt,
-            },
-          ],
-          updatedAt: first.createdAt,
-        }
-      }),
-    ...kept,
-  ]
   // opened with no chat chosen while one is being answered: that one
   const newestBusy = answering[0] ? rootOf(answering[0]) : null
   const loaded = useJobs((s) => s.loaded)
@@ -104,8 +196,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     if (!chatId && newestBusy) setChat(newestBusy)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded])
-  const showList = listOpen || (!chatId && chats.length > 0)
-  const empty = !chatId && !showList
+  const empty = !chatId
   const busy = live.some((j) => !isFinished(j))
   const [error, setError] = useState<string | null>(null)
 
@@ -136,7 +227,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
       ...(as === 'general' ? { mode: 'general' } : {}),
     }
     try {
-      if (!chatId || showList) {
+      if (!chatId) {
         // a new chat (asked with no chat open, or from the list of chats): its first question's job names it
         const j = await submitJob({ kind: 'ask', title: question, input })
         setChat(j.id)
@@ -165,7 +256,6 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           input: { ...input, thread: chatId, history: turns },
         })
       }
-      setListOpen(false)
     } catch (e) {
       setError((e as Error).message)
       throw e
@@ -201,9 +291,9 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     </button>
   )
 
-  /** a source: the note, at the line with the answer – the chat steps aside */
+  /** a source: the note, at the line with the answer – beside the chat, or with the chat stepping aside (phone) */
   const go = (noteId: string, find?: string) => {
-    hideAskChat()
+    if (!docked) hideAskChat()
     onOpen(noteId, find)
   }
 
@@ -216,59 +306,63 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
     const el = scroller.current
     if (el) el.scrollTop = el.scrollHeight
     nearBottom.current = true
-  }, [count, chatId, listOpen, Boolean(conversation)])
+  }, [count, chatId, Boolean(conversation)])
   useLayoutEffect(() => {
     const el = scroller.current
     if (el && nearBottom.current) el.scrollTop = el.scrollHeight
   }, [writing, liveIds.length, live.map((j) => j.status).join(',')])
 
+  // Escape closes it – beside the note, only from inside the chat (Escape in the note is the note's)
+  const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeAskChat()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || newMenuRef.current || (docked && !root.current?.contains(document.activeElement))) return
+      closeAskChat()
+    }
+    // (before the menu's own Escape handler has closed it)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [docked])
+  const newBtn = useRef<HTMLButtonElement>(null)
+  const [newMenu, setNewMenu] = useState(false)
+  // (Escape with the menu open closes the menu, not the chat)
+  const newMenuRef = useRef(false)
+  newMenuRef.current = newMenu
 
-  return createPortal(
-    <div className="ask-chat" role="dialog" aria-label={`Ask about ${target.title || 'this note'}`}>
+  const about = target.all ? 'Ask your notes' : target.folderId ? 'Ask this folder' : 'Ask about this note'
+  const openSubject = () => (target.noteId ? go(target.noteId) : target.folderId ? onShowFolder(target.folderId) : undefined)
+  return (
+    <div ref={root} className={`ask-chat${docked ? ' docked' : ''}`} role={docked ? 'complementary' : 'dialog'} aria-label={`${about}: ${target.title || 'this note'}`}>
       <header className="ask-chat-head">
-        <button className="text ask-chat-back" onClick={closeAskChat} aria-label="Back to the note">
-          <ChevronLeft size={20} /> {target.noteId ? 'Note' : 'Back'}
-        </button>
-        <div className="ask-chat-title">
+        {docked ? (
+          <button className="icon" onClick={closeAskChat} aria-label="Close the chat" title="Close the chat">
+            <X size={19} />
+          </button>
+        ) : (
+          <button className="text ask-chat-back" onClick={closeAskChat} aria-label="Back to the note">
+            <ChevronLeft size={20} /> {target.noteId ? 'Note' : 'Back'}
+          </button>
+        )}
+        <button className="ask-chat-title" onClick={openSubject} disabled={target.all} title={target.noteId ? 'Open the note' : target.folderId ? 'Show the folder' : undefined}>
           <span className="ask-chat-kicker">
-            <MessageCircleQuestion size={13} /> {target.all ? 'Ask your notes' : target.folderId ? 'Ask this folder' : 'Ask about this note'}
+            <MessageCircleQuestion size={13} /> {about}
           </span>
           <span className="ask-chat-name">{target.title || 'Untitled'}</span>
-        </div>
-        <button
-          className="icon"
-          aria-label="Save the chat as a note"
-          title="Save the chat as a note"
-          onClick={() => setSaving(allTurns)}
-          disabled={showList || !allTurns.length}
-        >
+        </button>
+        <button className="icon" aria-label="Save the chat as a note" title="Save the chat as a note" onClick={() => setSaving(allTurns)} disabled={!allTurns.length}>
           <FilePlus2 size={19} />
         </button>
-        <button
-          className={`icon${listOpen ? ' active' : ''}`}
-          aria-label="Chats about this note"
-          title="Chats"
-          onClick={() => setListOpen((v) => !v)}
-          disabled={!chats.length}
-        >
+        <button className="icon" aria-label="All chats" title="All chats" onClick={browseChats}>
           <History size={19} />
         </button>
-        <button
-          className="icon"
-          aria-label="New chat"
-          title="New chat"
-          onClick={() => {
-            setChat(null)
-            setListOpen(false)
-          }}
-        >
+        <button ref={newBtn} className="icon" aria-label="New chat" title="New chat" onClick={() => setNewMenu((v) => !v)}>
           <SquarePen size={19} />
         </button>
+        {newMenu && (
+          <Popover anchorRef={newBtn} align="right" onClose={() => setNewMenu(false)}>
+            <NewChatMenu target={target} current={current} onDone={() => setNewMenu(false)} onSame={() => setChat(null)} />
+          </Popover>
+        )}
       </header>
       {target.noteId && <ReferencesBar noteId={target.noteId} onOpen={go} />}
 
@@ -280,21 +374,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
       >
-        {showList ? (
-          <ChatList
-            list={chats}
-            busy={busyChats}
-            current={chatId}
-            onPick={(c) => {
-              setChat(c.id)
-              setListOpen(false)
-            }}
-            onRemove={(id) => {
-              history.remove(id)
-              if (id === chatId) setChat(null)
-            }}
-          />
-        ) : empty ? (
+        {empty ? (
           <div className="ask-chat-empty">
             {mode === 'general' ? (
               <>
@@ -355,10 +435,10 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
       <ChatInput
         placeholder={
           mode === 'general'
-            ? chatId && !showList
+            ? chatId
               ? 'Ask a follow-up…'
               : 'Ask your AI anything – a recipe, an email, an idea…'
-            : chatId && !showList
+            : chatId
               ? 'Ask a follow-up…'
               : target.all
                 ? 'What do your notes say about…?'
@@ -366,7 +446,7 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
                   ? 'Ask about this folder’s notes…'
                   : 'What does it say about…?'
         }
-        disabled={busy && !showList}
+        disabled={busy}
         autoFocus={empty}
         error={error}
         onSend={send}
@@ -379,66 +459,231 @@ function AskChat({ target, onOpen }: { target: AskChatTarget; onOpen: (noteId: s
           onOpen={(id) => go(id)}
         />
       )}
-    </div>,
-    document.body,
+    </div>
   )
 }
 
 /** what each chat window answers from (by its key): 'notes' or 'general' */
 const MODES = 'reconnotes.askMode'
 
-function ChatList({
-  list,
-  busy,
+/**
+ * "New chat": about the same thing as this one, or – when another note is open now – about that
+ * note, its folder, or all your notes.
+ */
+function NewChatMenu({
+  target,
   current,
-  onPick,
-  onRemove,
+  onDone,
+  onSame,
 }: {
-  list: Conversation[]
-  /** chats with a question being answered */
-  busy: Set<string>
-  current: string | null
-  onPick: (c: Conversation) => void
-  onRemove: (id: string) => void
+  target: AskChatTarget | null
+  current: { noteId: string; title: string; folderId: string | null } | null
+  onDone: () => void
+  /** a new chat about the same thing as the one open */
+  onSame?: () => void
 }) {
-  if (!list.length) return <p className="hint ask-chat-none">No chats yet.</p>
+  const ws = useWorkspace()
+  const folder = current?.folderId ? ws.folders.find((f) => f.id === current.folderId) : undefined
+  const options: { key: string; t: AskChatTarget; icon: ReactNode; label: string }[] = []
+  const add = (t: AskChatTarget, icon: ReactNode, label: string) => {
+    if (!options.some((o) => o.key === chatKey(t))) options.push({ key: chatKey(t), t, icon, label })
+  }
+  if (target) add(target, <SquarePen size={15} />, `New chat about ${target.all ? 'all your notes' : `“${target.title || 'Untitled'}”`}`)
+  if (current) add({ noteId: current.noteId, title: current.title }, <FileText size={15} />, `About this note – “${current.title || 'Untitled'}”`)
+  if (folder) add({ folderId: folder.id, title: folder.name }, <Folder size={15} />, `About its folder – ${folder.name}`)
+  add(ALL_NOTES, <Library size={15} />, 'About all your notes')
   return (
-    <div className="ask-chat-list">
-      <div className="menu-label">
-        <History size={13} /> Chats about this note
-      </div>
-      {list.map((c) => (
-        <div key={c.id} className={`ask-chat-row${c.id === current ? ' active' : ''}`} onClick={() => onPick(c)}>
-          <div className="ask-chat-row-text">
-            <span className="ask-chat-row-q">{c.turns[0]?.question}</span>
-            <span className="ask-chat-row-meta">
-              {busy.has(c.id) ? (
-                <>
-                  <Loader2 size={11} className="spin" /> Answering…
-                </>
-              ) : (
-                <>
-                  {c.turns.length > 1 ? `${c.turns.length} questions · ` : ''}
-                  {when(c.updatedAt)}
-                </>
-              )}
-            </span>
-          </div>
-          {!busy.has(c.id) && (
-            <button
-              className="icon"
-              aria-label="Delete this chat"
-              title="Delete this chat"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRemove(c.id)
-              }}
-            >
-              <Trash2 size={15} />
-            </button>
-          )}
-        </div>
+    <>
+      {options.map((o) => (
+        <button
+          key={o.key}
+          onClick={() => {
+            onDone()
+            if (target && o.key === chatKey(target) && onSame) onSame()
+            else openChatAt(o.t, null)
+          }}
+        >
+          {o.icon} {o.label}
+        </button>
       ))}
+    </>
+  )
+}
+
+interface ChatBrief {
+  id: string
+  scope: string
+  question: string
+  questions: number
+  updatedAt: number
+}
+
+/** A chat's subject from what it was asked about ("note:<id>", "folders:<id>", "" for all). Null: several notes or folders. */
+function subjectOf(scope: string, names: { note: (id: string) => string | null; folder: (id: string) => string | null }): AskChatTarget | null {
+  if (!scope) return ALL_NOTES
+  const [kind, rest] = [scope.slice(0, scope.indexOf(':')), scope.slice(scope.indexOf(':') + 1)]
+  if (kind === 'note') return { noteId: rest, title: names.note(rest) ?? 'A deleted note' }
+  if (kind === 'folders' && !rest.includes(',')) return { folderId: rest, title: names.folder(rest) ?? 'A deleted folder' }
+  return null
+}
+
+/**
+ * Every chat, newest first, grouped by what it's about – all your notes, each folder, each note
+ * (the open note's first) – with a search. Any of them opens, whatever note is open.
+ */
+function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: string; title: string; folderId: string | null } | null }) {
+  const ws = useWorkspace()
+  const jobs = useJobs((s) => s.jobs)
+  const finished = jobs.filter((j) => j.kind === 'ask' && isFinished(j)).length
+  const [list, setList] = useState<ChatBrief[] | null>(null)
+  const [query, setQuery] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const target = useStore(askChat, (s) => s.target)
+  useEffect(() => {
+    let alive = true
+    api<{ chats: ChatBrief[] }>('GET', '/api/ask/chats')
+      .then((r) => alive && setList(r.chats))
+      .catch((e) => alive && (setList([]), setError((e as Error).message)))
+    return () => {
+      alive = false
+    }
+  }, [finished])
+  const names = useMemo(
+    () => ({
+      note: (id: string) => {
+        const n = ws.allNotes.find((x) => x.id === id)
+        return n && !n.trashedAt ? n.title || 'Untitled' : null
+      },
+      folder: (id: string) => {
+        const f = ws.folders.find((x) => x.id === id)
+        return f && !f.trashedAt ? f.name : null
+      },
+    }),
+    [ws.allNotes, ws.folders],
+  )
+  // chats with a question being answered that aren't kept yet (a first question)
+  const busy = jobs.filter((j) => j.kind === 'ask' && !isFinished(j))
+  const busyIds = new Set(busy.map((j) => (typeof j.input.thread === 'string' && j.input.thread ? j.input.thread : j.id)))
+  const scopeOfJob = (j: Job) => {
+    const notes = Array.isArray(j.input.notes) ? j.input.notes.map(String) : []
+    const folders = Array.isArray(j.input.folders) ? j.input.folders.map(String) : []
+    return notes.length === 1 ? `note:${notes[0]}` : notes.length ? `notes:${notes.join(',')}` : folders.length ? `folders:${[...folders].sort().join(',')}` : ''
+  }
+  const all: ChatBrief[] = [
+    ...busy
+      .filter((j) => !(typeof j.input.thread === 'string' && j.input.thread) && !list?.some((c) => c.id === j.id))
+      .map((j) => ({ id: j.id, scope: scopeOfJob(j), question: String(j.input.question), questions: 1, updatedAt: j.createdAt })),
+    ...(list ?? []),
+  ]
+  const q = query.trim().toLowerCase()
+  const groups = new Map<string, { subject: AskChatTarget; chats: ChatBrief[]; newest: number }>()
+  for (const c of all) {
+    const subject = subjectOf(c.scope, names)
+    if (!subject) continue
+    if (q && !c.question.toLowerCase().includes(q) && !subject.title.toLowerCase().includes(q)) continue
+    const key = chatKey(subject)
+    const g = groups.get(key) ?? { subject, chats: [], newest: 0 }
+    g.chats.push(c)
+    g.newest = Math.max(g.newest, c.updatedAt)
+    groups.set(key, g)
+  }
+  const first = current ? `note:${current.noteId}` : null
+  const ordered = [...groups.entries()].sort(([ka, a], [kb, b]) => Number(kb === first) - Number(ka === first) || b.newest - a.newest)
+  const remove = (id: string) => {
+    setList((l) => l?.filter((c) => c.id !== id) ?? null)
+    void api('DELETE', `/api/ask/history/${id}`).catch(() => {})
+  }
+  const newBtn = useRef<HTMLButtonElement>(null)
+  const [newMenu, setNewMenu] = useState(false)
+  const icon = (t: AskChatTarget) => (t.all ? <Library size={14} /> : t.folderId ? <Folder size={14} /> : <FileText size={14} />)
+
+  return (
+    <div className={`ask-chat ask-browser${docked ? ' docked' : ''}`} role={docked ? 'complementary' : 'dialog'} aria-label="Chats">
+      <header className="ask-chat-head">
+        {target ? (
+          <button className="text ask-chat-back" onClick={stopBrowsing} aria-label="Back to the chat">
+            <ChevronLeft size={20} /> Chat
+          </button>
+        ) : (
+          <button className="icon" onClick={closeAskChat} aria-label="Close" title="Close">
+            <X size={19} />
+          </button>
+        )}
+        <div className="ask-chat-title static">
+          <span className="ask-chat-kicker">
+            <History size={13} /> Ask
+          </span>
+          <span className="ask-chat-name">All chats</span>
+        </div>
+        <button ref={newBtn} className="icon" aria-label="New chat" title="New chat" onClick={() => setNewMenu((v) => !v)}>
+          <SquarePen size={19} />
+        </button>
+        {newMenu && (
+          <Popover anchorRef={newBtn} align="right" onClose={() => setNewMenu(false)}>
+            <NewChatMenu target={null} current={current} onDone={() => setNewMenu(false)} />
+          </Popover>
+        )}
+        {target && (
+          <button className="icon" onClick={closeAskChat} aria-label="Close the chat" title="Close the chat">
+            <X size={19} />
+          </button>
+        )}
+      </header>
+      <div className="ask-browser-search">
+        <Search size={15} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats" aria-label="Search chats" />
+      </div>
+      <div className="ask-chat-body">
+        {list === null && <Loader2 size={18} className="spin" />}
+        {error && <p className="error-text">{error}</p>}
+        {list !== null && !ordered.length && (
+          <div className="ask-chat-empty">
+            <MessageCircleQuestion size={34} />
+            <p>{q ? 'No chats match.' : 'No chats yet.'}</p>
+            {!q && <p className="hint">Start one with the new-chat button: about this note, its folder or all your notes.</p>}
+          </div>
+        )}
+        {ordered.map(([key, g]) => (
+          <section key={key} className="ask-browser-group">
+            <div className="menu-label">
+              {icon(g.subject)} {g.subject.all ? 'All your notes' : g.subject.title}
+              {key === first && <span className="ask-browser-here">this note</span>}
+            </div>
+            {g.chats.map((c) => (
+              <div key={c.id} className="ask-chat-row" onClick={() => openChatAt(g.subject, c.id)}>
+                <div className="ask-chat-row-text">
+                  <span className="ask-chat-row-q">{c.question}</span>
+                  <span className="ask-chat-row-meta">
+                    {busyIds.has(c.id) ? (
+                      <>
+                        <Loader2 size={11} className="spin" /> Answering…
+                      </>
+                    ) : (
+                      <>
+                        {c.questions > 1 ? `${c.questions} questions · ` : ''}
+                        {when(c.updatedAt)}
+                      </>
+                    )}
+                  </span>
+                </div>
+                {!busyIds.has(c.id) && (
+                  <button
+                    className="icon"
+                    aria-label="Delete this chat"
+                    title="Delete this chat"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (confirm('Delete this chat?')) remove(c.id)
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
     </div>
   )
 }

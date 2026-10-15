@@ -62,8 +62,10 @@ It's built for one person's daily notes, and anyone can run it.
   *Compile* turns a whole note, handwriting and typing, into a tidy new document. *Summarise*,
   *Extract to-dos* and *Clean up wording* work on any note. *Ask your notes* (or *Ask about this
   note*, or *Ask this folder*) answers from your own notes as it's written, with sources that open
-  at the passage it used, and follow-up questions. Under each note, *Related notes* are found by
-  meaning.
+  at the passage it used, and follow-up questions. On a computer or iPad the chat sits beside the note
+  (drag its edge to resize) and stays open as you move between notes; on iPhone, swipe in from the
+  right edge. *Chats* in the sidebar lists every chat – about all your notes, a folder or a note –
+  to carry on any of them. Under each note, *Related notes* are found by meaning.
 - **AI that gets better at your words.** Names and terms you list (*Settings › Handwriting &
   speech › Your words*) are spelled right in handwriting and transcripts, and a word you correct
   after a job is remembered for next time. Uncertain words are marked for you to check.

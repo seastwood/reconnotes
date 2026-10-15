@@ -84,6 +84,16 @@ export function listConversations(store: Store, scope: string, limit = 50): Conv
   return rows.map((r) => ({ id: r.id, scope: r.scope, turns: JSON.parse(r.turns), createdAt: r.created_at, updatedAt: r.updated_at }))
 }
 
+/** Every chat, newest first, in brief: what it's about, its first question, how many questions. */
+export function listAllChats(store: Store, limit = 300): { id: string; scope: string; question: string; questions: number; updatedAt: number }[] {
+  table(store)
+  const rows = store.db.prepare('SELECT id, scope, turns, updated_at FROM ask_history ORDER BY updated_at DESC LIMIT ?').all(limit) as { id: string; scope: string; turns: string; updated_at: number }[]
+  return rows.map((r) => {
+    const turns = JSON.parse(r.turns) as AskTurnSaved[]
+    return { id: r.id, scope: r.scope, question: turns[0]?.question ?? '', questions: turns.length, updatedAt: r.updated_at }
+  })
+}
+
 export function deleteConversation(store: Store, id: string) {
   table(store)
   store.db.prepare('DELETE FROM ask_history WHERE id = ?').run(id)

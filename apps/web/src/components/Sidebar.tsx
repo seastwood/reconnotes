@@ -23,6 +23,7 @@ import {
   Command as CommandIcon,
   Activity,
   Loader2,
+  MessagesSquare,
   X,
   Lock,
   LockOpen,
@@ -47,6 +48,7 @@ import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { isKeptOffline, setKeepOffline, useOffline } from '../lib/offline'
 import { moveNotes, trashNotes } from '../lib/noteActions'
 import { SyncBadge } from './SyncBadge'
+import { useStore } from '../lib/store'
 import { useJobs } from '../lib/jobs'
 import { isSyncConfigured } from '../lib/settings'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
@@ -54,7 +56,7 @@ import { lockFolder, useFolderAccess } from '../lib/folderLock'
 import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/searchScope'
 import { useSavedSearches } from '../lib/searchHistory'
 import { PasswordDialog, type PasswordMode } from './PasswordDialog'
-import { openAskChat } from '../lib/askChat'
+import { askChat, browseChats, closeAskChat, openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
 import { refreshShares, useShares } from '../lib/shares'
 import { ShareWithDialog } from './ShareWithDialog'
@@ -166,6 +168,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // folders shared with others (marked, and shared from the folder's menu)
   const [sharing, setSharing] = useState<string | null>(null)
+  const chatsOpen = useStore(askChat, (s) => s.browsing)
   // read-only folders: set on it, or on a folder it's in
   const readOnlyBy = useMemo(() => {
     const rules = folderRules(ws.folders)
@@ -616,6 +619,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           </div>
         )}
         {isSyncConfigured() && <JobsRow active={view.kind === 'jobs'} onClick={() => onView({ kind: 'jobs' })} />}
+        {isSyncConfigured() && (
+          <div className={`folder-row special${chatsOpen ? ' active' : ''}`} onClick={() => (chatsOpen ? closeAskChat() : browseChats())} title="Every chat with your AI – about all your notes, a folder or a note">
+            <MessagesSquare size={16} /> <span className="folder-name">Chats</span>
+          </div>
+        )}
         {smart.length > 0 && (
           <>
             <div className="section-label">Smart folders</div>

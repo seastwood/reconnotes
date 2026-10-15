@@ -79,7 +79,7 @@ import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { meetingStart } from '../lib/meeting'
 import { useStore } from '../lib/store'
 import { takeQuickAction } from '../lib/appLinks'
-import { openAskChat } from '../lib/askChat'
+import { askChat, toggleAskChat } from '../lib/askChat'
 import { openRefs, useRefs } from '../lib/refs'
 import { Capacitor } from '@capacitor/core'
 
@@ -209,6 +209,7 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [menu, setMenu] = useState<'style' | 'more' | 'table' | 'lists' | 'format' | null>(null)
+  const chatOpen = useStore(askChat, (s) => Boolean(s.target || s.browsing))
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -548,10 +549,11 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
 
       {busy && <Loader2 size={18} className="spin" aria-label={busy} />}
       <button
-        className="tb"
-        title="Chat with AI about this note"
-        aria-label="Ask about this note"
-        onClick={() => openAskChat({ noteId, title: (meta?.get('title') as string) ?? '' })}
+        className={`tb${chatOpen ? ' on' : ''}`}
+        title={chatOpen ? 'Hide the chat' : 'Chat with AI – your last chat, or one about this note'}
+        aria-label={chatOpen ? 'Hide the chat' : 'Chat'}
+        aria-pressed={chatOpen}
+        onClick={() => toggleAskChat({ noteId, title: (meta?.get('title') as string) ?? '' })}
       >
         <MessageCircleQuestion size={20} />
       </button>
