@@ -28,13 +28,18 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
     },
     equalityFn: (a, b) => a?.item === b?.item && a?.end === b?.end,
   })
-  // the note losing focus hides it – but not under a tap already on its way (iOS can blur first)
-  const [shown, setShown] = useState(at)
+  const focused = useEditorState({ editor, selector: ({ editor: e }) => e.isFocused })
+  // the note losing focus hides it – but not under a tap already on its way (iOS can blur first):
+  // the item it was at is kept a moment. While you're typing it's always where the text is now
+  // (never a frame behind, where the text was before a backspace), and gone at once out of an item.
+  const [kept, setKept] = useState(at)
   useEffect(() => {
-    if (at) return setShown(at)
-    const t = setTimeout(() => setShown(null), 600)
+    if (at) return setKept(at)
+    if (focused) return setKept(null)
+    const t = setTimeout(() => setKept(null), 600)
     return () => clearTimeout(t)
-  }, [at])
+  }, [at, focused])
+  const shown = at ?? (focused ? null : kept)
   // a touch is the button's own: the note keeps its focus (and keyboard), the copy happens as the finger lifts
   const button = useRef<HTMLButtonElement | null>(null)
   const latest = useRef(shown)
@@ -80,6 +85,8 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
   let pos: { left: number; top: number }
   try {
     const view = editor.view
+    // (kept for a tap after the note lost focus: only while it still points at that item's text)
+    if (shown.end > view.state.doc.content.size || view.state.doc.resolve(shown.item).parent.type.name !== 'taskItem') return null
     const end = view.coordsAtPos(shown.end)
     const box = view.dom.getBoundingClientRect()
     const pad = parseFloat(getComputedStyle(view.dom).paddingRight) || 0
