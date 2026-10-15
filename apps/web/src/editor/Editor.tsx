@@ -25,6 +25,7 @@ import { EditorToolbar, STYLES, applyStyle } from './EditorToolbar'
 import { registerCommands } from '../lib/commands'
 import { compileNote, convertAllHandwriting, noteAction } from '../lib/ai'
 import { saveAsTemplate } from '../lib/templates'
+import { rememberScroll, scrollPlace } from '../lib/scrollMemory'
 import { isSyncConfigured, settings } from '../lib/settings'
 import { useInputDebugLog } from './debugInput'
 import { FindInNote } from './find'
@@ -272,6 +273,57 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     if (found) warmUpAi()
   }, [editor, noteId])
 
+  /**
+   * Back where you were in this note last time (switching notes doesn't lose your place) – unless
+   * it was opened at something to find (a search result, a passage). A long note draws over a few
+   * frames, so it waits until the note is tall enough; a scroll of your own meanwhile wins.
+   */
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const to = initialFind?.query.trim() ? 0 : scrollPlace(noteId)
+    let restoring = to > 0
+    let frame = 0
+    let tries = 0
+    const stop = () => {
+      restoring = false
+      cancelAnimationFrame(frame)
+    }
+    const go = () => {
+      if (!restoring) return
+      if (el.scrollHeight - el.clientHeight >= to || tries++ > 120) {
+        el.scrollTop = to
+        restoring = false
+      } else frame = requestAnimationFrame(go)
+    }
+    if (restoring) frame = requestAnimationFrame(go)
+    let pending = 0
+    const onScroll = () => {
+      if (restoring || pending) return
+      pending = requestAnimationFrame(() => {
+        pending = 0
+        rememberScroll(noteId, el.scrollTop)
+      })
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    // touching, wheeling or typing: you're moving it yourself
+    el.addEventListener('wheel', stop, { passive: true })
+    el.addEventListener('touchstart', stop, { passive: true })
+    el.addEventListener('keydown', stop)
+    return () => {
+      stop()
+      // (each scroll is remembered as it happens: by now the note may be off the page, at 0)
+      cancelAnimationFrame(pending)
+      el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('wheel', stop)
+      el.removeEventListener('touchstart', stop)
+      el.removeEventListener('keydown', stop)
+    }
+    // (the note's page is there once the editor is)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteId, Boolean(editor)])
+
   // New, empty note: put the cursor in it.
   useEffect(() => {
     if (editor && editor.isEmpty && editor.isEditable) editor.commands.focus('start')
@@ -345,7 +397,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           />
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} canReplace={!readOnly} />}
           {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
-          <div className="editor-scroll" onPointerDownCapture={onPointerDownCapture}>
+          <div className="editor-scroll" ref={scrollRef} onPointerDownCapture={onPointerDownCapture}>
             {settingUp && (
               <MeetingSetup
                 noteId={noteId}
