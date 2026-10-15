@@ -548,11 +548,16 @@ export function App() {
   const chatOpen = useStore(askChat, (s) => Boolean(s.target || s.browsing))
   const roomForChat = useMedia(DOCK_MEDIA)
   const chatDocked = chatOpen && roomForChat && !narrow
-  const madeRoomFrom = useRef<1 | 2 | 3 | null>(null)
+  // (kept across restarts: closed in the meantime, the columns still come back)
+  const madeRoomFrom = useRef<1 | 2 | 3 | null>(safeLocalGet<{ v: 1 | 2 | 3 | null }>('reconnotes.layoutBeforeChat', { v: null }).v)
+  const roomFrom = (v: 1 | 2 | 3 | null) => {
+    madeRoomFrom.current = v
+    safeLocalSet('reconnotes.layoutBeforeChat', { v })
+  }
   useLayoutEffect(() => {
     if (!chatDocked) {
       if (madeRoomFrom.current !== null) setLayout(madeRoomFrom.current)
-      madeRoomFrom.current = null
+      if (madeRoomFrom.current !== null) roomFrom(null)
       return
     }
     // worked out from the columns' widths (measuring mid-animation would take away too much)
@@ -563,7 +568,7 @@ export function App() {
     let fit = layout
     while (fit > 1 && noteW(fit) < 460) fit = (fit - 1) as 1 | 2
     if (fit !== layout) {
-      madeRoomFrom.current ??= layout
+      if (madeRoomFrom.current === null) roomFrom(layout)
       setLayout(fit)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

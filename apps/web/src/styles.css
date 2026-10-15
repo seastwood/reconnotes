@@ -5124,11 +5124,45 @@ button.ask-chat-title:disabled {
   user-select: none;
 }
 /* the list of every chat */
-.ask-browser-search {
+.ask-browser-tools {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 8px 12px 0;
+}
+.ask-browser-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--muted);
+}
+.ask-browser-sort select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 6px;
+}
+.ask-browser-flat {
+  margin-bottom: 14px;
+}
+.ask-chat-row-about {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.ask-chat-row-about svg {
+  flex: none;
+}
+.ask-browser-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
