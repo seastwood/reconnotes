@@ -42,6 +42,8 @@ export function SortChoices({
               onClick={() => onChange(m, on && turnable ? !reverse : false)}
               title={on && turnable ? `${sortDirection(m, reverse)} – choose again for ${sortDirection(m, !reverse).toLowerCase()}` : undefined}
               aria-pressed={on}
+              // stays open: choosing it again turns the order around
+              data-keep-open
             >
               {SORT_LABELS[m]}
               {on && (

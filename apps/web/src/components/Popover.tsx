@@ -98,8 +98,9 @@ export function Popover({
         // React portals bubble through the component tree; don't let menu
         // clicks reach the row or toolbar the menu was opened from.
         e.stopPropagation()
-        // choosing an item closes the menu (labels and inputs don't)
-        if ((e.target as HTMLElement).closest('button')) onClose()
+        // choosing an item closes the menu (labels and inputs don't, nor a choice that stays open to be chosen again)
+        const b = (e.target as HTMLElement).closest('button')
+        if (b && !b.hasAttribute('data-keep-open')) onClose()
       }}
     >
       {children}
