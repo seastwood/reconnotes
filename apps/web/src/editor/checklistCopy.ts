@@ -159,7 +159,7 @@ export function sortItem(view: EditorView, li: HTMLElement) {
 }
 
 /** Copy the checklist item at `pos` (and its sub-items, with their pictures). */
-export function copyChecklistItem(view: EditorView, pos: number, doc: Y.Doc | null) {
+export function copyChecklistItem(view: EditorView, pos: number, doc: Y.Doc | null, onCopied?: (ok: boolean) => void) {
   if (pos > view.state.doc.content.size) return
   const $pos = view.state.doc.resolve(pos)
   for (let d = $pos.depth; d > 0; d--) {
@@ -172,8 +172,10 @@ export function copyChecklistItem(view: EditorView, pos: number, doc: Y.Doc | nu
     const label = text ? `“${text.length > 40 ? text.slice(0, 40) + '…' : text}”` : 'the item'
     let pictures = 0
     node.descendants((n) => void (n.type.name === 'image' && pictures++))
-    const done = (ok: boolean) =>
+    const done = (ok: boolean) => {
+      onCopied?.(ok)
       showToast(ok ? `Copied ${label}${pictures ? ` with ${pictures} picture${pictures === 1 ? '' : 's'}` : ''}` : 'Couldn’t copy – select the text and use Copy instead')
+    }
     if (doc) {
       // the item in its checklist, so it pastes back as a checklist item
       const slice = new PMSlice(Fragment.from(view.state.schema.nodes.taskList.create($pos.node(d - 1).attrs, node)), 0, 0)

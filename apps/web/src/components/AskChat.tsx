@@ -257,9 +257,11 @@ function AskChat({
   // questions of this chat not kept yet (being answered, or just answered)
   const live = chatId
     ? jobs
-        .filter((j) => j.kind === 'ask' && (j.id === chatId || j.input.thread === chatId) && j.status !== 'cancelled')
+        .filter((j) => j.kind === 'ask' && (j.id === chatId || j.input.thread === chatId))
         .filter((j) => !saved.some((t) => t.question === j.input.question && t.at >= j.createdAt))
         .sort((a, b) => a.createdAt - b.createdAt)
+        // a stopped question shows as stopped – until it's asked again
+        .filter((j, i, all) => j.status !== 'cancelled' || !all.slice(i + 1).some((k) => k.input.question === j.input.question))
     : []
   // chats about this with a question still being answered (a new chat is only kept once answered)
   const ofThis = (j: Job) => {
@@ -350,7 +352,10 @@ function AskChat({
       kind: 'ask',
       title: String(j.input.question),
       input: j.input,
-    }).catch((e) => setError((e as Error).message))
+    })
+      // the chat's first question asked again: the chat is the new one
+      .then((n) => j.id === chatId && setChat(n.id))
+      .catch((e) => setError((e as Error).message))
 
   // saving an answer (or the whole chat) as a note
   const [saving, setSaving] = useState<TurnToSave[] | null>(null)

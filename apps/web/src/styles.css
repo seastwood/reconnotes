@@ -4858,6 +4858,12 @@ a.button {
   opacity: 1;
   background: color-mix(in srgb, var(--accent) 20%, var(--paper));
 }
+.item-copy.copied {
+  opacity: 1;
+  color: #fff;
+  background: #2f9e44;
+  border-color: #2f9e44;
+}
 .copy-armed {
   position: fixed;
   z-index: 50;

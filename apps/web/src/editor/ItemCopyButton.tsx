@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditorState, type Editor } from '@tiptap/react'
-import { Copy } from 'lucide-react'
+import { Check, Copy } from 'lucide-react'
 import type * as Y from 'yjs'
 import { copyChecklistItem } from './checklistCopy'
 
@@ -40,6 +40,20 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
     return () => clearTimeout(t)
   }, [at, focused])
   const shown = at ?? (focused ? null : kept)
+  // a tick for a moment once it's copied
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const onCopied = (ok: boolean) => {
+    if (!ok) return
+    setCopied(true)
+    clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1400)
+  }
+  useEffect(() => () => clearTimeout(copiedTimer.current), [])
+  useEffect(() => setCopied(false), [shown?.item])
+  const copy = (item: number) => copyChecklistItem(editor.view, item, doc, onCopied)
+  const copyRef = useRef(copy)
+  copyRef.current = copy
   // a touch is the button's own: the note keeps its focus (and keyboard), the copy happens as the finger lifts
   const button = useRef<HTMLButtonElement | null>(null)
   const latest = useRef(shown)
@@ -58,7 +72,7 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
       const d = down
       down = null
       if (!d || !latest.current || Math.hypot(t.clientX - d.x, t.clientY - d.y) > 12) return
-      copyChecklistItem(editor.view, latest.current.item, doc)
+      copyRef.current(latest.current.item)
     }
     b.addEventListener('touchstart', start, { passive: false })
     b.addEventListener('touchend', end, { passive: false })
@@ -93,21 +107,24 @@ export function ItemCopyButton({ editor, doc }: { editor: Editor; doc: Y.Doc | n
     const right = box.right - Math.max(0, pad - 30)
     const size = 28
     pos = end.right + 6 + size <= right ? { left: end.right + 6, top: (end.top + end.bottom) / 2 - size / 2 } : { left: right - size, top: end.bottom + 2 }
+    // never over the toolbar above the note (or past its bottom): the item is scrolled out of sight
+    const scroller = view.dom.closest('.editor-scroll')?.getBoundingClientRect()
+    if (scroller && (pos.top < scroller.top || pos.top + size > scroller.bottom)) return null
   } catch {
     return null
   }
   return (
     <button
       ref={button}
-      className="item-copy"
+      className={copied ? 'item-copy copied' : 'item-copy'}
       style={{ left: pos.left, top: pos.top }}
       // keep the cursor (and the keyboard) where they are
       onPointerDown={(e) => e.preventDefault()}
-      onClick={() => copyChecklistItem(editor.view, shown.item, doc)}
-      aria-label="Copy this item"
-      title="Copy this item"
+      onClick={() => copy(shown.item)}
+      aria-label={copied ? 'Copied' : 'Copy this item'}
+      title={copied ? 'Copied' : 'Copy this item'}
     >
-      <Copy size={14} />
+      {copied ? <Check size={15} strokeWidth={3} /> : <Copy size={14} />}
     </button>
   )
 }

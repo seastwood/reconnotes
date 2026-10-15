@@ -26,7 +26,7 @@ export interface AskResult {
   general?: boolean
 }
 
-/** the newest "Ask your notes" job for this question (still useful: not failed or cancelled) */
+/** the newest "Ask your notes" job for this question (a stopped one too – it isn't asked again by itself) */
 const sameFolders = (a: unknown, b: string[]) => JSON.stringify([...((a as string[] | undefined) ?? [])].sort()) === JSON.stringify([...b].sort())
 
 function jobFor(jobs: Job[], question: string, folders: string[], notes: string[]): Job | undefined {
@@ -38,7 +38,6 @@ function jobFor(jobs: Job[], question: string, folders: string[], notes: string[
         j.input.question === question &&
         sameFolders(j.input.folders, folders) &&
         sameFolders(j.input.notes, notes) &&
-        j.status !== 'cancelled' &&
         !(j.status === 'done' && !j.result?.answer),
     )
     .sort((a, b) => b.createdAt - a.createdAt)[0]
@@ -118,7 +117,7 @@ export function AskPanel({
 export function AskThread({ root, onOpen }: { root: Job; onOpen: (noteId: string, find?: string) => void }) {
   const jobs = useJobs((s) => s.jobs)
   const [error, setError] = useState<string | null>(null)
-  const thread = jobs.filter((j) => j.kind === 'ask' && j.input.thread === root.id && j.status !== 'cancelled').sort((a, b) => a.createdAt - b.createdAt)
+  const thread = jobs.filter((j) => j.kind === 'ask' && j.input.thread === root.id).sort((a, b) => a.createdAt - b.createdAt)
   // while they're on screen, no "finished" toast for them
   useEffect(() => {
     thread.forEach((j) => watchingJob(j.id, true))
@@ -191,6 +190,15 @@ export function Turn({ job, error, onRetry, onOpen }: { job: Job | undefined; er
       </>
     )
   if (result) return <AskAnswer result={result} onOpen={onOpen} />
+  if (job?.status === 'cancelled')
+    return (
+      <p className="hint">
+        Stopped.{' '}
+        <button className="text" onClick={onRetry}>
+          Ask again
+        </button>
+      </p>
+    )
   // being written: show it as it grows (with only the sources cited so far)
   const partial = job?.status === 'running' ? (job.partial as unknown as AskResult | null | undefined) : null
   if (partial?.answer) {
