@@ -6939,3 +6939,54 @@ button.ask-chat-title:disabled {
 .import-result {
   white-space: pre-wrap;
 }
+
+/* the chat's switches: what it answers from, and Ask / Edit */
+.ask-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 12px 6px;
+}
+.ask-modes .ask-mode {
+  margin: 0;
+}
+.ask-mode.off {
+  opacity: 0.45;
+}
+/* a change your AI made to the note */
+.ask-edit-done {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.ask-edit-done p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.ask-edit-done p svg {
+  flex: none;
+  color: var(--accent-text);
+  transform: translateY(2px);
+}
+.ask-edit-done.reverted p {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.ask-edit-done .hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+.ask-revert {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

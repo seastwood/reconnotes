@@ -16,6 +16,8 @@ export interface SavedTurn {
   read?: AskResult['read']
   /** the AI's own answer, not from the notes */
   general?: boolean
+  /** a change made to the note ("Edit"): its job, how many blocks changed, whether it was taken back */
+  edit?: { job: string; changed: number; reverted?: boolean }
   at: number
 }
 export interface Conversation {

@@ -303,7 +303,7 @@ function announce(j: Job) {
       const note = j.status === 'done' ? productNote(j) : j.noteId
       const chat = j.kind === 'ask' && j.status === 'done' ? chatRefOf(j) : null
       void showNotification(
-        chat ? 'Your notes have an answer' : `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,
+        chat ? (j.input.mode === 'edit' ? 'Your AI changed the note' : 'Your notes have an answer') : `${label} ${j.status === 'done' ? 'finished' : 'failed'}`,
         j.status === 'done' ? j.title : `${j.title}: ${j.error ?? ''}`.slice(0, 200),
         chat ? null : note,
         (id) => nav?.openNote(id),
@@ -315,7 +315,7 @@ function announce(j: Job) {
   if (awaited.has(j.id)) return
   if (j.status === 'done' && j.kind === 'ask') {
     // the answer: in its chat (the search only had the question)
-    showActionToast('Your notes have an answer', 'Show', () => openChatRef(chatRefOf(j)))
+    showActionToast(j.input.mode === 'edit' ? 'Your AI changed the note' : 'Your notes have an answer', 'Show', () => openChatRef(chatRefOf(j)))
   } else if (j.status === 'done') {
     const note = productNote(j)
     if (note) showActionToast(`${label} finished – ${j.title}`, 'Open', () => nav?.openNote(note))

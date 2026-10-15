@@ -51,7 +51,8 @@ import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { attendeeNames, meetingNotesText } from './meetingNotes'
-import { askRefs, saveTurn, setAskRefs } from './askHistory'
+import { askRefs, markEditReverted, saveTurn, setAskRefs } from './askHistory'
+import { applyEdit, revertEdit, type EditRecord } from './noteEdit'
 import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
@@ -331,6 +332,8 @@ export function mergeVoices(
 
 /** for snapshots before a redo replaces a result */
 let versionStore: Store | null = null
+/** Take back an "Edit" made from the chat (set up with the handlers). Null when done; else why not. */
+export let revertEditJob: (job: Job) => Promise<string | null> = async () => 'Not ready yet.'
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
   versionStore = store
@@ -560,6 +563,11 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const when = { tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined }
     const question = String(job.input.question ?? '').slice(0, 1000)
     // "Anything": the AI's own answer, not from the notes (a recipe for the Recipes folder)
+    if (job.input.mode === 'edit') {
+      const e = await editAsked(job)
+      saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: e.answer, sources: [], edit: { job: job.id, changed: e.changed }, at: Date.now() })
+      return { result: { answer: e.answer, sources: [], question: String(job.input.question ?? ''), edit: { changed: e.changed }, noteId: e.noteId }, agent: e.agent }
+    }
     const r: Awaited<ReturnType<typeof askNotes>> & { general?: boolean } =
       job.input.mode === 'general'
         ? await askGeneral(ai, question, when, historyFromInput(job.input.history))
@@ -577,10 +585,12 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     return { result: { ...r, question: String(job.input.question ?? '') } as unknown as Record<string, unknown>, agent: r.agent }
   })
 
-  jobs.register('compile', async (job) => {
-    const noteId = job.input.noteId as string
-    const doc = noteDoc(noteId)
-    const { markdown, title, dropped } = await compileMarkdown(store, ai, doc)
+  /**
+   * What lets the AI's Markdown of a note become the note again: its recordings, files, pictures and
+   * drawings (from their marker lines), due dates and links to notes, as the real thing. `inks`: the
+   * drawings it used (their strokes live beside the content).
+   */
+  const rebuildContext = (doc: Y.Doc): { ctx: Partial<Ctx>; inks: Set<string> } => {
     // links, due dates, recordings, files, pictures and drawings come back as the real thing
     const originals = new Map<string, Y.XmlElement>()
     const dues = new Map<string, Record<string, unknown>>()
@@ -615,6 +625,106 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       dueFor: (date) => dues.get(date) ?? null,
       noteFor: (t) => links.get(t.trim().toLowerCase()) ?? titles.get(t.trim().toLowerCase()) ?? null,
     }
+    return { ctx, inks }
+  }
+
+  /**
+   * "Edit" in a note's chat: the note changed as asked – the AI writes it back whole, and only the
+   * blocks that differ are swapped in (see noteEdit.ts). What was taken out is kept with the job
+   * (for Revert), and the note as it was goes into its history too.
+   */
+  const editAsked = async (job: Job) => {
+    const notes = Array.isArray(job.input.notes) ? job.input.notes.map(String) : []
+    if (notes.length !== 1) throw new Error('Edit changes one note – ask in that note’s chat.')
+    const noteId = notes[0]
+    const doc = noteDoc(noteId)
+    const request = String(job.input.question ?? '').slice(0, 2000)
+    const markers: string[] = []
+    const mark = (m: string) => (markers.push(m), m)
+    const md = noteToMarkdown(doc, {
+      drawingPlaceholder: (id) => mark(compileMarker('drawing', id)),
+      imagePlaceholder: (id) => mark(compileMarker('image', id)),
+      attachmentPlaceholder: (kind, id) => mark(compileMarker(kind, id)),
+    })
+      // (a drawing's recognised words aren't the note's to rewrite)
+      .replace(/(⟦DRAWING:[a-z0-9]+⟧)\n> ✍️[^\n]*(?:\n> [^\n]*)*/g, '$1')
+      .trim()
+    if (md.length > 40_000) throw new Error('This note is too long to edit with AI in one go.')
+    const history = historyFromInput(job.input.history)
+    reportProgress('Changing the note…')
+    const prompt = `You edit a note as its owner asks. Below is the whole note in Markdown, then the request.
+
+Write back the WHOLE note with the request carried out, and nothing else changed:
+- Every other word, line, heading and list stays exactly as it is, in the same order.
+- Keep each line like ⟦IMAGE:…⟧, ⟦DRAWING:…⟧, ⟦AUDIO:…⟧ or ⟦FILE:…⟧ exactly, on its own line – they are pictures, drawings, recordings and files. Move one only if asked; remove one only if asked.
+- Keep [[links]], #tags and dates like !2026-10-14 as they are.
+- Markdown: "# " headings, "- " bullets, "1. " numbered lists, "- [ ] " checklist items ("- [x] " ticked), | tables |, **bold**, *italic*.
+- Don't add anything the request doesn't ask for: no notes, no explanations, no code fences.
+
+After the note, write a line with only "===CHANGED===" and then one short sentence saying what you changed (e.g. "Made the groceries a checklist.").
+${history.length ? `\nEarlier in this chat:\n${history.map((h) => `Request: ${h.question}\nDone: ${h.answer.slice(0, 500)}`).join('\n')}\n` : ''}
+The note:
+<<<
+${md}
+>>>
+
+The request: ${request}`
+    const budget = Math.min(16000, Math.max(1200, Math.ceil(md.length / 2.5) + 600))
+    const { text, agent } = await ai.editNote(prompt, budget, () => reportProgress('Changing the note…'))
+    const split = text.split(/\n?\s*={3,}\s*CHANGED\s*={3,}\s*\n?/i)
+    let markdown = split[0].replace(/^<<<\s*\n|\n\s*>>>\s*$/g, '').trim()
+    const said = (split[1] ?? '').trim().split('\n')[0]?.trim() ?? ''
+    if (!markdown) throw new Error('The AI gave nothing back – the note is unchanged.')
+    const note = extractNote(doc)
+    markdown = keepCompileExtras(markdown, markers, note.tags, [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1]))
+    // the AI's version, as blocks, in a document of its own (to compare and copy from)
+    const { ctx } = rebuildContext(doc)
+    const scratch = new Y.Doc()
+    const nodes = markdownToNodes(markdown, { attach: () => null, noteFor: () => null, ...ctx })
+    if (nodes.length) scratch.getXmlFragment('content').insert(0, nodes)
+    if (versionStore) snapshotNow(versionStore, noteDocName(noteId), doc, 'Before an AI edit')
+    let applied: ReturnType<typeof applyEdit> | null = null
+    await sync.change(noteDocName(noteId), (d) => {
+      applied = applyEdit(getContent(d), scratch.getXmlFragment('content'))
+    })
+    const { record, changed } = applied! as ReturnType<typeof applyEdit>
+    if (changed) fs.writeFileSync(jobs.filePath(job.id), JSON.stringify(record))
+    const after = sync.getDoc(noteDocName(noteId))
+    if (after) {
+      const ex = extractNote(after)
+      await sync.change(WORKSPACE_DOC, (w) => updateNote(w, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
+    }
+    const answer = changed ? said || 'Changed the note as asked.' : 'Nothing needed changing – the note is as it was.'
+    return { answer, sources: [], changed, agent, noteId }
+  }
+
+  /** Take an "Edit" back (from the chat). Null: done; else why not. */
+  revertEditJob = async (job: Job): Promise<string | null> => {
+    const file = jobs.filePath(job.id)
+    if (job.result?.reverted) return null
+    if (!fs.existsSync(file)) return 'This change can’t be taken back from here any more – the note’s History has it as it was.'
+    const record = JSON.parse(fs.readFileSync(file, 'utf8')) as EditRecord
+    const noteId = String(job.result?.noteId ?? '')
+    let ok = false
+    await sync.change(noteDocName(noteId), (d) => {
+      ok = revertEdit(getContent(d), record)
+    })
+    if (!ok) return 'Those lines have changed since, so they weren’t put back – the note’s History has it as it was before the edit.'
+    const after = sync.getDoc(noteDocName(noteId))
+    if (after) {
+      const ex = extractNote(after)
+      await sync.change(WORKSPACE_DOC, (w) => updateNote(w, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
+    }
+    jobs.setResult(job.id, { ...(job.result ?? {}), reverted: true })
+    markEditReverted(store, typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id, job.id, true)
+    return null
+  }
+
+  jobs.register('compile', async (job) => {
+    const noteId = job.input.noteId as string
+    const doc = noteDoc(noteId)
+    const { markdown, title, dropped } = await compileMarkdown(store, ai, doc)
+    const { ctx, inks } = rebuildContext(doc)
     // a redo replaces the compiled note's contents; otherwise a new note next to the original
     const previous = job.input.replace ? jobs.get(job.input.replace as string)?.result?.noteId : null
     const ws = sync.getDoc(WORKSPACE_DOC)

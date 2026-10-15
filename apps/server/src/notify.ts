@@ -102,7 +102,7 @@ export class Notifier {
     // an answer: its conversation (the chat it's in, and what it was asked about)
     const chat = job.kind === 'ask' && job.status === 'done' ? chatOf(job) : null
     const notice: Notice = {
-      title: chat ? 'Your notes have an answer' : job.status === 'done' ? `${label} finished` : `${label} failed`,
+      title: chat ? (job.input.mode === 'edit' ? 'Your AI changed the note' : 'Your notes have an answer') : job.status === 'done' ? `${label} finished` : `${label} failed`,
       message: job.status === 'done' ? job.title : `${job.title}: ${job.error ?? 'failed'}`.slice(0, 400),
       link: chat
         ? `reconnotes://chat?thread=${encodeURIComponent(chat.thread)}${chat.note ? `&note=${chat.note}` : chat.folder ? `&folder=${chat.folder}` : ''}`

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ArrowUpDown, BookOpen, ChevronLeft, FileText, FilePlus2, Folder, History, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, ArrowUpDown, BookOpen, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, History, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
@@ -14,6 +14,9 @@ import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
 import { ReferencesBar } from './References'
 import { SaveAsNoteDialog } from './SaveAsNoteDialog'
+import { useNoteReadOnly } from '../lib/readOnly'
+import { api } from '../lib/api'
+import { showToast } from '../lib/toast'
 import type { TurnToSave } from '../lib/askToNote'
 
 /**
@@ -256,6 +259,15 @@ function AskChat({
     setModeState(m)
     safeLocalSet(MODES, { ...safeLocalGet<Record<string, 'notes' | 'general'>>(MODES, {}), [key]: m })
   }
+  // Ask, or Edit: the note changed as asked (only a note's chat, and not a read-only note) – kept for each chat window
+  const ro = useNoteReadOnly(target.noteId ?? '')
+  const canEdit = Boolean(target.noteId) && !ro.readOnly
+  const [editing, setEditingState] = useState<boolean>(() => safeLocalGet<Record<string, boolean>>(EDITS, {})[key] ?? false)
+  const setEditing = (v: boolean) => {
+    setEditingState(v)
+    safeLocalSet(EDITS, { ...safeLocalGet<Record<string, boolean>>(EDITS, {}), [key]: v })
+  }
+  const edit = canEdit && editing
   const jobs = useJobs((s) => s.jobs)
   const conversation = chatId ? history.list?.find((c) => c.id === chatId) : undefined
   const saved = conversation?.turns ?? []
@@ -315,7 +327,7 @@ function AskChat({
       ...scope,
       tzOffset: new Date().getTimezoneOffset(),
       question,
-      ...(as === 'general' ? { mode: 'general' } : {}),
+      ...(as === 'general' ? { mode: 'general' } : edit ? { mode: 'edit' } : {}),
     }
     try {
       if (!chatId) {
@@ -365,7 +377,7 @@ function AskChat({
   // saving an answer (or the whole chat) as a note
   const [saving, setSaving] = useState<TurnToSave[] | null>(null)
   const doneLive: TurnToSave[] = live
-    .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string')
+    .filter((j) => j.status === 'done' && typeof j.result?.answer === 'string' && j.input.mode !== 'edit')
     .map((j) => {
       const r = j.result as unknown as AskResult
       return { question: String(j.input.question), answer: r.answer, sources: r.sources, cites: r.cites }
@@ -378,7 +390,7 @@ function AskChat({
       <Sparkles size={14} /> Answer without my notes
     </button>
   )
-  const allTurns: TurnToSave[] = [...saved.map((t) => ({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })), ...doneLive]
+  const allTurns: TurnToSave[] = [...saved.filter((t) => !t.edit).map((t) => ({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })), ...doneLive]
   const saveButton = (t: TurnToSave) => (
     <button className="text ask-save" onClick={() => setSaving([t])}>
       <FilePlus2 size={14} /> Save as note
@@ -506,9 +518,15 @@ function AskChat({
                   <span className="ask-chat-time">{when(t.at)}</span>
                 </div>
                 <div className="ask-chat-a ask-panel">
-                  <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
-                  {saveButton({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })}
-                  {notFound(t) && i === saved.length - 1 && !live.length && withoutNotes(t.question)}
+                  {t.edit ? (
+                    <EditDone answer={t.answer} job={t.edit.job} changed={t.edit.changed} reverted={Boolean(t.edit.reverted)} />
+                  ) : (
+                    <>
+                      <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
+                      {saveButton({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })}
+                      {notFound(t) && i === saved.length - 1 && !live.length && withoutNotes(t.question)}
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -516,7 +534,16 @@ function AskChat({
               <div key={j.id} className="ask-chat-turn">
                 <div className="ask-chat-q">{String(j.input.question)}</div>
                 <div className="ask-chat-a ask-panel">
-                  <Turn job={j} onRetry={() => retry(j)} onOpen={go} />
+                  {j.input.mode === 'edit' && j.status === 'done' ? (
+                    <EditDone
+                      answer={String(j.result?.answer ?? '')}
+                      job={j.id}
+                      changed={Number((j.result?.edit as { changed?: number } | undefined)?.changed ?? 0)}
+                      reverted={Boolean(j.result?.reverted)}
+                    />
+                  ) : (
+                    <Turn job={j} onRetry={() => retry(j)} onOpen={go} />
+                  )}
                   {j.status === 'done' && typeof j.result?.answer === 'string' && saveButton(doneLive.find((t) => t.question === String(j.input.question))!)}
                   {j.status === 'done' && j === live[live.length - 1] && notFound(j.result as unknown as AskResult) && withoutNotes(String(j.input.question))}
                 </div>
@@ -527,17 +554,31 @@ function AskChat({
         )}
       </div>
 
-      <div className="ask-mode" role="radiogroup" aria-label="Answer from">
-        <button role="radio" aria-checked={mode === 'notes'} className={mode === 'notes' ? 'on' : ''} onClick={() => setMode('notes')} title="Answers come only from your notes, with their sources">
-          <BookOpen size={14} /> {target.all ? 'Your notes' : target.folderId ? 'This folder' : 'This note'}
-        </button>
-        <button role="radio" aria-checked={mode === 'general'} className={mode === 'general' ? 'on' : ''} onClick={() => setMode('general')} title="Your AI answers from what it knows – a recipe, an email, an idea – not from your notes">
-          <Sparkles size={14} /> Anything
-        </button>
+      <div className="ask-modes">
+        <div className={`ask-mode${edit ? ' off' : ''}`} role="radiogroup" aria-label="Answer from" aria-disabled={edit}>
+          <button role="radio" disabled={edit} aria-checked={mode === 'notes'} className={mode === 'notes' ? 'on' : ''} onClick={() => setMode('notes')} title="Answers come only from your notes, with their sources">
+            <BookOpen size={14} /> {target.all ? 'Your notes' : target.folderId ? 'This folder' : 'This note'}
+          </button>
+          <button role="radio" disabled={edit} aria-checked={mode === 'general'} className={mode === 'general' ? 'on' : ''} onClick={() => setMode('general')} title="Your AI answers from what it knows – a recipe, an email, an idea – not from your notes">
+            <Sparkles size={14} /> Anything
+          </button>
+        </div>
+        {canEdit && (
+          <div className="ask-mode" role="radiogroup" aria-label="Ask or edit">
+            <button role="radio" aria-checked={!edit} className={!edit ? 'on' : ''} onClick={() => setEditing(false)} title="Ask about the note – it isn't changed">
+              <MessageSquare size={14} /> Ask
+            </button>
+            <button role="radio" aria-checked={edit} className={edit ? 'on' : ''} onClick={() => setEditing(true)} title="Tell your AI how to change this note – you can revert any change">
+              <PencilLine size={14} /> Edit
+            </button>
+          </div>
+        )}
       </div>
       <ChatInput
         placeholder={
-          mode === 'general'
+          edit
+            ? 'Tell your AI what to change – “make the list a checklist”…'
+            : mode === 'general'
             ? chatId
               ? 'Ask a follow-up…'
               : 'Ask your AI anything – a recipe, an email, an idea…'
@@ -568,6 +609,44 @@ function AskChat({
 
 /** what each chat window answers from (by its key): 'notes' or 'general' */
 const MODES = 'reconnotes.askMode'
+/** the chat windows set to Edit (by key) */
+const EDITS = 'reconnotes.askEdit'
+
+/** A change your AI made to the note ("Edit"), with Revert. */
+function EditDone({ answer, job, changed, reverted: was }: { answer: string; job: string; changed: number; reverted: boolean }) {
+  const [reverted, setReverted] = useState(was)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => setReverted(was), [was])
+  const revert = async () => {
+    setBusy(true)
+    try {
+      await api('POST', `/api/ask/edit/${job}/revert`)
+      setReverted(true)
+      showToast('Put back as it was')
+    } catch (e) {
+      showToast((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className={`ask-edit-done${reverted ? ' reverted' : ''}`}>
+      <p>
+        <PencilLine size={14} /> {answer}
+      </p>
+      {changed > 0 &&
+        (reverted ? (
+          <span className="hint">
+            <Undo2 size={13} /> Reverted
+          </span>
+        ) : (
+          <button className="text ask-revert" onClick={() => void revert()} disabled={busy}>
+            {busy ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />} Revert
+          </button>
+        ))}
+    </div>
+  )
+}
 
 /**
  * "New chat": about the same thing as this one, or – when another note is open now – about that

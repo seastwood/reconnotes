@@ -38,7 +38,7 @@ import { serveShare } from './shareServer'
 import { importNotes, unpack } from './importNotes'
 import type { Jobs } from './jobs'
 import type { Notifier } from './notify'
-import { JOB_KINDS, compileMarkdown, removeJobResult } from './jobHandlers'
+import { JOB_KINDS, compileMarkdown, removeJobResult, revertEditJob } from './jobHandlers'
 import { backupNotes, describeBackups, restoreFromBackup } from './restoreBackup'
 import { log } from './log'
 import { aiHealth } from './health'
@@ -321,6 +321,14 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
   })
   // every chat in brief, for the chats browser
   route('GET', '/api/ask/chats', (_req, res) => json(res, 200, { chats: listAllChats(store) }))
+  // an "Edit" from the chat taken back
+  route('POST', `/api/ask/edit/${ID}/revert`, async (_req, res, [id]) => {
+    const job = jobs.get(id)
+    if (!job || job.kind !== 'ask' || job.input.mode !== 'edit') throw new HttpError(404, 'No such change')
+    const why = await revertEditJob(job)
+    if (why) throw new HttpError(409, why)
+    json(res, 200, { ok: true })
+  })
   route('POST', `/api/ask/history/${ID}/seen`, (_req, res, [id]) => {
     markChatSeen(store, id)
     json(res, 200, { ok: true })

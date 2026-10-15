@@ -21,6 +21,8 @@ export interface AskTurnSaved {
   read?: string[]
   /** answered by the AI itself, not from the notes ("Anything" in the chat) */
   general?: boolean
+  /** a change made to the note ("Edit"): its job, how many blocks changed, whether it was taken back */
+  edit?: { job: string; changed: number; reverted?: boolean }
   at: number
 }
 
@@ -114,6 +116,18 @@ export function listAllChats(store: Store, limit = 300): { id: string; scope: st
 export function markChatSeen(store: Store, id: string) {
   table(store)
   store.db.prepare('UPDATE ask_history SET seen_at = MAX(seen_at, updated_at) WHERE id = ?').run(id)
+}
+
+/** An "Edit" in a chat taken back (or not): said on its turn, so the chat shows it. */
+export function markEditReverted(store: Store, chatId: string, jobId: string, reverted: boolean) {
+  table(store)
+  const row = store.db.prepare('SELECT turns FROM ask_history WHERE id = ?').get(chatId) as { turns: string } | undefined
+  if (!row) return
+  const turns = JSON.parse(row.turns) as AskTurnSaved[]
+  const t = turns.find((x) => x.edit?.job === jobId)
+  if (!t?.edit) return
+  t.edit.reverted = reverted
+  store.db.prepare('UPDATE ask_history SET turns = ? WHERE id = ?').run(JSON.stringify(turns), chatId)
 }
 
 export function deleteConversation(store: Store, id: string) {

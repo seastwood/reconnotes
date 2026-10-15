@@ -541,6 +541,21 @@ ${partNotes.join('\n\n')}
     return { text: result, agent: agent.name }
   }
 
+  /**
+   * A note rewritten as asked ("Edit" in the chat): with the "Ask your notes" agents, room for the
+   * whole note back (`maxTokens`, by its length).
+   */
+  async editNote(prompt: string, maxTokens: number, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) => {
+      const gen = () => backend.generate([{ text: withExtra(prompt) }], maxTokens)
+      const raw = (await (onText ? streaming(onText, gen) : gen())).replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<\|[^|>]{1,40}\|>/g, '').trim()
+      // (a code block in the note stays: only a fence around the whole answer comes off)
+      return (/^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n```$/i.exec(raw)?.[1] ?? raw).trim()
+    })
+    log.info(`edited a note via "${agent.name}" (${prompt.length} chars → ${result.length})`)
+    return { text: result, agent: agent.name }
+  }
+
   /** Recording or audio file → text, with the "Audio to text" agents (failover as usual). */
   /** `names`: people who'll be heard (a meeting's attendees) – spelled right */
   /** `group`: the recording's group (top-level folder) – only its fixed words are used */

@@ -1,0 +1,66 @@
+import * as Y from 'yjs'
+import { describe, expect, it } from 'vitest'
+import { applyEdit, blockKey, diffBlocks, revertEdit } from '../src/noteEdit'
+
+const para = (t: string, attrs: Record<string, string> = {}) => {
+  const p = new Y.XmlElement('paragraph')
+  for (const [k, v] of Object.entries(attrs)) p.setAttribute(k, v)
+  p.insert(0, [new Y.XmlText(t)])
+  return p
+}
+const checklist = (items: string[]) => {
+  const l = new Y.XmlElement('taskList')
+  l.insert(
+    0,
+    items.map((t) => {
+      const i = new Y.XmlElement('taskItem')
+      i.setAttribute('checked', false as unknown as string)
+      i.insert(0, [para(t)])
+      return i
+    }),
+  )
+  return l
+}
+const doc = (nodes: Y.XmlElement[]) => {
+  const d = new Y.Doc()
+  d.getXmlFragment('content').insert(0, nodes)
+  return d
+}
+const texts = (d: Y.Doc) => d.getXmlFragment('content').toArray().map((n) => blockKey(n as Y.XmlElement))
+
+describe('editing a note with AI', () => {
+  it('finds the stretches that changed', () => {
+    expect(diffBlocks(['a', 'b', 'c', 'd'], ['a', 'X', 'Y', 'd'])).toEqual([{ i0: 1, i1: 3, j0: 1, j1: 3 }])
+    expect(diffBlocks(['a', 'b'], ['a', 'b', 'c'])).toEqual([{ i0: 2, i1: 2, j0: 2, j1: 3 }])
+    expect(diffBlocks(['a', 'b', 'c'], ['b'])).toEqual([
+      { i0: 0, i1: 1, j0: 0, j1: 0 },
+      { i0: 2, i1: 3, j0: 1, j1: 1 },
+    ])
+  })
+
+  it('swaps in only what changed, keeps the rest as it was, and reverts exactly', () => {
+    const note = doc([para('Groceries'), para('milk'), para('eggs'), para('Call mom', { color: 'blue' })])
+    const ai = doc([para('Groceries'), checklist(['milk', 'eggs']), para('Call mom')])
+    const keptBlock = note.getXmlFragment('content').get(3)
+    const { record, changed } = applyEdit(note.getXmlFragment('content'), ai.getXmlFragment('content'))
+    expect(changed).toBe(2)
+    expect(texts(note)).toEqual(texts(ai))
+    // the untouched block is the very same one (its attributes kept)
+    expect(note.getXmlFragment('content').get(2)).toBe(keptBlock)
+    expect((note.getXmlFragment('content').get(2) as Y.XmlElement).getAttribute('color')).toBe('blue')
+
+    // typed meanwhile, elsewhere: revert still finds the change
+    note.getXmlFragment('content').insert(0, [para('Added later')])
+    expect(revertEdit(note.getXmlFragment('content'), record)).toBe(true)
+    expect(texts(note).map((k) => k.replace(/<[^>]+>/g, ''))).toEqual(['Added later', 'Groceries', 'milk', 'eggs', 'Call mom'])
+  })
+
+  it("won't revert over blocks changed since", () => {
+    const note = doc([para('one'), para('two')])
+    const ai = doc([para('one'), para('TWO')])
+    const { record } = applyEdit(note.getXmlFragment('content'), ai.getXmlFragment('content'))
+    const f = note.getXmlFragment('content')
+    ;(f.get(1) as Y.XmlElement).get(0) instanceof Y.XmlText && ((f.get(1) as Y.XmlElement).get(0) as Y.XmlText).insert(3, '!')
+    expect(revertEdit(f, record)).toBe(false)
+  })
+})
