@@ -80,6 +80,8 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
       }
       const target = e.target as Element
       if (target.closest?.('.image-viewer')) return void (start = null) // the viewer has its own gestures
+      // the chat has its own (slid in from the right edge, and back out from its left)
+      if (target.closest?.('.ask-chat, .ask-dock') || document.querySelector('.ask-chat:not(.docked)')) return void (start = null)
       start = {
         x: t.clientX,
         y: t.clientY,
@@ -99,6 +101,7 @@ function useEdgeSwipe(onLeftEdge: () => void, onRightEdge: () => void, onClose: 
       const horizontal = Math.abs(dx) > 60 && Math.abs(dy) < Math.abs(dx) * 0.6
       if (quick && horizontal) {
         if (start.fromEdge && dx > 0) handlers.current.onLeftEdge()
+        // (in from the right edge, over a note: the chat – AskChat.tsx – slides in)
         else if (start.fromRight && dx < 0) handlers.current.onRightEdge()
         else if (start.onPanel && dx < 0) handlers.current.onClose()
         else if (start.onPanel && dx > 0) handlers.current.onOpen()
@@ -375,9 +378,8 @@ export function App() {
     () => {
       if (!(noteShown && step('back'))) openNext()
     },
-    () => {
-      if (noteShown) step('forward')
-    },
+    // the right edge is the chat's: folders › notes › note › chat, one swipe at a time
+    () => undefined,
     closeOne,
     openNext,
   )
@@ -600,6 +602,7 @@ export function App() {
         onOpen={followLink}
         onShowFolder={(folderId) => showView({ kind: 'folder', folderId })}
         current={note && nav.noteId && !note.trashedAt ? { noteId: nav.noteId, title: note.title, folderId: note.folderId ?? null } : null}
+        noteOnScreen={noteShown && editorVisible && !noteLockedBy}
       />
       {settingsOpen && <SettingsDialog tab={settingsOpen === true ? undefined : settingsOpen} onClose={() => setSettingsOpen(false)} />}
       {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}

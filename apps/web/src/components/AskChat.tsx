@@ -8,7 +8,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { api } from '../lib/api'
 import { useMedia } from '../lib/media'
 import { useWorkspace } from '../lib/workspace'
-import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, openChatAt, showAskChat, stopBrowsing, toggleAskChat, type AskChatTarget } from '../lib/askChat'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
 import { Popover } from './Popover'
 import { useAskHistory, when, type Conversation } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
@@ -30,11 +30,14 @@ export function AskChatHost({
   onOpen,
   onShowFolder,
   current,
+  noteOnScreen,
 }: {
   onOpen: (noteId: string, find?: string) => void
   onShowFolder: (folderId: string) => void
   /** the note open now (a new chat can be about it, or its folder) */
   current: { noteId: string; title: string; folderId: string | null } | null
+  /** a note is what's on screen (the right-edge swipe opens the chat only from a note) */
+  noteOnScreen: boolean
 }) {
   const target = useStore(askChat, (s) => s.target)
   const hidden = useStore(askChat, (s) => s.hidden)
@@ -42,9 +45,12 @@ export function AskChatHost({
   const docked = useMedia(DOCK_MEDIA)
   const currentRef = useRef(current)
   currentRef.current = current
-  useEdgeSwipes(Boolean(target || browsing), () => {
+  const onScreenRef = useRef(noteOnScreen)
+  onScreenRef.current = noteOnScreen
+  useChatSlide(docked, () => {
+    if (!onScreenRef.current) return null
     const c = currentRef.current
-    toggleAskChat(c ? { noteId: c.noteId, title: c.title } : null)
+    return lastChatTarget() ?? (c ? { noteId: c.noteId, title: c.title } : null)
   })
   if (!target && !browsing) return null
   const inner = browsing || !target ? (
@@ -102,42 +108,115 @@ function ChatDock({ children }: { children: ReactNode }) {
 }
 
 /**
- * Touch screens: a swipe in from the right edge opens the chat (the last one, or a new one about the
- * note); with it open, a swipe right from its left edge closes it.
+ * Touch screens: the chat slides in from the right edge over a note – following the finger, and
+ * opening if it's pulled far enough (or flicked), else sliding back – and out again the same way,
+ * pulled right from its left edge. So swiping goes folders › notes › note › chat and back. Beside
+ * the note (a big screen), the swipe just shows or hides the panel.
  */
-function useEdgeSwipes(open: boolean, toggle: () => void) {
-  const openRef = useRef(open)
-  openRef.current = open
-  const toggleRef = useRef(toggle)
-  toggleRef.current = toggle
+function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
+  const dockedRef = useRef(docked)
+  dockedRef.current = docked
+  const openableRef = useRef(openable)
+  openableRef.current = openable
   useEffect(() => {
-    let start: { x: number; y: number; from: 'right' | 'chat' } | null = null
-    const down = (e: TouchEvent) => {
-      const t = e.touches[0]
-      if (e.touches.length !== 1 || !t) return void (start = null)
-      if (!openRef.current && t.clientX > innerWidth - 22) start = { x: t.clientX, y: t.clientY, from: 'right' }
-      else if (openRef.current) {
-        // the chat's own left edge (a panel at the side, or the whole screen on a phone)
-        const chat = document.querySelector('.ask-dock, .ask-chat:not(.ask-dock .ask-chat)')?.getBoundingClientRect()
-        start = chat && t.clientX >= chat.left && t.clientX < chat.left + 24 ? { x: t.clientX, y: t.clientY, from: 'chat' } : null
-      } else start = null
+    const EDGE = 24
+    type Drag = { mode: 'open' | 'close'; x0: number; y0: number; locked: boolean; wasHidden: boolean; target: AskChatTarget | null; last: { x: number; t: number }[] }
+    let d: Drag | null = null
+    const el = () => document.querySelector<HTMLElement>('.ask-chat:not(.docked)')
+    const W = () => innerWidth
+    const place = (x: number, animate: boolean) => {
+      const e = el()
+      if (!e) return
+      e.style.transition = animate ? 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'
+      e.style.transform = `translateX(${x}px)`
     }
-    const move = (e: TouchEvent) => {
-      const t = e.touches[0]
-      if (!start || !t) return
-      const dx = t.clientX - start.x
-      const dy = Math.abs(t.clientY - start.y)
-      if (dy > 40) return void (start = null)
-      if ((start.from === 'right' && dx < -60) || (start.from === 'chat' && dx > 70)) {
-        start = null
-        toggleRef.current()
+    const settle = (x: number, then: () => void) => {
+      place(x, true)
+      setTimeout(() => {
+        then()
+        const e = el()
+        if (e) {
+          e.style.transition = ''
+          e.style.transform = ''
+        }
+      }, 230)
+    }
+    const down = (ev: TouchEvent) => {
+      const t = ev.touches[0]
+      d = null
+      if (ev.touches.length !== 1 || !t || (t as Touch & { touchType?: string }).touchType === 'stylus') return
+      const s = askChat.get()
+      const showing = Boolean((s.target && !s.hidden) || s.browsing)
+      if (dockedRef.current) {
+        // beside the note: a plain swipe shows or hides the panel
+        if (!showing && t.clientX > W() - EDGE) {
+          const target = openableRef.current()
+          if (target) d = { mode: 'open', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target, last: [] }
+        } else if (showing) {
+          const dock = document.querySelector('.ask-dock')?.getBoundingClientRect()
+          if (dock && t.clientX >= dock.left && t.clientX < dock.left + EDGE) d = { mode: 'close', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target: null, last: [] }
+        }
+        return
+      }
+      if (!showing && t.clientX > W() - EDGE) {
+        const target = s.hidden && s.target ? s.target : openableRef.current()
+        if (target) d = { mode: 'open', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: s.hidden, target, last: [] }
+      } else if (showing && t.clientX < EDGE + 6 && (ev.target as Element).closest?.('.ask-chat')) {
+        d = { mode: 'close', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target: null, last: [] }
+      }
+    }
+    const move = (ev: TouchEvent) => {
+      const t = ev.touches[0]
+      if (!d || !t) return
+      const dx = t.clientX - d.x0
+      const dy = t.clientY - d.y0
+      if (!d.locked) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return void (d = null) // scrolling
+        if (Math.abs(dx) < 8) return
+        if ((d.mode === 'open' && dx > 0) || (d.mode === 'close' && dx < 0)) return void (d = null)
+        d.locked = true
+        if (dockedRef.current) return
+        // in it comes, from the edge
+        if (d.mode === 'open') askChat.set({ target: d.target, hidden: false, browsing: false, dragX: W() })
+      }
+      if (ev.cancelable) ev.preventDefault()
+      if (dockedRef.current) return
+      d.last = [...d.last.slice(-4), { x: t.clientX, t: performance.now() }]
+      place(d.mode === 'open' ? Math.max(0, Math.min(W(), W() + dx)) : Math.max(0, dx), false)
+    }
+    const up = (ev: TouchEvent) => {
+      if (!d?.locked) return void (d = null)
+      const drag = d
+      d = null
+      const t = ev.changedTouches[0]
+      const dx = (t?.clientX ?? drag.x0) - drag.x0
+      if (dockedRef.current) {
+        if (drag.mode === 'open' && dx < -50 && drag.target) openAskChat(drag.target)
+        if (drag.mode === 'close' && dx > 60) closeAskChat()
+        return
+      }
+      // how fast at the end (px/ms; + rightwards)
+      const a = drag.last[0]
+      const b = drag.last[drag.last.length - 1]
+      const v = a && b && b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0
+      const far = Math.abs(dx) > W() * 0.35
+      if (drag.mode === 'open') {
+        if (far || v < -0.45) settle(0, () => askChat.set({ dragX: null }))
+        else settle(W(), () => (drag.wasHidden ? askChat.set({ hidden: true, dragX: null }) : closeAskChat()))
+      } else {
+        if (far || v > 0.45) settle(W(), () => closeAskChat())
+        else settle(0, () => undefined)
       }
     }
     window.addEventListener('touchstart', down, { passive: true })
-    window.addEventListener('touchmove', move, { passive: true })
+    window.addEventListener('touchmove', move, { passive: false })
+    window.addEventListener('touchend', up, { passive: true })
+    window.addEventListener('touchcancel', up, { passive: true })
     return () => {
       window.removeEventListener('touchstart', down)
       window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', up)
+      window.removeEventListener('touchcancel', up)
     }
   }, [])
 }
@@ -329,10 +408,19 @@ function AskChat({
   const newMenuRef = useRef(false)
   newMenuRef.current = newMenu
 
+  // brought in by a finger (it places it) – or with a button: it slides in by itself
+  const startX = useStore(askChat, (s) => s.dragX)
+  const [slidIn] = useState(() => askChat.get().dragX !== null)
   const about = target.all ? 'Ask your notes' : target.folderId ? 'Ask this folder' : 'Ask about this note'
   const openSubject = () => (target.noteId ? go(target.noteId) : target.folderId ? onShowFolder(target.folderId) : undefined)
   return (
-    <div ref={root} className={`ask-chat${docked ? ' docked' : ''}`} role={docked ? 'complementary' : 'dialog'} aria-label={`${about}: ${target.title || 'this note'}`}>
+    <div
+      ref={root}
+      className={`ask-chat${docked ? ' docked' : slidIn ? '' : ' slides-in'}`}
+      style={!docked && startX !== null ? { transform: `translateX(${startX}px)`, transition: 'none' } : undefined}
+      role={docked ? 'complementary' : 'dialog'}
+      aria-label={`${about}: ${target.title || 'this note'}`}
+    >
       <header className="ask-chat-head">
         {docked ? (
           <button className="icon" onClick={closeAskChat} aria-label="Close the chat" title="Close the chat">

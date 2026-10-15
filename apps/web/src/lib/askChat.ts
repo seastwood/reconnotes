@@ -25,6 +25,8 @@ interface AskChatState {
   browsing: boolean
   /** the chat last open, per note or folder ("note:<id>" / "folder:<id>" / "all"); null for a new one */
   chat: Record<string, string | null>
+  /** being slid in with a finger (phone): how far from its place it starts (px); null otherwise */
+  dragX: number | null
 }
 
 interface Kept {
@@ -48,6 +50,7 @@ export const askChat = new Store<AskChatState>({
   hidden: false,
   browsing: false,
   chat: kept.chat ?? {},
+  dragX: null,
 })
 let last: AskChatTarget | null = kept.last ?? kept.target ?? null
 askChat.subscribe(() => {
@@ -65,7 +68,7 @@ export const openChatAt = (target: AskChatTarget, conversation: string | null) =
 }
 
 export const openAskChat = (target: AskChatTarget) => askChat.set({ target, hidden: false, browsing: false })
-export const closeAskChat = () => askChat.set({ target: null, hidden: false, browsing: false })
+export const closeAskChat = () => askChat.set({ target: null, hidden: false, browsing: false, dragX: null })
 export const hideAskChat = () => askChat.set({ hidden: true })
 export const showAskChat = () => askChat.set({ hidden: false })
 /** the list of every chat (the panel opens on it) */
