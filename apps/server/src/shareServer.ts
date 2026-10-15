@@ -5,7 +5,7 @@ import { WORKSPACE_DOC, extractNote, folderRules, getFolders, getNotes, noteDocN
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { COOK_SCRIPT, cookPage, recipeIn } from './shareCook'
-import { SHARE_HEADERS, type ShareRow, type Shares, drawingSvg, esc, noteHas, pageShell, sharePage, sharedNote } from './shares'
+import { SHARE_HEADERS, type Shares, drawingSvg, esc, noteHas, pageShell, sharePage, sharedNote } from './shares'
 
 /**
  * The share port
@@ -18,7 +18,8 @@ import { SHARE_HEADERS, type ShareRow, type Shares, drawingSvg, esc, noteHas, pa
  * reverse proxy on a domain of its own), while the server's own port stays
  * yours alone.
  *
- * A shared folder: /s/<link> lists it (subfolders, then notes), /s/<link>/f/<folder> a subfolder,
+ * A person's link: /s/<link> lists what's shared with them (or opens their one shared folder),
+ * /s/<link>/f/<folder> a folder,
  * /s/<link>/n/<note> a note, and /s/<link>/n/<note>/a|d/… its pictures, files and drawings. Only
  * what's in the folder now is reachable: not a note moved out, deleted, a template, or anything in a
  * locked (password) folder. With a passcode, every page asks for it first (once on each device: a
@@ -65,23 +66,49 @@ const send = (res: http.ServerResponse, status: number, html: string, head = fal
 const gone = (res: http.ServerResponse, head = false) =>
   send(res, 404, pageShell('Not shared', '<p>This isn’t shared any more – or the link isn’t quite right.</p>'), head)
 
-/** What a folder link can reach now: its folders (it and the unlocked ones inside it), by id. */
-function reach(ws: Y.Doc, share: ShareRow): Map<string, FolderData> | null {
-  const folders = [...getFolders(ws).values()].map(readFolder)
-  const rules = folderRules(folders)
-  const live = new Map(folders.filter((f) => !f.trashedAt).map((f) => [f.id, f]))
-  const root = share.folderId ? live.get(share.folderId) : undefined
-  if (!root || rules.get(root.id)?.lockedBy) return null
-  const out = new Map<string, FolderData>([[root.id, root]])
+/**
+ * What a person's link can reach now: the shared folders (each with the unlocked folders inside it)
+ * and the shared notes, from all their pools. `roots`: the shared folders themselves.
+ */
+interface Reach {
+  roots: string[]
+  folders: Map<string, FolderData>
+  notes: Map<string, NoteData>
+  /** notes shared on their own (not through a folder) */
+  loose: string[]
+}
+function reach(ws: Y.Doc, shared: { folders: string[]; notes: string[] }): Reach {
+  const all = [...getFolders(ws).values()].map(readFolder)
+  const rules = folderRules(all)
+  const live = new Map(all.filter((f) => !f.trashedAt).map((f) => [f.id, f]))
+  const roots = shared.folders.filter((id) => live.has(id) && !rules.get(id)?.lockedBy)
+  const folders = new Map<string, FolderData>(roots.map((id) => [id, live.get(id)!]))
   for (let added = true; added; ) {
     added = false
     for (const f of live.values())
-      if (!out.has(f.id) && f.parentId && out.has(f.parentId) && !rules.get(f.id)?.lockedBy) {
-        out.set(f.id, f)
+      if (!folders.has(f.id) && f.parentId && folders.has(f.parentId) && !rules.get(f.id)?.lockedBy) {
+        folders.set(f.id, f)
         added = true
       }
   }
-  return out
+  const notes = notesIn(ws, folders)
+  const loose: string[] = []
+  const metas = getNotes(ws)
+  for (const id of shared.notes) {
+    const m = metas.get(id)
+    if (!m || notes.has(id)) continue
+    const n = readNote(m)
+    if (n.trashedAt || n.template || (n.folderId && rules.get(n.folderId)?.lockedBy)) continue
+    notes.set(id, n)
+    loose.push(id)
+  }
+  // a shared folder inside another shared folder: just part of it
+  const top = roots.filter((id) => !roots.some((r) => r !== id && isInside(live, id, r)))
+  return { roots: top, folders, notes, loose }
+}
+const isInside = (folders: Map<string, FolderData>, id: string, ancestor: string) => {
+  for (let f = folders.get(id); f?.parentId; f = folders.get(f.parentId)) if (f.parentId === ancestor) return true
+  return false
 }
 
 /** The notes in these folders that a link shows (not deleted, not templates). */
@@ -110,33 +137,54 @@ const byOrder = (sort: FolderData['sort']) => (a: NoteData, b: NoteData) =>
 
 const day = (t: number) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
-/** "Recipes › Soups › …": the way back up to the shared folder. */
-function crumbs(link: string, folders: Map<string, FolderData>, rootId: string, folderId: string, last?: string): string {
-  const path: FolderData[] = []
-  for (let f = folders.get(folderId); f; f = f.id === rootId ? undefined : folders.get(f.parentId ?? '')) path.unshift(f)
-  const parts = path.map((f) => `<a href="${f.id === rootId ? `/s/${link}` : `/s/${link}/f/${esc(f.id)}`}">📁 ${esc(f.name || 'Untitled folder')}</a>`)
-  if (last) parts.push(`<span>${esc(last)}</span>`)
-  return `<nav class="crumbs">${parts.join('<span>›</span>')}</nav>`
+/** A shared folder's start: the root it's in (the nearest of the shared folders above it). */
+const rootOf = (r: Reach, folderId: string) => {
+  for (let f = r.folders.get(folderId); f; f = f.parentId ? r.folders.get(f.parentId) : undefined) if (r.roots.includes(f.id)) return f.id
+  return null
 }
 
-function folderPage(link: string, share: ShareRow, folders: Map<string, FolderData>, notes: Map<string, NoteData>, folderId: string): string {
-  const folder = folders.get(folderId)!
-  const subs = [...folders.values()]
+/** "Recipes › Soups › …": the way back up to the shared folder (and to everything shared, when there's more). */
+function crumbs(link: string, r: Reach, folderId: string | null, last?: string): string {
+  const path: FolderData[] = []
+  const root = folderId ? rootOf(r, folderId) : null
+  for (let f = folderId ? r.folders.get(folderId) : undefined; f; f = f.id === root ? undefined : r.folders.get(f.parentId ?? '')) path.unshift(f)
+  const home = r.roots.length + r.loose.length > 1
+  const parts = [
+    ...(home ? [`<a href="/s/${link}">🏠 Shared with you</a>`] : []),
+    ...path.map((f) => `<a href="${!home && f.id === root ? `/s/${link}` : `/s/${link}/f/${esc(f.id)}`}">📁 ${esc(f.name || 'Untitled folder')}</a>`),
+  ]
+  if (last) parts.push(`<span>${esc(last)}</span>`)
+  return parts.length > (last ? 1 : 0) ? `<nav class="crumbs">${parts.join('<span>›</span>')}</nav>` : ''
+}
+
+const count = (r: Reach, id: string): number => [...r.notes.values()].filter((n) => n.folderId === id).length + [...r.folders.values()].filter((f) => f.parentId === id).reduce((s, f) => s + count(r, f.id), 0)
+const folderItem = (link: string, r: Reach, f: FolderData) =>
+  `<li><a href="/s/${link}/f/${esc(f.id)}"><div class="t">📁 ${esc(f.name || 'Untitled folder')}</div><div class="d">${count(r, f.id)} note${count(r, f.id) === 1 ? '' : 's'}</div></a></li>`
+const noteItem = (link: string, n: NoteData) =>
+  `<li><a href="/s/${link}/n/${esc(n.id)}"><div class="t">${n.pinned ? '📌 ' : ''}${esc(n.title || 'Untitled')}</div>${n.snippet ? `<div class="s">${esc(n.snippet)}</div>` : ''}<div class="d">${day(n.updatedAt || n.createdAt)}</div></a></li>`
+const withWho = (who: string) => `<div class="meta">Shared from ReconNotes${who ? ` with ${esc(who)}` : ''} · read-only, always up to date</div>`
+
+/** Everything shared with the person: their shared folders and notes. */
+function homePage(link: string, who: string, r: Reach): string {
+  const folders = r.roots.map((id) => r.folders.get(id)!).sort((a, b) => a.name.localeCompare(b.name))
+  const notes = r.loose.map((id) => r.notes.get(id)!).sort((a, b) => (a.title || '').localeCompare(b.title || ''))
+  const items = [...folders.map((f) => folderItem(link, r, f)), ...notes.map((n) => noteItem(link, n))]
+  return pageShell(
+    'Shared with you',
+    `<h1 class="folder">Shared with ${esc(who || 'you')}</h1>${withWho('')}${items.length ? `<ul class="list">${items.join('')}</ul>` : '<p class="empty">Nothing is shared here right now.</p>'}`,
+  )
+}
+
+function folderPage(link: string, who: string, r: Reach, folderId: string): string {
+  const folder = r.folders.get(folderId)!
+  const subs = [...r.folders.values()]
     .filter((f) => f.parentId === folderId)
     .sort((a, b) => (folder.sort === 'manual' ? (a.order < b.order ? -1 : a.order > b.order ? 1 : 0) : a.name.localeCompare(b.name)))
-  // how many notes in each subfolder, with its own subfolders
-  const count = (id: string): number => [...notes.values()].filter((n) => n.folderId === id).length + [...folders.values()].filter((f) => f.parentId === id).reduce((s, f) => s + count(f.id), 0)
-  const here = [...notes.values()].filter((n) => n.folderId === folderId).sort(byOrder(folder.sort))
-  const items = [
-    ...subs.map((f) => `<li><a href="/s/${link}/f/${esc(f.id)}"><div class="t">📁 ${esc(f.name || 'Untitled folder')}</div><div class="d">${count(f.id)} note${count(f.id) === 1 ? '' : 's'}</div></a></li>`),
-    ...here.map(
-      (n) =>
-        `<li><a href="/s/${link}/n/${esc(n.id)}"><div class="t">${n.pinned ? '📌 ' : ''}${esc(n.title || 'Untitled')}</div>${n.snippet ? `<div class="s">${esc(n.snippet)}</div>` : ''}<div class="d">${day(n.updatedAt || n.createdAt)}</div></a></li>`,
-    ),
-  ]
+  const here = [...r.notes.values()].filter((n) => n.folderId === folderId && !r.loose.includes(n.id)).sort(byOrder(folder.sort))
+  const items = [...subs.map((f) => folderItem(link, r, f)), ...here.map((n) => noteItem(link, n))]
   return pageShell(
     folder.name || 'Shared folder',
-    `${folderId === share.folderId ? '' : crumbs(link, folders, share.folderId!, folder.parentId ?? share.folderId!)}<h1 class="folder">${esc(folder.name || 'Untitled folder')}</h1><div class="meta">Shared from ReconNotes${share.name ? ` with ${esc(share.name)}` : ''} · read-only, always up to date</div>${
+    `${crumbs(link, r, r.roots.includes(folderId) ? null : (folder.parentId ?? null))}<h1 class="folder">${esc(folder.name || 'Untitled folder')}</h1>${withWho(who)}${
       items.length ? `<ul class="list">${items.join('')}</ul>` : '<p class="empty">Nothing in this folder yet.</p>'
     }`,
   )
@@ -145,7 +193,7 @@ function folderPage(link: string, share: ShareRow, folders: Map<string, FolderDa
 function passcodePage(link: string, wrong: boolean, wait: boolean): string {
   return pageShell(
     'Passcode',
-    `<h1 class="folder">🔒 Enter the passcode</h1><p class="meta">This shared folder has a passcode. You’ll only be asked once on this device.</p>
+    `<h1 class="folder">🔒 Enter the passcode</h1><p class="meta">What’s shared here has a passcode. You’ll only be asked once on this device.</p>
 <form class="pass" method="post" action="/s/${link}/unlock"><input name="passcode" type="password" autocomplete="current-password" autofocus required aria-label="Passcode">${
       wait ? '<p class="error">Too many wrong tries – wait a while, then try again.</p>' : wrong ? '<p class="error">That isn’t it – try again.</p>' : ''
     }<button type="submit">Open</button></form>`,
@@ -203,8 +251,8 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
   }
   // a note's own link (/s/<link>, its files /s/<link>/a|d/…)
   const m = new RegExp(`^/s/${LINK}(?:/(a|d)/${ID}(\\.svg)?|/(cook))?$`).exec(path)
-  const share = m ? ctx.shares.get(m[1]) : null
-  if (m && (!share || share.kind === 'note')) {
+  // (a person's link is theirs: below)
+  if (m && !ctx.shares.person(m[1])) {
     if (req.method !== 'GET' && !head) return gone(res), true
     const shared = sharedNote(ctx.shares, ctx.sync, m[1])
     if (!shared) return gone(res, head), true
@@ -221,12 +269,12 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
     return true
   }
 
-  // a folder's link
+  // a person's link: everything in their pools
   const f = new RegExp(`^/s/${LINK}(?:/(unlock|f/${ID}|n/${ID}(?:/(a|d)/${ID}(\\.svg)?|/(cook))?))?$`).exec(path)
   if (!f) return false
   const link = f[1]
-  const folderShare = ctx.shares.get(link)
-  if (!folderShare || folderShare.kind !== 'folder') return gone(res, head), true
+  const person = ctx.shares.person(link)
+  if (!person) return gone(res, head), true
 
   // the passcode, once on each device
   const pass = ctx.shares.pass(link)
@@ -256,17 +304,20 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
   }
 
   const ws = ctx.sync.getDoc(WORKSPACE_DOC)
-  const folders = ws ? reach(ws, folderShare) : null
-  if (!ws || !folders) return gone(res, head), true
-  const notes = notesIn(ws, folders)
+  if (!ws) return gone(res, head), true
+  const r = reach(ws, ctx.shares.reachOf(link))
   ctx.shares.opened(link)
 
-  if (!f[3] && !f[4]) return send(res, 200, folderPage(link, folderShare, folders, notes, folderShare.folderId!), head), true
-  if (f[3]) {
-    if (!folders.has(f[3])) return gone(res, head), true
-    return send(res, 200, folderPage(link, folderShare, folders, notes, f[3]), head), true
+  if (!f[3] && !f[4]) {
+    // one folder and nothing else: that folder straight away
+    if (r.roots.length === 1 && !r.loose.length) return send(res, 200, folderPage(link, person.name, r, r.roots[0]), head), true
+    return send(res, 200, homePage(link, person.name, r), head), true
   }
-  const note = notes.get(f[4])
+  if (f[3]) {
+    if (!r.folders.has(f[3])) return gone(res, head), true
+    return send(res, 200, folderPage(link, person.name, r, f[3]), head), true
+  }
+  const note = r.notes.get(f[4])
   const doc = note ? ctx.sync.getDoc(noteDocName(note.id)) : null
   if (!note || !doc) return gone(res, head), true
   const base = `/s/${link}/n/${note.id}`
@@ -276,8 +327,8 @@ export async function serveShare(ctx: ShareContext, req: http.IncomingMessage, r
   if (!f[5]) {
     const html = sharePage(base, title, doc, note.updatedAt, {
       cookHref: recipe ? `${base}/cook` : undefined,
-      noteHref: (id) => (notes.has(id) ? `/s/${link}/n/${id}` : null),
-      top: crumbs(link, folders, folderShare.folderId!, note.folderId!, title),
+      noteHref: (id) => (r.notes.has(id) ? `/s/${link}/n/${id}` : null),
+      top: crumbs(link, r, r.loose.includes(note.id) ? null : (note.folderId ?? null), title),
     })
     return send(res, 200, html, head), true
   }

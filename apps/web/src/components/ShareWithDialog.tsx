@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, ExternalLink, KeyRound, Link2, Loader2, Share, Users, X } from 'lucide-react'
-import { copyText, lastOpened, refreshShares, setShareAddress, shareFolder, stopShare, updateShare, useShares, type ShareLink } from '../lib/shares'
+import { Check, Copy, KeyRound, Link2, Loader2, Share, Users, X } from 'lucide-react'
+import { addPerson, copyText, lastOpened, poolPeople, refreshShares, setPoolItem, setShareAddress, useShares, type ShareItem, type SharePerson } from '../lib/shares'
 
 /**
- * Share a folder: a read-only link for each person ("Sydney"), to everything in the folder and its
- * subfolders – notes, pictures, drawings, recordings, files – always as it is now. Each link has its
- * own passcode (or none) and is stopped on its own. Folders with a password stay out.
+ * Share a folder or a note with people: tick the pools it goes in (each person has one of their own,
+ * and anyone can be in more than one), or share with someone new – who gets a link of their own,
+ * for good. Read-only, always up to date. Who's in which pool: Settings › Sharing & backups.
  */
-export function ShareFolderDialog({ folderId, name, onClose }: { folderId: string; name: string; onClose: () => void }) {
-  const all = useShares((s) => s.shares)
+export function ShareWithDialog({ item, name, onClose }: { item: ShareItem; name: string; onClose: () => void }) {
+  const pools = useShares((s) => s.pools)
+  const people = useShares((s) => s.people)
   const address = useShares((s) => s.address)
   const port = useShares((s) => s.port)
   const loaded = useShares((s) => s.loaded)
-  const links = all.filter((l) => l.folderId === folderId)
   const [who, setWho] = useState('')
   const [passcode, setPasscode] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,23 +35,22 @@ export function ShareFolderDialog({ folderId, name, onClose }: { folderId: strin
       setBusy(false)
     }
   }
-  const copy = async (l: ShareLink) => {
-    await copyText(l.url)
-    setCopied(l.id)
+  const copy = async (p: SharePerson) => {
+    await copyText(p.url)
+    setCopied(p.id)
     setTimeout(() => setCopied(null), 1500)
   }
+  const isIn = (poolId: string) => pools.find((p) => p.id === poolId)?.items.some((i) => i.kind === item.kind && i.id === item.id) ?? false
+  // who sees it now: everyone in a pool it's in
+  const seeing = people.filter((p) => p.pools.some(isIn))
   const make = () =>
     run(async () => {
-      const l = await shareFolder(folderId, who.trim(), passcode || null)
+      const p = await addPerson(who.trim(), passcode || null, { item })
       setWho('')
       setPasscode('')
-      await copy(l)
+      await copy(p)
     })
-  const changePasscode = (l: ShareLink) => {
-    const next = prompt(l.hasPasscode ? `A new passcode for ${l.name || 'this link'} (leave it empty for none):` : `A passcode for ${l.name || 'this link'} (at least 4 characters):`, '')
-    if (next === null) return
-    void run(() => updateShare(l.id, { passcode: next || null }))
-  }
+  const what = item.kind === 'folder' ? 'Everything in this folder and its subfolders – notes, pictures, drawings, recordings and files' : 'This note, with its pictures, drawings, recordings and files'
 
   return createPortal(
     <div className="dialog-backdrop" onClick={onClose}>
@@ -65,47 +64,59 @@ export function ShareFolderDialog({ folderId, name, onClose }: { folderId: strin
           </button>
         </header>
         <p className="hint">
-          Everything in this folder and its subfolders – notes, pictures, drawings, recordings and files – read-only and always up to date. Nothing else on
-          your server can be reached through the link{port ? ` (it’s served on its own port, ${port})` : ''}. Folders with a password are left out.
+          {what}, read-only and always up to date. Each person has one link for everything shared with them, and nothing else on your server can be reached
+          through it{port ? ` (it’s served on its own port, ${port})` : ''}.{item.kind === 'folder' ? ' Folders with a password are left out.' : ''}
         </p>
 
         {!loaded && <Loader2 size={18} className="spin" />}
-        {links.length > 0 && (
-          <ul className="share-links">
-            {links.map((l) => (
-              <li key={l.id}>
-                <div className="share-link-head">
-                  <strong>{l.name || 'A link'}</strong>
-                  {l.hasPasscode && (
-                    <span className="share-tag" title="Asks for a passcode (once on each device)">
-                      <KeyRound size={12} /> passcode
+        {pools.length > 0 && (
+          <>
+            <h3>Share in…</h3>
+            <ul className="share-pools-pick">
+              {pools.map((p) => (
+                <li key={p.id}>
+                  <label>
+                    <input type="checkbox" checked={isIn(p.id)} disabled={busy} onChange={(e) => void run(() => setPoolItem(p.id, item, e.target.checked))} />
+                    <span>
+                      <strong>{p.name}</strong>
+                      <span className="share-seen">{poolPeople(p, people) ? `seen by ${poolPeople(p, people)}` : 'nobody sees it yet'}</span>
                     </span>
-                  )}
-                  <span className="share-seen">{lastOpened(l.lastSeenAt)}</span>
-                </div>
-                <input className="share-url" readOnly value={l.url} onFocus={(e) => e.target.select()} aria-label={`Link for ${l.name || 'this link'}`} />
-                <div className="row">
-                  <button onClick={() => void copy(l)}>
-                    {copied === l.id ? <Check size={15} /> : <Copy size={15} />} {copied === l.id ? 'Copied' : 'Copy link'}
-                  </button>
-                  {'share' in navigator && (
-                    <button onClick={() => void navigator.share({ url: l.url, title: name }).catch(() => undefined)}>
-                      <Share size={15} /> Send…
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {seeing.length > 0 && (
+          <>
+            <h3>Who sees it</h3>
+            <ul className="share-links">
+              {seeing.map((p) => (
+                <li key={p.id}>
+                  <div className="share-link-head">
+                    <strong>{p.name}</strong>
+                    {p.hasPasscode && (
+                      <span className="share-tag" title="Asks for a passcode (once on each device)">
+                        <KeyRound size={12} /> passcode
+                      </span>
+                    )}
+                    <span className="share-seen">{lastOpened(p.lastSeenAt)}</span>
+                  </div>
+                  <div className="row">
+                    <button onClick={() => void copy(p)}>
+                      {copied === p.id ? <Check size={15} /> : <Copy size={15} />} {copied === p.id ? 'Copied' : 'Copy their link'}
                     </button>
-                  )}
-                  <a className="button" href={l.url} target="_blank" rel="noreferrer">
-                    <ExternalLink size={15} /> Open
-                  </a>
-                  <button onClick={() => changePasscode(l)} disabled={busy}>
-                    <KeyRound size={15} /> {l.hasPasscode ? 'Passcode…' : 'Add passcode…'}
-                  </button>
-                  <button className="danger-text" disabled={busy} onClick={() => confirm(`Stop sharing “${name}” with ${l.name || 'this link'}? The link stops working at once.`) && void run(() => stopShare(l.id))}>
-                    Stop sharing
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                    {'share' in navigator && (
+                      <button onClick={() => void navigator.share({ url: p.url, title: `Shared with ${p.name}` }).catch(() => undefined)}>
+                        <Share size={15} /> Send…
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         <form
@@ -115,7 +126,7 @@ export function ShareFolderDialog({ folderId, name, onClose }: { folderId: strin
             void make()
           }}
         >
-          <h3>{links.length ? 'Share with someone else' : 'Share with…'}</h3>
+          <h3>Share with someone new</h3>
           <label>
             Who it’s for
             <input value={who} onChange={(e) => setWho(e.target.value)} placeholder="e.g. Sydney" autoCapitalize="words" required maxLength={80} />
@@ -127,6 +138,7 @@ export function ShareFolderDialog({ folderId, name, onClose }: { folderId: strin
           <button type="submit" className="primary" disabled={busy || !who.trim()}>
             {busy ? <Loader2 size={15} className="spin" /> : <Link2 size={15} />} Make their link
           </button>
+          <p className="hint">They get a pool of their own with this in it. Add more to it any time, or add other people to it, in Settings › Sharing & backups.</p>
         </form>
 
         <div className="share-address">

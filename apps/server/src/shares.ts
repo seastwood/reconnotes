@@ -26,10 +26,14 @@ import type { SyncEngine } from './sync'
  * drawings can be fetched through the link. Stopping the share makes the link
  * stop working at once.
  *
- * A folder is shared with someone ("Recipes" with Sydney): each person gets
- * a link of their own, stopped on its own, optionally with a passcode (asked
- * once on each of their devices). They're served on a port of their own as
- * well (shareServer.ts), which can show shared things and nothing else.
+ * Sharing with people: each person ("Sydney") has one link of their own, for
+ * good, optionally with a passcode (asked once on each of their devices), and
+ * stopped on its own. What they see is in pools: a pool is a set of folders
+ * (with their subfolders) and notes, and a person sees everything in every
+ * pool they're in. Sharing more with Sydney is adding it to her pool – her
+ * link stays the same; adding Mom to Sydney's pool shows Mom the same things;
+ * someone in two pools sees both. They're served on a port of their own
+ * (shareServer.ts), which can show shared things and nothing else.
  *
  * The pages are built from the notes' structure with every piece of text
  * escaped, and served with a Content-Security-Policy that allows no scripts,
@@ -72,7 +76,28 @@ const row = (r: Raw): ShareRow => ({
   lastSeenAt: r.last_seen_at,
 })
 
+/** Someone things are shared with: their link (the id), name, passcode, the pools they're in. */
+export interface PersonRow {
+  id: string
+  name: string
+  hasPasscode: boolean
+  createdAt: number
+  lastSeenAt: number | null
+  pools: string[]
+}
+
+/** A set of shared things – folders (with their subfolders) and notes – and who sees it. */
+export interface PoolRow {
+  id: string
+  name: string
+  createdAt: number
+  items: { kind: 'folder' | 'note'; id: string }[]
+  /** the people in it */
+  members: string[]
+}
+
 const newId = () => crypto.randomBytes(16).toString('base64url')
+const poolId = () => crypto.randomBytes(9).toString('base64url')
 const hashPasscode = (passcode: string, salt: string) => crypto.scryptSync(passcode.normalize('NFKC'), salt, 32).toString('hex')
 
 export class Shares {
@@ -101,6 +126,34 @@ export class Shares {
     ])
       if (!have.has(col)) store.db.exec(`ALTER TABLE shares ADD COLUMN ${col} ${type}`)
     store.db.exec('CREATE INDEX IF NOT EXISTS shares_folder ON shares(folder_id)')
+    store.db.exec(`
+      CREATE TABLE IF NOT EXISTS share_people (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        pass_hash TEXT,
+        pass_salt TEXT,
+        created_at INTEGER NOT NULL,
+        last_seen_at INTEGER,
+        revoked_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS share_pools (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS share_pool_items (
+        pool_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        PRIMARY KEY (pool_id, kind, item_id)
+      );
+      CREATE TABLE IF NOT EXISTS share_pool_members (
+        pool_id TEXT NOT NULL,
+        person_id TEXT NOT NULL,
+        PRIMARY KEY (pool_id, person_id)
+      );
+    `)
+    this.migrateFolderLinks()
     let secret = store.getSetting<string>('shareSecret')
     if (!secret) store.setSetting('shareSecret', (secret = crypto.randomBytes(32).toString('hex')))
     this.secret = Buffer.from(secret, 'hex')
@@ -111,8 +164,137 @@ export class Shares {
     return r ? row(r) : null
   }
 
-  forFolder(folderId: string): ShareRow[] {
-    return (this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE folder_id = ? AND revoked_at IS NULL ORDER BY created_at`).all(folderId) as Raw[]).map(row)
+  /**
+   * Folder links from before pools (one link per person per folder): each becomes a person with the
+   * same link, passcode and all, so links already sent keep working. Links with the same name ("Sydney"
+   * twice, for two folders) share one pool: each sees both folders.
+   */
+  private migrateFolderLinks() {
+    const db = this.store.db
+    const old = db
+      .prepare('SELECT id, folder_id, name, pass_hash, pass_salt, created_at, last_seen_at FROM shares WHERE folder_id IS NOT NULL AND revoked_at IS NULL ORDER BY created_at')
+      .all() as { id: string; folder_id: string; name: string | null; pass_hash: string | null; pass_salt: string | null; created_at: number; last_seen_at: number | null }[]
+    if (!old.length) return
+    db.transaction(() => {
+      const pools = new Map<string, string>()
+      for (const r of old) {
+        const name = (r.name ?? '').trim() || 'Shared'
+        const key = name.toLowerCase()
+        let pool = pools.get(key)
+        if (!pool) {
+          pool = poolId()
+          pools.set(key, pool)
+          db.prepare('INSERT INTO share_pools (id, name, created_at) VALUES (?, ?, ?)').run(pool, name, r.created_at)
+        }
+        db.prepare('INSERT OR IGNORE INTO share_people (id, name, pass_hash, pass_salt, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)').run(r.id, name, r.pass_hash, r.pass_salt, r.created_at, r.last_seen_at)
+        db.prepare('INSERT OR IGNORE INTO share_pool_members (pool_id, person_id) VALUES (?, ?)').run(pool, r.id)
+        db.prepare('INSERT OR IGNORE INTO share_pool_items (pool_id, kind, item_id) VALUES (?, ?, ?)').run(pool, 'folder', r.folder_id)
+        db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ?').run(Date.now(), r.id)
+      }
+    })()
+  }
+
+  // --- people and pools ----------------------------------------------------------------------------
+
+  people(): PersonRow[] {
+    const members = this.store.db.prepare('SELECT pool_id, person_id FROM share_pool_members').all() as { pool_id: string; person_id: string }[]
+    return (
+      this.store.db.prepare('SELECT id, name, pass_hash, created_at, last_seen_at FROM share_people WHERE revoked_at IS NULL ORDER BY created_at').all() as {
+        id: string
+        name: string
+        pass_hash: string | null
+        created_at: number
+        last_seen_at: number | null
+      }[]
+    ).map((p) => ({
+      id: p.id,
+      name: p.name,
+      hasPasscode: Boolean(p.pass_hash),
+      createdAt: p.created_at,
+      lastSeenAt: p.last_seen_at,
+      pools: members.filter((m) => m.person_id === p.id).map((m) => m.pool_id),
+    }))
+  }
+
+  person(id: string): PersonRow | null {
+    return this.people().find((p) => p.id === id) ?? null
+  }
+
+  pools(): PoolRow[] {
+    const live = new Set(this.people().map((p) => p.id))
+    const items = this.store.db.prepare('SELECT pool_id, kind, item_id FROM share_pool_items').all() as { pool_id: string; kind: 'folder' | 'note'; item_id: string }[]
+    const members = this.store.db.prepare('SELECT pool_id, person_id FROM share_pool_members').all() as { pool_id: string; person_id: string }[]
+    return (this.store.db.prepare('SELECT id, name, created_at FROM share_pools ORDER BY created_at').all() as { id: string; name: string; created_at: number }[]).map((p) => ({
+      id: p.id,
+      name: p.name,
+      createdAt: p.created_at,
+      items: items.filter((i) => i.pool_id === p.id).map((i) => ({ kind: i.kind, id: i.item_id })),
+      members: members.filter((m) => m.pool_id === p.id && live.has(m.person_id)).map((m) => m.person_id),
+    }))
+  }
+
+  /** A new pool ("Recipes for family"). */
+  addPool(name: string): PoolRow {
+    const id = poolId()
+    this.store.db.prepare('INSERT INTO share_pools (id, name, created_at) VALUES (?, ?, ?)').run(id, name.trim().slice(0, 80) || 'Shared', Date.now())
+    return this.pools().find((p) => p.id === id)!
+  }
+
+  renamePool(id: string, name: string) {
+    this.store.db.prepare('UPDATE share_pools SET name = ? WHERE id = ?').run(name.trim().slice(0, 80) || 'Shared', id)
+  }
+
+  /** The pool goes: what was in it is no longer shared through it (the people and their links stay). */
+  deletePool(id: string) {
+    this.store.db.transaction(() => {
+      this.store.db.prepare('DELETE FROM share_pool_items WHERE pool_id = ?').run(id)
+      this.store.db.prepare('DELETE FROM share_pool_members WHERE pool_id = ?').run(id)
+      this.store.db.prepare('DELETE FROM share_pools WHERE id = ?').run(id)
+    })()
+  }
+
+  hasPool(id: string): boolean {
+    return Boolean(this.store.db.prepare('SELECT 1 FROM share_pools WHERE id = ?').get(id))
+  }
+
+  /** Put a folder or note in a pool, or take it out. */
+  setPoolItem(pool: string, kind: 'folder' | 'note', itemId: string, inPool: boolean) {
+    if (inPool) this.store.db.prepare('INSERT OR IGNORE INTO share_pool_items (pool_id, kind, item_id) VALUES (?, ?, ?)').run(pool, kind, itemId)
+    else this.store.db.prepare('DELETE FROM share_pool_items WHERE pool_id = ? AND kind = ? AND item_id = ?').run(pool, kind, itemId)
+  }
+
+  /**
+   * Someone new: their link, and a pool of their own ("Sydney") – or the pools given. With `item`,
+   * that's in their pool already.
+   */
+  addPerson(name: string, passcode: string | null, opts: { pools?: string[]; item?: { kind: 'folder' | 'note'; id: string } } = {}): PersonRow {
+    const id = newId()
+    const clean = name.trim().slice(0, 80) || 'Someone'
+    this.store.db.transaction(() => {
+      this.store.db.prepare('INSERT INTO share_people (id, name, created_at) VALUES (?, ?, ?)').run(id, clean, Date.now())
+      let pools = (opts.pools ?? []).filter((p) => this.hasPool(p))
+      if (!pools.length) pools = [this.addPool(clean).id]
+      for (const p of pools) this.store.db.prepare('INSERT OR IGNORE INTO share_pool_members (pool_id, person_id) VALUES (?, ?)').run(p, id)
+      if (opts.item) this.setPoolItem(pools[0], opts.item.kind, opts.item.id, true)
+    })()
+    if (passcode) this.setPasscode(id, passcode)
+    return this.person(id)!
+  }
+
+  /** Which pools the person is in (all of them, replacing what they were in). */
+  setPersonPools(id: string, pools: string[]) {
+    this.store.db.transaction(() => {
+      this.store.db.prepare('DELETE FROM share_pool_members WHERE person_id = ?').run(id)
+      for (const p of pools) if (this.hasPool(p)) this.store.db.prepare('INSERT OR IGNORE INTO share_pool_members (pool_id, person_id) VALUES (?, ?)').run(p, id)
+    })()
+  }
+
+  /** What the person's link reaches: the folders and notes in all their pools. */
+  reachOf(personId: string): { folders: string[]; notes: string[] } {
+    const rows = this.store.db
+      .prepare('SELECT DISTINCT i.kind, i.item_id FROM share_pool_items i JOIN share_pool_members m ON m.pool_id = i.pool_id WHERE m.person_id = ?')
+      .all(personId) as { kind: string; item_id: string }[]
+    return { folders: rows.filter((r) => r.kind === 'folder').map((r) => r.item_id), notes: rows.filter((r) => r.kind === 'note').map((r) => r.item_id) }
   }
 
   get(id: string): ShareRow | null {
@@ -129,35 +311,30 @@ export class Shares {
     return this.get(id)!
   }
 
-  /** A new link to the folder, for `name` (each person their own). */
-  shareFolder(folderId: string, name: string, passcode?: string | null): ShareRow {
-    const id = newId()
-    this.store.db.prepare('INSERT INTO shares (id, note_id, folder_id, name, created_at) VALUES (?, ?, ?, ?, ?)').run(id, '', folderId, name.trim().slice(0, 80), Date.now())
-    if (passcode) this.setPasscode(id, passcode)
-    return this.get(id)!
-  }
-
   stop(noteId: string): boolean {
     return this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE note_id = ? AND folder_id IS NULL AND revoked_at IS NULL').run(Date.now(), noteId).changes > 0
   }
 
-  /** Stop one link. */
+  /** Stop a person's link (they see nothing any more; their pools stay, with the others in them). */
   revoke(id: string): boolean {
-    return this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(Date.now(), id).changes > 0
+    const now = Date.now()
+    const a = this.store.db.prepare('UPDATE share_people SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(now, id).changes
+    if (a) this.store.db.prepare('DELETE FROM share_pool_members WHERE person_id = ?').run(id)
+    return a > 0 || this.store.db.prepare('UPDATE shares SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(now, id).changes > 0
   }
 
   rename(id: string, name: string) {
-    this.store.db.prepare('UPDATE shares SET name = ? WHERE id = ?').run(name.trim().slice(0, 80), id)
+    this.store.db.prepare('UPDATE share_people SET name = ? WHERE id = ?').run(name.trim().slice(0, 80) || 'Someone', id)
   }
 
-  /** A passcode to open the link (null: none). A new one asks again on every device. */
+  /** A passcode to open the person's link (null: none). A new one asks again on every device. */
   setPasscode(id: string, passcode: string | null) {
     const salt = passcode ? crypto.randomBytes(16).toString('hex') : null
-    this.store.db.prepare('UPDATE shares SET pass_hash = ?, pass_salt = ? WHERE id = ?').run(passcode ? hashPasscode(passcode, salt!) : null, salt, id)
+    this.store.db.prepare('UPDATE share_people SET pass_hash = ?, pass_salt = ? WHERE id = ?').run(passcode ? hashPasscode(passcode, salt!) : null, salt, id)
   }
 
   checkPasscode(id: string, passcode: string): boolean {
-    const r = this.store.db.prepare('SELECT pass_hash, pass_salt FROM shares WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null; pass_salt: string | null } | undefined
+    const r = this.store.db.prepare('SELECT pass_hash, pass_salt FROM share_people WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null; pass_salt: string | null } | undefined
     if (!r?.pass_hash || !r.pass_salt) return false
     const got = Buffer.from(hashPasscode(passcode, r.pass_salt), 'hex')
     return crypto.timingSafeEqual(got, Buffer.from(r.pass_hash, 'hex'))
@@ -165,7 +342,7 @@ export class Shares {
 
   /** What the "passcode entered" cookie holds for this link (changes when the passcode does). */
   pass(id: string): string | null {
-    const r = this.store.db.prepare('SELECT pass_hash FROM shares WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null } | undefined
+    const r = this.store.db.prepare('SELECT pass_hash FROM share_people WHERE id = ? AND revoked_at IS NULL').get(id) as { pass_hash: string | null } | undefined
     return r?.pass_hash ? crypto.createHmac('sha256', this.secret).update(`${id}|${r.pass_hash}`).digest('base64url') : null
   }
 
@@ -175,10 +352,12 @@ export class Shares {
     if (now - (this.seen.get(id) ?? 0) < 60_000) return
     this.seen.set(id, now)
     this.store.db.prepare('UPDATE shares SET last_seen_at = ? WHERE id = ?').run(now, id)
+    this.store.db.prepare('UPDATE share_people SET last_seen_at = ? WHERE id = ?').run(now, id)
   }
 
+  /** The single notes' own links (anyone with the link; not a person's). */
   all(): ShareRow[] {
-    return (this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE revoked_at IS NULL ORDER BY created_at DESC`).all() as Raw[]).map(row)
+    return (this.store.db.prepare(`SELECT ${COLUMNS} FROM shares WHERE revoked_at IS NULL AND folder_id IS NULL ORDER BY created_at DESC`).all() as Raw[]).map(row)
   }
 }
 

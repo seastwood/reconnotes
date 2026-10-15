@@ -59,7 +59,7 @@ import { PasswordDialog, type PasswordMode } from './PasswordDialog'
 import { openAskChat } from '../lib/askChat'
 import { checkForUpdates } from '../lib/webImport'
 import { refreshShares, useShares } from '../lib/shares'
-import { ShareFolderDialog } from './ShareFolderDialog'
+import { ShareWithDialog } from './ShareWithDialog'
 import { setFolderReadOnly } from '../lib/readOnly'
 import { folderRules } from '@reconnotes/core'
 
@@ -173,12 +173,20 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     const rules = folderRules(ws.folders)
     return (id: string) => rules.get(id)?.readOnlyBy ?? null
   }, [ws.folders])
-  const shareLinks = useShares((s) => s.shares)
+  const sharePools = useShares((s) => s.pools)
+  const sharePeople = useShares((s) => s.people)
+  // a folder in a pool that someone's in: who sees it
   const sharedWith = useMemo(() => {
     const by = new Map<string, string[]>()
-    for (const l of shareLinks) if (l.folderId) by.set(l.folderId, [...(by.get(l.folderId) ?? []), l.name || 'a link'])
+    for (const p of sharePools)
+      for (const i of p.items)
+        if (i.kind === 'folder')
+          for (const m of p.members) {
+            const who = sharePeople.find((x) => x.id === m)?.name
+            if (who && !by.get(i.id)?.includes(who)) by.set(i.id, [...(by.get(i.id) ?? []), who])
+          }
     return by
-  }, [shareLinks])
+  }, [sharePools, sharePeople])
   useEffect(() => void refreshShares(), [])
   const offlineFolders = useOffline((s) => s.folders)
   const offlineProgress = useOffline((s) => s.progress)
@@ -433,7 +441,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                 </button>
                 {isSyncConfigured() && !owner && (
                   <button onClick={() => (setMenuFor(null), setSharing(f.id))} title="A read-only link to everything in this folder, for someone you choose">
-                    <Users size={14} /> {sharedWith.has(f.id) ? 'Sharing…' : 'Share folder…'}
+                    <Users size={14} /> {sharedWith.has(f.id) ? 'Sharing…' : 'Share with…'}
                   </button>
                 )}
                 {hasSource(f.id) && (
@@ -713,7 +721,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
         </div>
       </nav>
       )}
-      {sharing && <ShareFolderDialog folderId={sharing} name={ws.folders.find((x) => x.id === sharing)?.name ?? 'Folder'} onClose={() => setSharing(null)} />}
+      {sharing && <ShareWithDialog item={{ kind: 'folder', id: sharing }} name={ws.folders.find((x) => x.id === sharing)?.name ?? 'Folder'} onClose={() => setSharing(null)} />}
       {pw && (
         <PasswordDialog
           folderId={pw.folderId}

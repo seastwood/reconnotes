@@ -101,6 +101,8 @@ interface Props {
   onHistory?: () => void
   /** share a read-only link */
   onShareLink?: () => void
+  /** share with people (into their pools) */
+  onShareWith?: () => void
   /** print / share as PDF */
   onPrint?: () => Promise<void>
   /** read only (the note, or a folder it's in): no editing buttons, only what leaves it as it is */
@@ -200,7 +202,7 @@ export function applyStyle(editor: Editor, key: StyleKey) {
   }
 }
 
-export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote: linkNote, onHistory, onShareLink, onPrint, readOnly: ro }: Props) {
+export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, onTogglePanels, fullScreen, onFind, onLinkNote: linkNote, onHistory, onShareLink, onShareWith, onPrint, readOnly: ro }: Props) {
   const readOnly = Boolean(ro?.readOnly)
   // read only: nothing offered that would change the note
   const onLinkNote = readOnly ? undefined : linkNote
@@ -688,6 +690,16 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
                 }}
               >
                 <History size={16} /> Version history…
+              </button>
+            )}
+            {onShareWith && (
+              <button
+                onClick={() => {
+                  setMenu(null)
+                  onShareWith()
+                }}
+              >
+                <Users size={16} /> Share with…
               </button>
             )}
             {onShareLink && (

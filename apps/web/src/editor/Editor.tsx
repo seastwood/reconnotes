@@ -44,6 +44,7 @@ import type { View } from '../components/Sidebar'
 import { DueDate } from './dueDate'
 import { VersionHistory } from '../components/VersionHistory'
 import { ShareDialog } from '../components/ShareDialog'
+import { ShareWithDialog } from '../components/ShareWithDialog'
 import { scanIntoNote, scannerAvailable } from '../lib/scanner'
 import { takeQuickAction } from '../lib/appLinks'
 
@@ -73,6 +74,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
   const undoManager = useMemo(() => createUndoManager(doc), [doc])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [shareWithOpen, setShareWithOpen] = useState(false)
   const onFollowLinkRef = useRef(onFollowLink)
   onFollowLinkRef.current = onFollowLink
   const onOpenNoteRef = useRef(onOpenNote)
@@ -392,6 +394,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
             onLinkNote={() => openLinkPicker(null)}
             onHistory={() => setHistoryOpen(true)}
             onShareLink={isSyncConfigured() ? () => setShareOpen(true) : undefined}
+            onShareWith={isSyncConfigured() ? () => setShareWithOpen(true) : undefined}
             onPrint={() => printNote(editor, doc, noteId)}
             readOnly={ro}
           />
@@ -449,6 +452,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           )}
           {historyOpen && <VersionHistory noteId={noteId} onClose={() => setHistoryOpen(false)} />}
           {shareOpen && <ShareDialog noteId={noteId} onClose={() => setShareOpen(false)} />}
+          {shareWithOpen && <ShareWithDialog item={{ kind: 'note', id: noteId }} name={editor.state.doc.firstChild?.textContent || 'this note'} onClose={() => setShareWithOpen(false)} />}
           <InkToolbar />
           <PencilPalette />
         </div>

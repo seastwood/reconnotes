@@ -126,11 +126,14 @@ describe('a shared folder', () => {
     await app.sync.change(noteDocName('hidden000001'), (doc) => void getContent(doc).insert(0, [para('Hidden')]))
 
     // a folder with a password can't be shared
-    expect((await json('POST', '/api/folders/locked000001/shares', { name: 'Sydney' })).status).toBe(409)
-    const made = await json('POST', '/api/folders/recipes00001/shares', { name: 'Sydney' })
-    expect(made.status).toBe(200)
-    expect(made.body).toMatchObject({ kind: 'folder', name: 'Sydney', folderId: 'recipes00001', hasPasscode: false })
+    expect((await json('POST', '/api/share-people', { name: 'Sydney', item: { kind: 'folder', id: 'locked000001' } })).status).toBe(409)
+    const res = await json('POST', '/api/share-people', { name: 'Sydney', item: { kind: 'folder', id: 'recipes00001' } })
+    expect(res.status).toBe(200)
+    const made = { body: res.body.person }
+    expect(made.body).toMatchObject({ name: 'Sydney', hasPasscode: false })
     expect(made.body.url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:8790/s/${made.body.id}$`))
+    // her own pool, with the folder in it
+    expect(res.body.pools.find((p: { id: string }) => p.id === made.body.pools[0])).toMatchObject({ name: 'Sydney', items: [{ kind: 'folder', id: 'recipes00001' }], members: [made.body.id] })
     const link = `${sharePort}/s/${made.body.id}`
 
     const top = await (await fetch(link)).text()
@@ -158,24 +161,24 @@ describe('a shared folder', () => {
 
     // the share port has nothing else: no app, no API (not even with the key), no other notes' links
     for (const p of ['/', '/api/health', '/api/notes', '/index.html', '/sync', '/ca.crt']) expect((await fetch(sharePort + p, { headers: auth })).status).toBe(404)
-    expect((await fetch(`${sharePort}/api/folders/recipes00001/shares`, { method: 'POST', headers: auth, body: '{}' })).status).toBe(404)
+    expect((await fetch(`${sharePort}/api/share-people`, { method: 'POST', headers: auth, body: '{}' })).status).toBe(404)
 
     // listed, with when it was last opened
     const list = await json('GET', '/api/shares')
-    expect(list.body.shares.find((r: { id: string }) => r.id === made.body.id).lastSeenAt).toBeGreaterThan(0)
+    expect(list.body.people.find((r: { id: string }) => r.id === made.body.id).lastSeenAt).toBeGreaterThan(0)
 
     // a note moved out of the folder isn't shared any more
     await app.sync.change(WORKSPACE_DOC, (ws) => updateNote(ws, 'chili0000001', { folderId: 'mine00000001' }))
     expect((await fetch(`${link}/n/chili0000001`)).status).toBe(404)
 
     // stopped: gone
-    await json('DELETE', `/api/shares/${made.body.id}`)
+    await json('DELETE', `/api/share-people/${made.body.id}`)
     expect((await fetch(link)).status).toBe(404)
     expect((await fetch(`${link}/n/soup00000001/a/soupphoto001`)).status).toBe(404)
   })
 
   it('a passcode: asked once on each device, and a new one asks again', async () => {
-    const made = await json('POST', '/api/folders/soups0000001/shares', { name: 'Sydney', passcode: 'tea-time' })
+    const made = { body: (await json('POST', '/api/share-people', { name: 'Sydney', passcode: 'tea-time', item: { kind: 'folder', id: 'soups0000001' } })).body.person }
     expect(made.body.hasPasscode).toBe(true)
     const link = `${sharePort}/s/${made.body.id}`
     const ask = await fetch(link)
@@ -197,16 +200,16 @@ describe('a shared folder', () => {
     expect((await fetch(`${link}/n/soup00000001/a/soupphoto001`, { headers: { cookie } })).status).toBe(200)
 
     // a new passcode: asked again
-    await json('PATCH', `/api/shares/${made.body.id}`, { passcode: 'new-one' })
+    await json('PATCH', `/api/share-people/${made.body.id}`, { passcode: 'new-one' })
     expect(await (await fetch(link, { headers: { cookie } })).text()).toContain('Enter the passcode')
     // none: open to the link
-    await json('PATCH', `/api/shares/${made.body.id}`, { passcode: null })
+    await json('PATCH', `/api/share-people/${made.body.id}`, { passcode: null })
     expect(await (await fetch(link)).text()).toContain('Tomato soup')
-    expect((await json('PATCH', `/api/shares/${made.body.id}`, { passcode: 'ab' })).status).toBe(400)
+    expect((await json('PATCH', `/api/share-people/${made.body.id}`, { passcode: 'ab' })).status).toBe(400)
   })
 
   it('too many wrong passcodes: a pause', async () => {
-    const made = await json('POST', '/api/folders/soups0000001/shares', { name: 'Someone', passcode: 'right-one' })
+    const made = { body: (await json('POST', '/api/share-people', { name: 'Someone', passcode: 'right-one', item: { kind: 'folder', id: 'soups0000001' } })).body.person }
     const link = `${sharePort}/s/${made.body.id}`
     const unlock = (passcode: string) => fetch(`${link}/unlock`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ passcode }) })
     for (let i = 0; i < 6; i++) expect((await unlock(`nope${i}`)).status).toBe(401)
@@ -216,7 +219,7 @@ describe('a shared folder', () => {
   it('links use the address set in the app', async () => {
     expect((await json('PUT', '/api/share-address', { address: 'not an address' })).status).toBe(400)
     await json('PUT', '/api/share-address', { address: 'https://notes-sydney.example.com/' })
-    const made = await json('POST', '/api/folders/soups0000001/shares', { name: 'Sydney' })
+    const made = { body: (await json('POST', '/api/share-people', { name: 'Sydney', item: { kind: 'folder', id: 'soups0000001' } })).body.person }
     expect(made.body.url).toBe(`https://notes-sydney.example.com/s/${made.body.id}`)
     await json('PUT', '/api/share-address', { address: '' })
   })
@@ -249,7 +252,7 @@ describe('cook mode on a shared recipe', () => {
       ])
     })
     await app.sync.change(noteDocName('plain0000001'), (doc) => void getContent(doc).insert(0, [p('Milk')]))
-    const made = await json('POST', '/api/folders/cookbook0001/shares', { name: 'Sydney' })
+    const made = (await json('POST', '/api/share-people', { name: 'Sydney', item: { kind: 'folder', id: 'cookbook0001' } })).person
     const link = `${sharePort}/s/${made.id}`
 
     const page = await (await fetch(`${link}/n/stew00000001`)).text()
@@ -275,7 +278,7 @@ describe('cook mode on a shared recipe', () => {
     expect((await fetch(`${link}/n/stew00000001`)).headers.get('content-security-policy')).not.toContain('script-src')
 
     // with a passcode: cook mode asks for it too
-    await json('PATCH', `/api/shares/${made.id}`, { passcode: 'carrots!' })
+    await json('PATCH', `/api/share-people/${made.id}`, { passcode: 'carrots!' })
     expect(await (await fetch(`${link}/n/stew00000001/cook`)).text()).toContain('Enter the passcode')
   })
 
@@ -283,5 +286,88 @@ describe('cook mode on a shared recipe', () => {
     const made = await json('POST', '/api/notes/stew00000001/share')
     expect(await (await fetch(`${sharePort}${made.path}`)).text()).toContain(`href="${made.path}/cook"`)
     expect((await fetch(`${sharePort}${made.path}/cook`)).status).toBe(200)
+  })
+})
+
+describe('share pools', () => {
+  const json = (method: string, url: string, body?: unknown) =>
+    fetch(base + url, { method, headers: { ...auth, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => r.json())
+  const page = (link: string, p = '') => fetch(`${sharePort}/s/${link}${p}`).then((r) => r.text())
+
+  it('more for the same person, others added to their pool, pools mixed – each link stays the same', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => {
+      createFolder(ws, { id: 'garden000001', name: 'Garden' })
+      createFolder(ws, { id: 'trips0000001', name: 'Trips' })
+      createFolder(ws, { id: 'work00000001', name: 'Work' })
+      createNote(ws, { id: 'tomato000001', title: 'Tomatoes', folderId: 'garden000001' })
+      createNote(ws, { id: 'lake00000001', title: 'Lake weekend', folderId: 'trips0000001' })
+      createNote(ws, { id: 'plan00000001', title: 'Wedding plan', folderId: 'work00000001' })
+      createNote(ws, { id: 'memo00000001', title: 'Memo', folderId: 'work00000001' })
+    })
+    for (const id of ['tomato000001', 'lake00000001', 'plan00000001', 'memo00000001']) await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, [new Y.XmlElement('paragraph')]))
+
+    // Sydney: the garden, in her own pool
+    const sydney = (await json('POST', '/api/share-people', { name: 'Sydney', item: { kind: 'folder', id: 'garden000001' } })).person
+    const herPool = sydney.pools[0]
+    expect(await page(sydney.id)).toContain('Tomatoes') // one folder: straight into it
+
+    // more for her: a folder and one note from elsewhere, same link
+    await json('PUT', `/api/share-pools/${herPool}/items`, { kind: 'folder', id: 'trips0000001', shared: true })
+    await json('PUT', `/api/share-pools/${herPool}/items`, { kind: 'note', id: 'plan00000001', shared: true })
+    const home = await page(sydney.id)
+    expect(home).toContain('Shared with Sydney')
+    expect(home).toContain('Garden')
+    expect(home).toContain('Trips')
+    expect(home).toContain('Wedding plan')
+    expect(home).not.toContain('Memo')
+    expect(await page(sydney.id, '/n/plan00000001')).toContain('Wedding plan')
+    expect((await fetch(`${sharePort}/s/${sydney.id}/n/memo00000001`)).status).toBe(404)
+    expect((await fetch(`${sharePort}/s/${sydney.id}/f/work00000001`)).status).toBe(404)
+
+    // Mom: her own pool (the trips), and Sydney's too
+    const mom = (await json('POST', '/api/share-people', { name: 'Mom' })).person
+    expect(await page(mom.id)).toContain('Nothing is shared here right now')
+    const momPool = mom.pools[0]
+    await json('PUT', `/api/share-pools/${momPool}/items`, { kind: 'note', id: 'memo00000001', shared: true })
+    await json('PATCH', `/api/share-people/${mom.id}`, { pools: [momPool, herPool] })
+    const momHome = await page(mom.id)
+    expect(momHome).toContain('Memo')
+    expect(momHome).toContain('Garden')
+    expect(momHome).toContain('Wedding plan')
+    // Sydney still doesn't see Mom's pool
+    expect(await page(sydney.id)).not.toContain('Memo')
+
+    // a pool made for both
+    const both = (await json('POST', '/api/share-pools', { name: 'Family', members: [sydney.id, mom.id] })).pool
+    expect(both.members.sort()).toEqual([sydney.id, mom.id].sort())
+
+    // taken out: gone from both
+    await json('PUT', `/api/share-pools/${herPool}/items`, { kind: 'folder', id: 'trips0000001', shared: false })
+    expect((await fetch(`${sharePort}/s/${mom.id}/f/trips0000001`)).status).toBe(404)
+    expect((await fetch(`${sharePort}/s/${sydney.id}/n/lake00000001`)).status).toBe(404)
+
+    // Sydney's link stopped: Mom still sees Sydney's pool
+    await json('DELETE', `/api/share-people/${sydney.id}`)
+    expect((await fetch(`${sharePort}/s/${sydney.id}`)).status).toBe(404)
+    expect(await page(mom.id)).toContain('Garden')
+    // the pool deleted: no longer shared through it
+    await json('DELETE', `/api/share-pools/${herPool}`)
+    expect(await page(mom.id)).not.toContain('Garden')
+  })
+
+  it('folder links from before pools keep working, the same name sharing one pool', async () => {
+    const { Shares } = await import('../src/shares')
+    const db = app.store.db
+    const ins = db.prepare('INSERT INTO shares (id, note_id, folder_id, name, created_at) VALUES (?, ?, ?, ?, ?)')
+    ins.run('oldlinkAAAAAAAAAAAAAAA', '', 'garden000001', 'Gran', 1)
+    ins.run('oldlinkBBBBBBBBBBBBBBB', '', 'work00000001', 'gran', 2)
+    new Shares(app.store)
+    const pools = (await json('GET', '/api/shares')).pools as { name: string; items: unknown[]; members: string[] }[]
+    const gran = pools.find((p) => p.name === 'Gran')!
+    expect(gran.members.sort()).toEqual(['oldlinkAAAAAAAAAAAAAAA', 'oldlinkBBBBBBBBBBBBBBB'])
+    expect(gran.items).toHaveLength(2)
+    const home = await page('oldlinkAAAAAAAAAAAAAAA')
+    expect(home).toContain('Garden')
+    expect(home).toContain('Work')
   })
 })

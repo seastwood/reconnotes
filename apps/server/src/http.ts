@@ -7,7 +7,7 @@ import http from 'node:http'
 import https from 'node:https'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
-import { WORKSPACE_DOC, folderRules, getFolders, noteGroup, readFolder, noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
+import { WORKSPACE_DOC, folderRules, getFolders, getNotes, noteGroup, readFolder, readNote, noteDocName, noteToMarkdown, getStrokes, extractNote, restoreNoteContent } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
 import { loadVersion, snapshotNow } from './versions'
@@ -33,7 +33,7 @@ import { listBackups, runBackup } from './backup'
 import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
 import type { Caller, Devices } from './devices'
-import { Shares, type ShareRow } from './shares'
+import { Shares, type PersonRow, type ShareRow } from './shares'
 import { serveShare } from './shareServer'
 import { importNotes, unpack } from './importNotes'
 import type { Jobs } from './jobs'
@@ -1050,27 +1050,89 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
     if (typeof v !== 'string' || v.length < 4 || v.length > 200) throw new HttpError(400, 'A passcode needs at least 4 characters.')
     return v
   }
-  route('GET', '/api/shares', (req, res) => json(res, 200, { shares: shares.all().map((r) => shareJson(req, r)), address: shareBase(req), port: config.sharePort, addressSet: Boolean(store.getSetting<string>('shareAddress') || config.shareUrl) }))
-  route('GET', `/api/folders/${ID}/shares`, (req, res, [id]) => json(res, 200, { shares: shares.forFolder(id).map((r) => shareJson(req, r)) }))
-  route('POST', `/api/folders/${ID}/shares`, async (req, res, [id]) => {
-    const b = await readJson<{ name?: string; passcode?: string | null }>(req)
-    const ws = sync.getDoc(WORKSPACE_DOC)
-    const all = ws ? [...getFolders(ws).values()].map(readFolder) : []
-    const folder = all.find((f) => f.id === id && !f.trashedAt)
-    if (!folder) throw new HttpError(404, 'This folder hasn’t reached the server yet – try again once it has synced.')
-    if (folderRules(all).get(id)?.lockedBy) throw new HttpError(409, 'A folder with a password (or in one) can’t be shared.')
-    json(res, 200, shareJson(req, shares.shareFolder(id, String(b.name ?? ''), passcode(b.passcode))))
+  const personJson = (req: http.IncomingMessage, p: PersonRow) => ({ ...p, url: `${shareBase(req)}/s/${p.id}` })
+  const sharesPayload = (req: http.IncomingMessage) => ({
+    shares: shares.all().map((r) => shareJson(req, r)),
+    people: shares.people().map((p) => personJson(req, p)),
+    pools: shares.pools(),
+    address: shareBase(req),
+    port: config.sharePort,
+    addressSet: Boolean(store.getSetting<string>('shareAddress') || config.shareUrl),
   })
-  route('PATCH', '/api/shares/([A-Za-z0-9_-]{16,40})', async (req, res, [id]) => {
-    if (!shares.get(id)) throw new HttpError(404, 'This link isn’t shared any more.')
-    const b = await readJson<{ name?: string; passcode?: string | null }>(req)
+  /** A folder or note that may go in a pool: on the server, not deleted, not behind a password. */
+  const shareable = (kind: unknown, id: unknown): { kind: 'folder' | 'note'; id: string } => {
+    const ws = sync.getDoc(WORKSPACE_DOC)
+    const folders = ws ? [...getFolders(ws).values()].map(readFolder) : []
+    const rules = folderRules(folders)
+    if (kind === 'folder' && typeof id === 'string') {
+      if (!folders.some((f) => f.id === id && !f.trashedAt)) throw new HttpError(404, 'This folder hasn’t reached the server yet – try again once it has synced.')
+      if (rules.get(id)?.lockedBy) throw new HttpError(409, 'A folder with a password (or in one) can’t be shared.')
+      return { kind, id }
+    }
+    if (kind === 'note' && typeof id === 'string') {
+      const m = ws ? getNotes(ws).get(id) : undefined
+      const n = m ? readNote(m) : null
+      if (!n || n.trashedAt || !sync.getDoc(noteDocName(id))) throw new HttpError(404, 'This note hasn’t reached the server yet – try again once it has synced.')
+      if (n.folderId && rules.get(n.folderId)?.lockedBy) throw new HttpError(409, 'A note in a folder with a password can’t be shared.')
+      return { kind, id }
+    }
+    throw new HttpError(400, 'A folder or a note')
+  }
+  const LINK_ID = '([A-Za-z0-9_-]{16,40})'
+  const POOL_ID = '([A-Za-z0-9_-]{6,40})'
+  route('GET', '/api/shares', (req, res) => json(res, 200, sharesPayload(req)))
+  // people: one link each, for good; what they see is in the pools they're in
+  route('POST', '/api/share-people', async (req, res) => {
+    const b = await readJson<{ name?: string; passcode?: string | null; pools?: string[]; item?: { kind?: string; id?: string } }>(req)
+    if (!String(b.name ?? '').trim()) throw new HttpError(400, 'Who is it for?')
+    const item = b.item ? shareable(b.item.kind, b.item.id) : undefined
+    const p = shares.addPerson(String(b.name), passcode(b.passcode), { pools: Array.isArray(b.pools) ? b.pools.map(String) : undefined, item })
+    json(res, 200, { person: personJson(req, p), ...sharesPayload(req) })
+  })
+  route('PATCH', `/api/share-people/${LINK_ID}`, async (req, res, [id]) => {
+    if (!shares.person(id)) throw new HttpError(404, 'This link isn’t shared any more.')
+    const b = await readJson<{ name?: string; passcode?: string | null; pools?: string[] }>(req)
     if (typeof b.name === 'string') shares.rename(id, b.name)
     if ('passcode' in b) shares.setPasscode(id, passcode(b.passcode))
-    json(res, 200, shareJson(req, shares.get(id)!))
+    if (Array.isArray(b.pools)) shares.setPersonPools(id, b.pools.map(String))
+    json(res, 200, sharesPayload(req))
   })
-  route('DELETE', '/api/shares/([A-Za-z0-9_-]{16,40})', (_req, res, [id]) => {
+  route('DELETE', `/api/share-people/${LINK_ID}`, (req, res, [id]) => {
     shares.revoke(id)
-    json(res, 200, { ok: true })
+    json(res, 200, sharesPayload(req))
+  })
+  // pools: sets of shared folders and notes
+  route('POST', '/api/share-pools', async (req, res) => {
+    const b = await readJson<{ name?: string; members?: string[] }>(req)
+    const pool = shares.addPool(String(b.name ?? ''))
+    for (const m of Array.isArray(b.members) ? b.members.map(String) : []) {
+      const p = shares.person(m)
+      if (p) shares.setPersonPools(m, [...p.pools, pool.id])
+    }
+    json(res, 200, { pool: shares.pools().find((p) => p.id === pool.id), ...sharesPayload(req) })
+  })
+  route('PATCH', `/api/share-pools/${POOL_ID}`, async (req, res, [id]) => {
+    if (!shares.hasPool(id)) throw new HttpError(404, 'That pool is gone.')
+    const b = await readJson<{ name?: string }>(req)
+    if (typeof b.name === 'string') shares.renamePool(id, b.name)
+    json(res, 200, sharesPayload(req))
+  })
+  route('DELETE', `/api/share-pools/${POOL_ID}`, (req, res, [id]) => {
+    shares.deletePool(id)
+    json(res, 200, sharesPayload(req))
+  })
+  route('PUT', `/api/share-pools/${POOL_ID}/items`, async (req, res, [id]) => {
+    if (!shares.hasPool(id)) throw new HttpError(404, 'That pool is gone.')
+    const b = await readJson<{ kind?: string; id?: string; shared?: boolean }>(req)
+    // taking something out needs no checks (it may be deleted already)
+    const item: { kind: 'folder' | 'note'; id: string } =
+      b.shared === false && (b.kind === 'folder' || b.kind === 'note') && typeof b.id === 'string' ? { kind: b.kind, id: b.id } : shareable(b.kind, b.id)
+    shares.setPoolItem(id, item.kind, item.id, b.shared !== false)
+    json(res, 200, sharesPayload(req))
+  })
+  route('DELETE', `/api/shares/${LINK_ID}`, (req, res, [id]) => {
+    shares.revoke(id)
+    json(res, 200, sharesPayload(req))
   })
   route('PUT', '/api/share-address', async (req, res) => {
     const b = await readJson<{ address?: string | null }>(req)

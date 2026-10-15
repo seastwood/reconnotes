@@ -1,6 +1,13 @@
 # Sharing folders
 
-Share a folder with someone, and they can read everything in it, read-only and always up to date. That includes its subfolders, notes, pictures, drawings, recordings and files. Nobody else on your server, and nothing else on it, can be reached through their link. Each person gets a link of their own, with an optional passcode, and you can stop each link on its own at any time.
+Share folders and notes with people, and they can read everything you've shared with them, read-only and always up to date. That includes subfolders, notes, pictures, drawings, recordings and files. Nobody else on your server, and nothing else on it, can be reached through their link.
+
+**People and pools.** Each person has **one link, for good**, with an optional passcode. What they see is in **pools**: a pool is a set of folders and notes. A person sees everything in every pool they're in.
+
+- **Share more with someone:** add it to their pool. Their link stays the same.
+- **Show someone else the same things:** add them to that pool (*Settings › Sharing & backups*, the pool's name under their name).
+- **Mix:** put someone in more than one pool – e.g. Mom in her own pool and in Sydney's. She sees both; Sydney still sees only hers.
+- **Stop a link:** the person sees nothing any more; their pools stay, with anyone else in them.
 
 ## What they see, and what they can't
 
@@ -10,13 +17,16 @@ Share a folder with someone, and they can read everything in it, read-only and a
 - **They can't reach** notes outside the folder. A link from a shared note to one outside it shows only its words, not the note. Folders with a password (and everything in them) are left out, and so are deleted notes and templates.
 - Move a note out of the folder, and it's no longer shared. What's in a shared folder is what's shared, so keep in it only what you mean to share.
 
-## Share a folder
+## Share a folder or a note
 
-1. In the sidebar, open the folder's **⋯** menu › **Share folder…**
-2. Type who it's for (e.g. *Sydney*), and a passcode if you want one. They're asked for it once on each of their devices.
-3. **Make their link**. It's copied, ready to send.
+1. A folder: in the sidebar, its **⋯** menu › **Share with…**. A note: its **⋯** menu › **Share with…**.
+2. Tick the pools it goes in – or, under *Share with someone new*, type who it's for (e.g. *Sydney*) and a passcode if you want one, and **Make their link**. They get a pool of their own with it in, and their link is copied, ready to send.
 
-The folder shows a 👥 mark in the sidebar. Its **⋯ › Sharing…** shows each person's link and when they last opened it. That's also where you add or change a passcode (a new passcode asks again on every device) and **Stop sharing**, which ends that link at once. **Settings › Data › Shared with others** lists everything that's shared, folders and single notes.
+A shared folder shows a 👥 mark in the sidebar. **Settings › Sharing & backups** has everyone you share with (their link, passcode, when they last opened it, and which pools they see) and every pool (who sees it, what's in it – take anything out with ✕). A new passcode asks again on every device. Single notes' own links (*Share a read-only link…*, for anyone) are listed there too.
+
+Opening their link, someone with one shared folder goes straight into it; someone with more sees a list of everything shared with them.
+
+Links made before pools keep working: each became a person with a pool of their own (links with the same name share one pool).
 
 ## The share port
 
