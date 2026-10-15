@@ -5023,8 +5023,10 @@ a.button {
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
+/* keyboard up: the status bar's room only if iOS hasn't already slid the page down by it
+   (in the app it doesn't – the title would sit under the clock) */
 .keyboard-open .ask-chat-head {
-  padding-top: 6px;
+  padding-top: calc(max(0px, env(safe-area-inset-top) - var(--app-top, 0px)) + 6px);
 }
 .ask-chat-back {
   display: inline-flex;
