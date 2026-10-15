@@ -189,59 +189,86 @@ export class MeaningIndex {
   }
 
   /**
-   * Notes about the same things as this one, closest first: each note's best
-   * passage against the gist of this note (the average of its passages).
-   * Uses the vectors already made for search – no AI call.
+   * Notes about the same things as this one, closest first. Uses the vectors already made for
+   * search – no AI call.
    *
-   * Embedding models rate almost any two notes as somewhat alike (0.5–0.65
-   * is usual for unrelated text), so a note only counts as related when it's
-   * clearly closer than that: above `minScore`, and – in a library big
-   * enough to tell – well above how alike notes typically are to this one.
+   * Each note is compared as a whole (the average of its passages) with each other note as a whole:
+   * a long note – a meeting, a manual – has so many passages that one of them is always somewhat
+   * like anything, so passage by passage it turned up as "related" to everything. And embedding models
+   * rate almost any two notes as somewhat alike, so a note only counts when it stands out:
+   *  - above `minScore`;
+   *  - in a library big enough to tell, well above how alike notes usually are to this one – and
+   *    this one well above how alike notes usually are to it (both ways: a note that's a bit like
+   *    everything isn't related to anything in particular);
+   *  - and sharing what they're about in so many words: uncommon words both use (#tags count).
    * Very short notes (a title, a line) say too little to compare.
    */
   related(noteId: string, limit = 5, minScore = 0.7): MeaningHit[] {
     const model = this.modelKey()
     if (!model) return []
     const all = this.vectors(model)
-    const own = all.filter((c) => c.noteId === noteId)
-    if (!own.length || own.reduce((n, c) => n + c.passage.length, 0) < MIN_RELATED_TEXT) return []
-    const gist = new Float32Array(own[0].vec.length)
-    for (const c of own) for (let i = 0; i < gist.length; i++) gist[i] += c.vec[i] / own.length
-    const best = new Map<string, MeaningHit>()
+    const byNote = new Map<string, { vecs: Float32Array[]; text: string; passages: { passage: string; vec: Float32Array }[] }>()
     for (const c of all) {
-      if (c.noteId === noteId || c.passage.length < MIN_RELATED_PASSAGE) continue
-      const score = cosine(gist, c.vec)
-      const cur = best.get(c.noteId)
-      if (!cur || score > cur.score) best.set(c.noteId, { noteId: c.noteId, score, passage: c.passage })
+      const n = byNote.get(c.noteId) ?? { vecs: [], text: '', passages: [] }
+      n.vecs.push(c.vec)
+      n.text += `\n${c.passage}`
+      n.passages.push(c)
+      byNote.set(c.noteId, n)
     }
-    // how alike notes usually are to this one (all of them, before the word check below)
-    const scores = [...best.values()].map((h) => h.score)
-    // and they must share what they're about in so many words: at least two
-    // uncommon words (in at most a few notes; a #tag counts as its word). Similar "feel" alone
-    // (two rambling recordings, two to-do lists) isn't related.
-    const textOf = new Map<string, string>()
-    for (const c of all) textOf.set(c.noteId, `${textOf.get(c.noteId) ?? ''}\n${c.passage}`)
-    const wordSets = new Map([...textOf].map(([id, t]) => [id, wordsOf(t)]))
+    const mine = byNote.get(noteId)
+    if (!mine || mine.text.length < MIN_RELATED_TEXT) return []
+    const gistOf = (vecs: Float32Array[]) => {
+      const g = new Float32Array(vecs[0].length)
+      for (const v of vecs) for (let i = 0; i < g.length; i++) g[i] += v[i] / vecs.length
+      return g
+    }
+    const gists = new Map<string, Float32Array>()
+    for (const [id, n] of byNote) if (n.text.length >= MIN_RELATED_TEXT) gists.set(id, gistOf(n.vecs))
+    const me = gists.get(noteId)!
+    const others = [...gists.keys()].filter((id) => id !== noteId)
+    const sim = new Map(others.map((id) => [id, cosine(me, gists.get(id)!)]))
+
+    // how alike notes usually are to a note: mean and spread of its likeness to all the others
+    const spread = (scores: number[]) => {
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length
+      return { mean, sd: Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length) || 1e-6 }
+    }
+    const tellable = others.length >= 8
+    const usual = tellable ? spread([...sim.values()]) : null
+
+    // uncommon words: in at most a few notes
+    const wordSets = new Map([...byNote].map(([id, n]) => [id, wordsOf(n.text)]))
     const df = new Map<string, number>()
     for (const ws of wordSets.values()) for (const w of ws) df.set(w, (df.get(w) ?? 0) + 1)
-    const rare = Math.max(3, Math.ceil(wordSets.size * 0.08))
-    const mine = wordSets.get(noteId) ?? new Set<string>()
+    const rare = Math.max(2, Math.ceil(wordSets.size * 0.04))
+    const myWords = wordSets.get(noteId) ?? new Set<string>()
     const sharesTopic = (id: string) => {
       const theirs = wordSets.get(id) ?? new Set<string>()
       let shared = 0
-      for (const w of mine) if (theirs.has(w) && (df.get(w) ?? 0) <= rare) shared++
+      for (const w of myWords) if (theirs.has(w) && (df.get(w) ?? 0) <= rare) shared++
       return shared >= 2
     }
-    for (const id of [...best.keys()]) if (!sharesTopic(id)) best.delete(id)
 
-    let floor = minScore
-    if (scores.length >= 8) {
-      // how alike notes usually are to this one: related ones stand out from that
-      const mean = scores.reduce((a, b) => a + b, 0) / scores.length
-      const sd = Math.sqrt(scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length)
-      floor = Math.max(floor, mean + 2 * sd)
+    const hits: MeaningHit[] = []
+    for (const id of others) {
+      const score = sim.get(id)!
+      if (score < minScore) continue
+      if (usual && score < usual.mean + 2 * usual.sd) continue
+      if (tellable) {
+        // from the other note's side too
+        const g = gists.get(id)!
+        const theirs = spread([...gists].filter(([o]) => o !== id).map(([, v]) => cosine(g, v)))
+        if (score < theirs.mean + 1.5 * theirs.sd) continue
+      }
+      if (!sharesTopic(id)) continue
+      // shown with its passage closest to this note
+      const best = byNote.get(id)!.passages.filter((p) => p.passage.length >= MIN_RELATED_PASSAGE).reduce<{ passage: string; s: number } | null>((b, p) => {
+        const s = cosine(me, p.vec)
+        return !b || s > b.s ? { passage: p.passage, s } : b
+      }, null)
+      hits.push({ noteId: id, score, passage: best?.passage ?? '' })
     }
-    const ranked = [...best.values()].filter((h) => h.score >= floor).sort((a, b) => b.score - a.score)
+    const ranked = hits.sort((a, b) => b.score - a.score)
     // and close to the best one (not a long tail of maybes)
     return ranked.filter((h) => h.score >= ranked[0].score - 0.1).slice(0, limit)
   }
