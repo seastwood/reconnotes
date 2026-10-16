@@ -84,10 +84,16 @@ const DOCK_WIDTH = 'reconnotes.chatWidth'
 const CHAT_SORT = 'reconnotes.chatSort'
 type ChatSort = 'subject' | 'recent' | 'oldest' | 'unread'
 
+const clampDock = (w: number) => Math.round(Math.max(320, Math.min(w, innerWidth * 0.6)))
+/** how wide the panel beside the note is (or will be, opening) */
+const dockWidth = () => clampDock(safeLocalGet<number>(DOCK_WIDTH, 420))
+
 /** The panel beside the note: its left edge dragged to make it wider or narrower (remembered). */
 function ChatDock({ children }: { children: ReactNode }) {
   const [width, setWidth] = useState(() => safeLocalGet<number>(DOCK_WIDTH, 420))
-  const clamp = (w: number) => Math.round(Math.max(320, Math.min(w, innerWidth * 0.6)))
+  const clamp = clampDock
+  // being swiped in from the edge: starts off past it (then the finger moves it)
+  const dragX = useStore(askChat, (s) => s.dragX)
   const drag = (e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
@@ -108,7 +114,7 @@ function ChatDock({ children }: { children: ReactNode }) {
     window.addEventListener('pointerup', up)
   }
   return (
-    <aside className="ask-dock" style={{ width: clamp(width) }}>
+    <aside className="ask-dock" style={{ width: clamp(width), ...(dragX != null ? { marginRight: -dragX } : {}) }}>
       <div className="ask-dock-edge" onPointerDown={drag} role="separator" aria-orientation="vertical" aria-label="Drag to resize the chat" title="Drag to resize" />
       {children}
     </aside>
@@ -132,12 +138,21 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
     let d: Drag | null = null
     // what moves: the chat over the note (phone), or the panel beside it (and its width)
     const el = () => (dockedRef.current ? document.querySelector<HTMLElement>('.ask-dock') : document.querySelector<HTMLElement>('.ask-chat:not(.docked)'))
-    const W = () => (dockedRef.current ? (document.querySelector('.ask-dock')?.getBoundingClientRect().width ?? innerWidth) : innerWidth)
+    // (beside the note: its width – known before it's there, from what it was last)
+    const W = () => (dockedRef.current ? (document.querySelector('.ask-dock')?.getBoundingClientRect().width ?? dockWidth()) : innerWidth)
+    // x: how far off to the right it is. Beside the note it slides out past the edge (a negative
+    // margin), so the note widens with it as it goes – no gap left behind
     const place = (x: number, animate: boolean) => {
       const e = el()
       if (!e) return
-      e.style.transition = animate ? 'transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'
-      e.style.transform = `translateX(${x}px)`
+      const ease = '220ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+      if (dockedRef.current) {
+        e.style.transition = animate ? `margin-right ${ease}` : 'none'
+        e.style.marginRight = `${-x}px`
+      } else {
+        e.style.transition = animate ? `transform ${ease}` : 'none'
+        e.style.transform = `translateX(${x}px)`
+      }
     }
     const settle = (x: number, then: () => void) => {
       place(x, true)
@@ -147,6 +162,7 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
         if (e) {
           e.style.transition = ''
           e.style.transform = ''
+          e.style.marginRight = ''
         }
       }, 230)
     }
@@ -158,7 +174,7 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
       const showing = Boolean((s.target && !s.hidden) || s.browsing)
       if (dockedRef.current) {
         // beside the note: a plain swipe shows or hides the panel
-        if (!showing && t.clientX > W() - EDGE) {
+        if (!showing && t.clientX > innerWidth - EDGE) {
           const target = openableRef.current()
           if (target) d = { mode: 'open', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target, last: [] }
         } else if (showing) {
@@ -184,12 +200,10 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
         if (Math.abs(dx) < 8) return
         if ((d.mode === 'open' && dx > 0) || (d.mode === 'close' && dx < 0)) return void (d = null)
         d.locked = true
-        if (dockedRef.current && d.mode === 'open') return
-        // in it comes, from the edge
+        // in it comes, from the edge (beside the note: from past the edge, the note narrowing)
         if (d.mode === 'open') askChat.set({ target: d.target, hidden: false, browsing: false, dragX: W() })
       }
       if (ev.cancelable) ev.preventDefault()
-      if (dockedRef.current && d.mode === 'open') return
       d.last = [...d.last.slice(-4), { x: t.clientX, t: performance.now() }]
       place(d.mode === 'open' ? Math.max(0, Math.min(W(), W() + dx)) : Math.max(0, dx), false)
     }
@@ -199,10 +213,6 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
       d = null
       const t = ev.changedTouches[0]
       const dx = (t?.clientX ?? drag.x0) - drag.x0
-      if (dockedRef.current && drag.mode === 'open') {
-        if (dx < -50 && drag.target) openAskChat(drag.target)
-        return
-      }
       // how fast at the end (px/ms; + rightwards)
       const a = drag.last[0]
       const b = drag.last[drag.last.length - 1]
