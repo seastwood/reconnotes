@@ -52,7 +52,7 @@ import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { attendeeNames, meetingNotesText } from './meetingNotes'
 import { askRefs, markEditReverted, saveTurn, setAskRefs } from './askHistory'
-import { applyEdit, revertEdit, type EditRecord } from './noteEdit'
+import { applyEdit, blockKey, diffBlocks, revertEdit, wholeNoteAsList, type EditRecord } from './noteEdit'
 import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
@@ -652,41 +652,75 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     if (md.length > 40_000) throw new Error('This note is too long to edit with AI in one go.')
     const history = historyFromInput(job.input.history)
     reportProgress('Changing the note…')
-    const prompt = `You edit a note as its owner asks. Below is the whole note in Markdown, then the request.
+    // (asked first and last: a small model keeps to what's freshest)
+    const editPrompt = (again: boolean) => `Rewrite the note below so it does what its owner asks.
 
-Write back the WHOLE note with the request carried out, and nothing else changed:
-- Every other word, line, heading and list stays exactly as it is, in the same order.
-- Keep each line like ⟦IMAGE:…⟧, ⟦DRAWING:…⟧, ⟦AUDIO:…⟧ or ⟦FILE:…⟧ exactly, on its own line – they are pictures, drawings, recordings and files. Move one only if asked; remove one only if asked.
+The owner asks: ${request}
+
+How:
+- Carry out the request fully. "this", "it" or "the note" means the whole note unless a part is named – e.g. "make this a checklist" turns every line of it into a checklist item.${again ? '\n- Your last answer gave the note back unchanged. That is wrong: the request asks for a change – make it this time.' : ''}
+- Change nothing the request doesn't ask about: other words, lines and headings stay as they are, in the same order.
+- Keep each line like ⟦IMAGE:…⟧, ⟦DRAWING:…⟧, ⟦AUDIO:…⟧ or ⟦FILE:…⟧ exactly, on its own line – they are pictures, drawings, recordings and files. Move or remove one only if asked.
 - Keep [[links]], #tags and dates like !2026-10-14 as they are.
-- Markdown: "# " headings, "- " bullets, "1. " numbered lists, "- [ ] " checklist items ("- [x] " ticked), | tables |, **bold**, *italic*.
-- Checklists come in two kinds: to-dos (tasks to do), and plain checklists for things to tick through – a shopping or packing list – which have a line "<!-- list -->" just before them. Keep each list's kind; for a new checklist of things to buy, pack or bring, put "<!-- list -->" on the line before it.
-- Don't add anything the request doesn't ask for: no notes, no explanations, no code fences.
-
-After the note, write a line with only "===CHANGED===" and then one short sentence saying what you changed (e.g. "Made the groceries a checklist.").
-${history.length ? `\nEarlier in this chat:\n${history.map((h) => `Request: ${h.question}\nDone: ${h.answer.slice(0, 500)}`).join('\n')}\n` : ''}
-The note:
+- Markdown: "# " headings, "- " bullets, "1. " numbered lists, | tables |, **bold**, *italic*.
+- Lists you tick: "- [ ] " items ("- [x] " ticked). To-dos (tasks to do) are just those lines. A checklist of things to buy, pack or bring – a shopping list, ingredients – has a line "<!-- list -->" just before its items. Keep each existing list's kind.
+- No notes, explanations or code fences.
+${history.length ? `\nEarlier in this chat:\n${history.map((h) => `Asked: ${h.question}\nDone: ${h.answer.slice(0, 500)}`).join('\n')}\n` : ''}
+The note, between <<< and >>>:
 <<<
 ${md}
 >>>
 
-The request: ${request}`
+Write the whole note again with the change made. Then a line with only "===CHANGED===" and one short sentence saying what you changed.
+The request again: ${request}`
     const budget = Math.min(16000, Math.max(1200, Math.ceil(md.length / 2.5) + 600))
-    const { text, agent } = await ai.editNote(prompt, budget, () => reportProgress('Changing the note…'))
-    const split = text.split(/\n?\s*={3,}\s*CHANGED\s*={3,}\s*\n?/i)
-    let markdown = split[0].replace(/^<<<\s*\n|\n\s*>>>\s*$/g, '').trim()
-    const said = (split[1] ?? '').trim().split('\n')[0]?.trim() ?? ''
-    if (!markdown) throw new Error('The AI gave nothing back – the note is unchanged.')
     const note = extractNote(doc)
-    markdown = keepCompileExtras(markdown, markers, note.tags, [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1]))
-    // the AI's version, as blocks, in a document of its own (to compare and copy from)
     const { ctx } = rebuildContext(doc)
-    const scratch = new Y.Doc()
-    const nodes = markdownToNodes(markdown, { attach: () => null, noteFor: () => null, ...ctx })
-    if (nodes.length) scratch.getXmlFragment('content').insert(0, nodes)
+    const linksIn = [...md.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((m) => m[1])
+    // the AI's version, as blocks, in a document of its own (to compare and copy from)
+    const asBlocks = (markdown: string) => {
+      const scratch = new Y.Doc()
+      const nodes = markdownToNodes(keepCompileExtras(markdown, markers, note.tags, linksIn), { attach: () => null, noteFor: () => null, ...ctx })
+      if (nodes.length) scratch.getXmlFragment('content').insert(0, nodes)
+      return scratch
+    }
+    const differs = (scratch: Y.Doc) => {
+      const keys = (f: Y.XmlFragment) => f.toArray().filter((c): c is Y.XmlElement => c instanceof Y.XmlElement).map(blockKey)
+      return diffBlocks(keys(getContent(doc)), keys(scratch.getXmlFragment('content'))).length > 0
+    }
+    let scratch: Y.Doc | null = null
+    let said = ''
+    let agent = ''
+    for (const again of [false, true]) {
+      const out = await ai.editNote(editPrompt(again), budget, () => reportProgress(again ? 'Changing the note (trying again)…' : 'Changing the note…'))
+      agent = out.agent
+      const split = out.text.split(/\n?\s*={3,}\s*CHANGED\s*={3,}\s*\n?/i)
+      const markdown = split[0].replace(/^<<<\s*\n|\n\s*>>>\s*$/g, '').trim()
+      said = (split[1] ?? '').trim().split('\n')[0]?.trim() ?? ''
+      if (!markdown) continue
+      const made = asBlocks(markdown)
+      if (differs(made)) {
+        scratch = made
+        break
+      }
+      log.warn(`AI edit gave the note back unchanged${again ? ' again' : ''} ("${request.slice(0, 80)}"): ${markdown.slice(0, 160).replace(/\n/g, ' ⏎ ')}`)
+    }
+    // still unchanged, and it's the whole note made a list: done here
+    if (!scratch) {
+      const listed = wholeNoteAsList(md, request)
+      if (listed) {
+        const made = asBlocks(listed.markdown)
+        if (differs(made)) {
+          scratch = made
+          said = listed.said
+        }
+      }
+    }
+    if (!scratch) return { answer: 'Your AI gave the note back unchanged. Try saying which part to change and how – e.g. “make the lines under Groceries a checklist”.', sources: [], changed: 0, agent, noteId }
     if (versionStore) snapshotNow(versionStore, noteDocName(noteId), doc, 'Before an AI edit')
     let applied: ReturnType<typeof applyEdit> | null = null
     await sync.change(noteDocName(noteId), (d) => {
-      applied = applyEdit(getContent(d), scratch.getXmlFragment('content'))
+      applied = applyEdit(getContent(d), scratch!.getXmlFragment('content'))
     })
     const { record, changed } = applied! as ReturnType<typeof applyEdit>
     if (changed) fs.writeFileSync(jobs.filePath(job.id), JSON.stringify(record))

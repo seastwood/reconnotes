@@ -75,3 +75,19 @@ describe('plain checklists in Markdown', () => {
     expect(lists.map((l) => l.getAttribute('kind') ?? null)).toEqual(['list', null])
   })
 })
+
+describe('making the whole note a list, when the AI won’t', async () => {
+  const { wholeNoteAsList } = await import('../src/noteEdit')
+  const md = '3 lbs ground beef\n\n2 large yellow onions\n\n# Toppings\n\nSour cream\n\n⟦IMAGE:abc12345⟧'
+  it('turns each line into an item, keeping headings and pictures', () => {
+    expect(wholeNoteAsList(md, 'Convert this into a checklist')?.markdown).toBe(
+      '<!-- list -->\n- [ ] 3 lbs ground beef\n\n- [ ] 2 large yellow onions\n\n# Toppings\n\n<!-- list -->\n- [ ] Sour cream\n\n⟦IMAGE:abc12345⟧',
+    )
+    expect(wholeNoteAsList(md, 'make it a numbered list')?.markdown).toContain('1. 3 lbs ground beef\n\n2. 2 large yellow onions')
+    expect(wholeNoteAsList(md, 'make this a to-do list')?.markdown).not.toContain('<!-- list -->')
+  })
+  it('leaves a request about a part of the note to the AI', () => {
+    expect(wholeNoteAsList(md, 'make the lines under Toppings a checklist')).toBeNull()
+    expect(wholeNoteAsList(md, 'fix the spelling')).toBeNull()
+  })
+})

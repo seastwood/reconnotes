@@ -144,3 +144,51 @@ export function revertEdit(frag: Y.XmlFragment, record: EditRecord): boolean {
   }
   return true
 }
+
+/**
+ * "Make this a checklist / bulleted / numbered list", of the whole note, done without the AI (when it
+ * gave the note back unchanged): each line of text becomes an item – headings, pictures, quotes,
+ * tables and lists already there stay as they are. Null: not that kind of request.
+ */
+export function wholeNoteAsList(md: string, request: string): { markdown: string; said: string } | null {
+  const r = request.toLowerCase()
+  // about the whole note ("this", "it", "the note"), not a part of it
+  if (!/\b(this|it|the note|this note|everything|all of (?:it|this)|the whole (?:note|thing)|the list|these)\b/.test(r)) return null
+  if (/\b(under|section|part|paragraph|heading|first|last|only|except|line \d|lines \d)\b/.test(r)) return null
+  const kind = /\bnumber(?:ed)?\b/.test(r)
+    ? 'numbered'
+    : /\bbullet/.test(r)
+      ? 'bullets'
+      : /\bto-?dos?\b|\btasks?\b/.test(r)
+        ? 'todo'
+        : /\bcheck ?list|\btick|\bshopping|\bgrocer|\bpacking/.test(r)
+          ? 'checklist'
+          : null
+  if (!kind) return null
+  const out: string[] = []
+  let inList = false
+  let n = 1
+  let made = 0
+  for (const line of md.split('\n')) {
+    const t = line.trim()
+    const keep = !t || /^(#|⟦|>|\||```|<!--|[-*+] |\d+[.)] )/.test(t)
+    if (keep) {
+      if (t) inList = false
+      out.push(line)
+      continue
+    }
+    if (!inList) {
+      // one list for a run of lines (blank lines between them don't split it)
+      while (out.length && !out[out.length - 1].trim()) out.pop()
+      if (out.length) out.push('')
+      if (kind === 'checklist') out.push('<!-- list -->')
+      inList = true
+      n = 1
+    }
+    out.push(kind === 'numbered' ? `${n++}. ${t}` : kind === 'bullets' ? `- ${t}` : `- [ ] ${t}`)
+    made++
+  }
+  if (!made) return null
+  const what = kind === 'numbered' ? 'a numbered list' : kind === 'bullets' ? 'a bulleted list' : kind === 'todo' ? 'a to-do list' : 'a checklist'
+  return { markdown: out.join('\n'), said: `Made the note ${what}.` }
+}
