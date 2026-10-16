@@ -36,6 +36,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end (server + two browser devices)
         run: npm run e2e -- e2e-screenshots
+      - name: End-to-end features (chat Edit, suggestions, due times, Due views, Undo, sync status)
+        run: npm run e2e:features -- e2e-screenshots
       - name: Keep screenshots
         if: always()
         uses: actions/upload-artifact@v5
