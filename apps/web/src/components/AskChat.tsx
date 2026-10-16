@@ -8,7 +8,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { chatList, forgetChat, markChatSeen, refreshChats, type ChatBrief } from '../lib/chatList'
 import { useMedia } from '../lib/media'
 import { useWorkspace } from '../lib/workspace'
-import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
+import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, notePart, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
 import { Popover } from './Popover'
 import { useAskHistory, when, type Conversation, type EditChange } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
@@ -274,6 +274,11 @@ function AskChat({
     safeLocalSet(EDITS, { ...safeLocalGet<Record<string, boolean>>(EDITS, {}), [key]: v })
   }
   const edit = canEdit && editing
+  // the part of the note selected in it: an edit changes just that (unless set aside)
+  const part = useStore(notePart, (p) => (p.part && p.part.noteId === target.noteId ? p.part : null))
+  const [partOff, setPartOff] = useState<string | null>(null)
+  const partKey = part ? `${part.from}-${part.to}-${part.text}` : null
+  const selected = edit && part && partOff !== partKey ? part : null
   const jobs = useJobs((s) => s.jobs)
   const conversation = chatId ? history.list?.find((c) => c.id === chatId) : undefined
   const saved = conversation?.turns ?? []
@@ -334,6 +339,7 @@ function AskChat({
       tzOffset: new Date().getTimezoneOffset(),
       question,
       ...(as === 'general' ? { mode: 'general' } : as === 'edit' ? { mode: 'edit' } : {}),
+      ...(as === 'edit' && selected ? { part: { from: selected.from, to: selected.to, text: selected.text } } : {}),
     }
     try {
       if (!chatId) {
@@ -597,10 +603,33 @@ function AskChat({
           </div>
         )}
       </div>
+      {edit && (
+        <div className="ask-edit-tools">
+          {selected && (
+            <span className="ask-edit-part" title={selected.text}>
+              <span>
+                Just the selected part: <q>{selected.text.replace(/\s+/g, ' ').slice(0, 60)}</q>
+              </span>
+              <button className="icon" onClick={() => setPartOff(partKey)} aria-label="Change the whole note instead" title="Change the whole note instead">
+                <X size={13} />
+              </button>
+            </span>
+          )}
+          <div className="ask-quick" role="group" aria-label="Quick changes">
+            {QUICK_EDITS.map((q) => (
+              <button key={q.label} disabled={busy} onClick={() => void send(q.ask, 'edit').catch(() => {})} title={q.ask}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <ChatInput
         placeholder={
           edit
-            ? 'Tell your AI what to change – “make the list a checklist”…'
+            ? selected
+              ? 'What to change in the selected part…'
+              : 'Tell your AI what to change – “make the list a checklist”…'
             : mode === 'general'
             ? chatId
               ? 'Ask a follow-up…'
@@ -636,6 +665,18 @@ const MODES = 'reconnotes.askMode'
 /** a request to change the note, not a question about it ("turn this into a checklist", "sort the list") */
 const CHANGE_REQUEST =
   /^\s*(?:please\s+|can you\s+|could you\s+|would you\s+)*(?:make|turn|convert|change|format|reformat|rewrite|reword|organi[sz]e|reorgani[sz]e|sort|alphabeti[sz]e|put|move|add|insert|remove|delete|fix|correct|clean up|tidy|split|merge|combine|group|number|bullet|bold|highlight|rename|replace|translate|shorten|expand)\b/i
+
+/** one tap changes in Edit (the selected part, or the whole note) */
+const QUICK_EDITS = [
+  { label: 'Fix spelling', ask: 'Fix the spelling, grammar and punctuation. Change nothing else.' },
+  { label: 'Tidy formatting', ask: 'Tidy up the formatting: clear headings, lists where things are listed, and consistent spacing. Keep every word.' },
+  { label: 'Checklist', ask: 'Make this a checklist (round checks) – each line an item.' },
+  { label: 'To-do list', ask: 'Make this a to-do list – each line a to-do.' },
+  { label: 'Bullet points', ask: 'Make this bullet points – each line or point a bullet.' },
+  { label: 'Shorter', ask: 'Make this shorter and clearer, keeping every fact, name, number and date.' },
+  { label: 'Sort A–Z', ask: 'Sort the list items alphabetically.' },
+  { label: 'Add headings', ask: 'Add short headings that break this into sections. Keep every word.' },
+]
 
 /** the chat windows set to Edit (by key) */
 const EDITS = 'reconnotes.askEdit'

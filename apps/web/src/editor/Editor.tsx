@@ -36,6 +36,7 @@ import { CodeCopy } from './codeCopy'
 import { MeetingSetup } from './MeetingSetup'
 import { useStore } from '../lib/store'
 import { meetingSetup } from '../lib/meeting'
+import { notePart } from '../lib/askChat'
 import { ListenButtons } from './listenButtons'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
@@ -180,6 +181,31 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
     },
     [doc, readOnly],
   )
+  // a selection (whole blocks, roughly): an Edit in the note's chat changes just that part
+  useEffect(() => {
+    if (!editor) return
+    let t: ReturnType<typeof setTimeout> | undefined
+    const update = () => {
+      clearTimeout(t)
+      t = setTimeout(() => {
+        const { from, to, empty, $from, $to } = editor.state.selection
+        const text = empty ? '' : editor.state.doc.textBetween(from, to, '\n', ' ').trim()
+        if (!text) {
+          if (notePart.get().part?.noteId === noteId) notePart.set({ part: null })
+          return
+        }
+        // a selection ending right at the start of a block doesn't take that block in
+        const last = $to.parentOffset === 0 && $to.index(0) > $from.index(0) ? $to.index(0) : $to.index(0) + 1
+        notePart.set({ part: { noteId, from: $from.index(0), to: last, text: text.slice(0, 2000) } })
+      }, 150)
+    }
+    editor.on('selectionUpdate', update)
+    return () => {
+      clearTimeout(t)
+      editor.off('selectionUpdate', update)
+      if (notePart.get().part?.noteId === noteId) notePart.set({ part: null })
+    }
+  }, [editor, noteId])
   const editorRef = useRef<TiptapEditor | null>(null)
   editorRef.current = editor
   editorForPicker.current = editor

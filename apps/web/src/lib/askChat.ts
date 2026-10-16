@@ -121,3 +121,15 @@ export function openChatRef(ref: ChatRef) {
   }
   openChatAt(ALL_NOTES, ref.thread)
 }
+
+/**
+ * The part of a note selected in its editor (top-level blocks [from, to) and their words): an Edit
+ * in its chat changes just that. Kept while the chat is used (tapping into the chat doesn't lose it).
+ */
+export interface NotePart {
+  noteId: string
+  from: number
+  to: number
+  text: string
+}
+export const notePart = new Store<{ part: NotePart | null }>({ part: null })

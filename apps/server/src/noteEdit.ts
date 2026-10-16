@@ -224,3 +224,58 @@ export function wholeNoteAsList(md: string, request: string): { markdown: string
   const what = kind === 'numbered' ? 'a numbered list' : kind === 'bullets' ? 'a bulleted list' : kind === 'todo' ? 'a to-do list' : 'a checklist'
   return { markdown: out.join('\n'), said: `Made the note ${what}.` }
 }
+
+/** A block's words alone (no spaces – compared with what the editor said was selected). */
+function bare(node: Y.XmlElement | Y.XmlText): string {
+  let out = ''
+  const walk = (n: Y.XmlElement | Y.XmlText) => {
+    if (n instanceof Y.XmlText) {
+      for (const op of n.toDelta() as { insert: unknown }[]) if (typeof op.insert === 'string') out += op.insert
+      return
+    }
+    for (const c of n.toArray()) if (c instanceof Y.XmlElement || c instanceof Y.XmlText) walk(c)
+  }
+  walk(node)
+  return out.replace(/\s+/g, '')
+}
+
+/**
+ * Where the part selected in the editor is now: its blocks [from, to). Its words say which: where
+ * the editor said, if they're still there; else wherever they've moved to. Null: not in the note.
+ */
+export function findPart(frag: Y.XmlFragment, part: { from: number; to: number; text: string }): { from: number; to: number } | null {
+  const texts = children(frag).map(bare)
+  const want = part.text.replace(/\s+/g, '')
+  if (!want) return null
+  const head = want.slice(0, 40)
+  const tail = want.slice(-40)
+  // all the words in a row, and where each block starts in them
+  const starts: number[] = []
+  let all = ''
+  for (const t of texts) {
+    starts.push(all.length)
+    all += t
+  }
+  const blockAt = (c: number) => {
+    let b = 0
+    while (b + 1 < starts.length && starts[b + 1] <= c) b++
+    return b
+  }
+  const range = (at: number) => {
+    const end = all.indexOf(tail, Math.max(at, at + want.length - tail.length - 200))
+    if (end < 0) return null
+    return { from: blockAt(at), to: blockAt(Math.max(at, end + tail.length - 1)) + 1 }
+  }
+  // where the editor said, if it's still there
+  if (part.from >= 0 && part.to > part.from && part.to <= texts.length) {
+    const t = texts.slice(part.from, part.to).join('')
+    if (t.includes(head) && t.includes(tail)) return { from: part.from, to: part.to }
+  }
+  // else the place its words are, nearest to where it was
+  let best: { from: number; to: number } | null = null
+  for (let at = all.indexOf(head); at >= 0; at = all.indexOf(head, at + 1)) {
+    const r = range(at)
+    if (r && (!best || Math.abs(r.from - part.from) < Math.abs(best.from - part.from))) best = r
+  }
+  return best
+}

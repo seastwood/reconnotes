@@ -7235,3 +7235,62 @@ button.ask-chat-title:disabled {
   align-items: center;
   gap: 3px;
 }
+
+/* Edit in the chat: the selected part, and one-tap changes */
+.ask-edit-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 12px 6px;
+  min-width: 0;
+}
+.ask-edit-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 8px;
+  background: var(--active);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.ask-edit-part > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-edit-part q {
+  color: var(--muted);
+}
+.ask-edit-part .icon {
+  padding: 4px;
+}
+.ask-quick {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.ask-quick::-webkit-scrollbar {
+  display: none;
+}
+.ask-quick button {
+  flex: none;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.ask-quick button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.ask-quick button:disabled {
+  opacity: 0.5;
+}

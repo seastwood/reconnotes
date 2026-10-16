@@ -28,6 +28,7 @@ import {
   speakerTurns,
   mergeMinorVoices,
   voiceCount,
+  extractTags,
 } from '@reconnotes/core'
 import type { Config } from './config'
 import type { Store } from './store'
@@ -52,7 +53,7 @@ import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
 import { attendeeNames, meetingNotesText } from './meetingNotes'
 import { askRefs, markEditReverted, saveTurn, setAskRefs } from './askHistory'
-import { applyEdit, blockKey, diffBlocks, revertEdit, wholeNoteAsList, type EditRecord } from './noteEdit'
+import { applyEdit, blockKey, diffBlocks, findPart, revertEdit, wholeNoteAsList, type EditRecord } from './noteEdit'
 import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
 
 /**
@@ -643,9 +644,21 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const noteId = notes[0]
     const doc = noteDoc(noteId)
     const request = String(job.input.question ?? '').slice(0, 2000)
+    // a selected part of it: only that is rewritten
+    const asked = job.input.part as { from?: unknown; to?: unknown; text?: unknown } | undefined
+    const part = asked && typeof asked.text === 'string' ? findPart(getContent(doc), { from: Number(asked.from), to: Number(asked.to), text: asked.text }) : null
+    if (asked && !part) throw new Error('The part you selected isn’t in the note any more – select it again.')
+    const blocks = getContent(doc)
+      .toArray()
+      .filter((c): c is Y.XmlElement | Y.XmlText => c instanceof Y.XmlElement || c instanceof Y.XmlText)
+    let source = doc
+    if (part) {
+      source = new Y.Doc()
+      getContent(source).insert(0, blocks.slice(part.from, part.to).map((b) => b.clone()))
+    }
     const markers: string[] = []
     const mark = (m: string) => (markers.push(m), m)
-    const md = noteToMarkdown(doc, {
+    const md = noteToMarkdown(source, {
       drawingPlaceholder: (id) => mark(compileMarker('drawing', id)),
       imagePlaceholder: (id) => mark(compileMarker('image', id)),
       attachmentPlaceholder: (kind, id) => mark(compileMarker(kind, id)),
@@ -657,7 +670,27 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     const history = historyFromInput(job.input.history)
     reportProgress('Changing the note…')
     // (asked first and last: a small model keeps to what's freshest)
-    const editPrompt = (again: boolean) => `Rewrite the note below so it does what its owner asks.
+    const editPrompt = (again: boolean) =>
+      part
+        ? `Rewrite the part of a note below so it does what its owner asks.
+
+The owner asks: ${request}
+
+How:
+- Carry out the request fully, on all of this part. "this" or "it" means this whole part – e.g. "make this a checklist" turns every line of it into a checklist item.${again ? '\n- Your last answer gave the part back unchanged. That is wrong: the request asks for a change – make it this time.' : ''}
+- Change nothing the request doesn't ask about.
+- Keep each line like ⟦IMAGE:…⟧, ⟦DRAWING:…⟧, ⟦AUDIO:…⟧ or ⟦FILE:…⟧ exactly, on its own line. Keep [[links]], #tags and dates like !2026-10-14 as they are.
+- Markdown: "# " headings, "- " bullets, "1. " numbered lists, | tables |, **bold**, *italic*. Lists you tick: "- [ ] " items ("- [x] " ticked); a checklist of things to buy, pack or bring has a line "<!-- list -->" just before its items.
+- No notes, explanations or code fences.
+
+The part, between <<< and >>>:
+<<<
+${md}
+>>>
+
+Write only this part again, with the change made. Then a line with only "===CHANGED===" and one short sentence saying what you changed.
+The request again: ${request}`
+        : `Rewrite the note below so it does what its owner asks.
 
 The owner asks: ${request}
 
@@ -684,8 +717,10 @@ The request again: ${request}`
     // the AI's version, as blocks, in a document of its own (to compare and copy from)
     const asBlocks = (markdown: string) => {
       const scratch = new Y.Doc()
-      const nodes = markdownToNodes(keepCompileExtras(markdown, markers, note.tags, linksIn), { attach: () => null, noteFor: () => null, ...ctx })
-      if (nodes.length) scratch.getXmlFragment('content').insert(0, nodes)
+      const nodes = markdownToNodes(keepCompileExtras(markdown, markers, part ? extractTags(md) : note.tags, linksIn), { attach: () => null, noteFor: () => null, ...ctx })
+      // a part: the rest of the note around it, as it is
+      const all = part ? [...blocks.slice(0, part.from).map((b) => b.clone()), ...nodes, ...blocks.slice(part.to).map((b) => b.clone())] : nodes
+      if (all.length) scratch.getXmlFragment('content').insert(0, all)
       return scratch
     }
     const differs = (scratch: Y.Doc) => {
@@ -711,7 +746,7 @@ The request again: ${request}`
     }
     // still unchanged, and it's the whole note made a list: done here
     if (!scratch) {
-      const listed = wholeNoteAsList(md, request)
+      const listed = wholeNoteAsList(md, part ? `this: ${request}` : request)
       if (listed) {
         const made = asBlocks(listed.markdown)
         if (differs(made)) {
@@ -720,6 +755,7 @@ The request again: ${request}`
         }
       }
     }
+    if (!scratch && part) return { answer: 'Your AI gave that part back unchanged. Try saying more exactly what to change.', sources: [], changed: 0, agent, noteId }
     if (!scratch) return { answer: 'Your AI gave the note back unchanged. Try saying which part to change and how – e.g. “make the lines under Groceries a checklist”.', sources: [], changed: 0, agent, noteId }
     if (versionStore) snapshotNow(versionStore, noteDocName(noteId), doc, 'Before an AI edit')
     let applied: ReturnType<typeof applyEdit> | null = null

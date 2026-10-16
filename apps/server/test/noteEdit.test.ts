@@ -1,6 +1,6 @@
 import * as Y from 'yjs'
 import { describe, expect, it } from 'vitest'
-import { applyEdit, blockKey, diffBlocks, revertEdit } from '../src/noteEdit'
+import { applyEdit, blockKey, diffBlocks, findPart, revertEdit } from '../src/noteEdit'
 
 const para = (t: string, attrs: Record<string, string> = {}) => {
   const p = new Y.XmlElement('paragraph')
@@ -103,5 +103,22 @@ describe('making the whole note a list, when the AI won’t', async () => {
   it('leaves a request about a part of the note to the AI', () => {
     expect(wholeNoteAsList(md, 'make the lines under Toppings a checklist')).toBeNull()
     expect(wholeNoteAsList(md, 'fix the spelling')).toBeNull()
+  })
+})
+
+describe('editing the selected part of a note', () => {
+  const d = doc([para('Intro'), para('Milk'), para('Eggs   and bread'), para('Outro'), para('Milk')])
+  const frag = d.getXmlFragment('content')
+  it('finds it where the editor said', () => {
+    expect(findPart(frag, { from: 1, to: 3, text: 'Milk\nEggs and bread' })).toEqual({ from: 1, to: 3 })
+  })
+  it('finds it where it has moved to, nearest to where it was', () => {
+    expect(findPart(frag, { from: 0, to: 2, text: 'Milk\nEggs and bread' })).toEqual({ from: 1, to: 3 })
+    expect(findPart(frag, { from: 5, to: 6, text: 'Milk' })).toEqual({ from: 4, to: 5 })
+    // part of a block's words: that block
+    expect(findPart(frag, { from: 9, to: 10, text: 'and bre' })).toEqual({ from: 2, to: 3 })
+  })
+  it('is null once its words are gone', () => {
+    expect(findPart(frag, { from: 1, to: 2, text: 'Cheese' })).toBeNull()
   })
 })
