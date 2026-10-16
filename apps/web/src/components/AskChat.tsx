@@ -161,15 +161,15 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
           const target = openableRef.current()
           if (target) d = { mode: 'open', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target, last: [] }
         } else if (showing) {
-          const dock = document.querySelector('.ask-dock')?.getBoundingClientRect()
-          if (dock && t.clientX >= dock.left && t.clientX < dock.left + EDGE) d = { mode: 'close', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target: null, last: [] }
+          // a swipe right anywhere on it (not in the box being typed in, or text that scrolls sideways)
+          if (closableFrom(ev.target)) d = { mode: 'close', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target: null, last: [] }
         }
         return
       }
       if (!showing && t.clientX > W() - EDGE) {
         const target = s.hidden && s.target ? s.target : openableRef.current()
         if (target) d = { mode: 'open', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: s.hidden, target, last: [] }
-      } else if (showing && t.clientX < EDGE + 6 && (ev.target as Element).closest?.('.ask-chat')) {
+      } else if (showing && closableFrom(ev.target)) {
         d = { mode: 'close', x0: t.clientX, y0: t.clientY, locked: false, wasHidden: false, target: null, last: [] }
       }
     }
@@ -227,6 +227,12 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
       window.removeEventListener('touchcancel', up)
     }
   }, [])
+}
+
+/** Where a swipe right can start to put the chat away: anywhere on it but the box being typed in, menus, and code or tables that scroll sideways. */
+function closableFrom(target: EventTarget | null): boolean {
+  const el = target as Element | null
+  return Boolean(el?.closest?.('.ask-chat') && !el.closest('textarea, input, select, pre, table, .menu, .ask-browser-tools'))
 }
 
 function AskChat({
