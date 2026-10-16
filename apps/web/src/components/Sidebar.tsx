@@ -505,7 +505,9 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   return (
     <aside className={`sidebar${overlay ? ' overlay' : ''}`}>
       <header className="sidebar-head">
-        <h1>ReconNotes</h1>
+        <h1>
+          <img className="app-logo" src="/icon-rounded-192.png" alt="ReconNotes" title="ReconNotes" width={30} height={30} />
+        </h1>
         <SyncBadge />
         <button className="icon" onClick={onSettings} aria-label="Settings">
           <SettingsIcon size={18} />

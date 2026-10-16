@@ -7581,3 +7581,15 @@ button.ask-chat-title:disabled {
   margin: 4px 0;
   padding-left: 18px;
 }
+
+/* the app's icon in place of its name, top left */
+.sidebar-head h1 {
+  display: flex;
+  align-items: center;
+}
+.app-logo {
+  width: 30px;
+  height: 30px;
+  display: block;
+  border-radius: 7px;
+}
