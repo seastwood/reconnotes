@@ -4,10 +4,11 @@ import { findTextFor } from './findText'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { onWorkspaceChange, type WorkspaceSnapshot } from './workspace'
 import { settings } from './settings'
+import { formatTime } from '@reconnotes/core'
 
 /**
  * Reminders for due items (iOS app): a notification at 9:00 on the day an
- * open item is due. Rescheduled whenever due dates change on any device.
+ * open item is due – or at its time, when it has one ("!fri 3pm"). Rescheduled whenever due dates change on any device.
  * iOS keeps at most 64 pending notifications, so only the next 60 are set.
  */
 
@@ -36,7 +37,8 @@ function wanted(ws: WorkspaceSnapshot) {
     )
     .map((d) => {
       const [y, m, day] = d.date.split('-').map(Number)
-      return { ...d, at: new Date(y, m - 1, day, HOUR, 0, 0) }
+      const [h, min] = d.time ? d.time.split(':').map(Number) : [HOUR, 0]
+      return { ...d, at: new Date(y, m - 1, day, h, min, 0) }
     })
     .filter((d) => d.at.getTime() > now)
     .sort((a, b) => a.at.getTime() - b.at.getTime())
@@ -48,7 +50,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 async function reschedule(ws: WorkspaceSnapshot) {
   const items = settings.get().dueReminders === false ? [] : wanted(ws)
-  const sig = JSON.stringify(items.map((i) => [i.id, i.date, i.text]))
+  const sig = JSON.stringify(items.map((i) => [i.id, i.date, i.time, i.text]))
   if (sig === last) return
   last = sig
   // cancel what we scheduled before, then schedule the current set
@@ -69,7 +71,7 @@ async function reschedule(ws: WorkspaceSnapshot) {
     notifications: items.map((i) => ({
       id: numId(i.id),
       title: i.text || 'Due today',
-      body: `Due today · ${i.noteTitle}`,
+      body: `${i.time ? `Due at ${formatTime(i.time)}` : 'Due today'} · ${i.noteTitle}`,
       schedule: { at: i.at, allowWhileIdle: true },
       // (opening it lands on the item)
       extra: { noteId: i.noteId, find: findTextFor(i.text) },

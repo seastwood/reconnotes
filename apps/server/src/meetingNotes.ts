@@ -1,5 +1,6 @@
 import { stem, telling } from './listen'
 import { STOP } from './ask'
+import { dueMarkdown, parseTime } from '@reconnotes/core'
 
 /**
  * Keeping meeting notes to what was said
@@ -337,24 +338,27 @@ export { attendeeNames } from '@reconnotes/core'
  * a to-do on that day, so it's in Due, the calendar feed and reminders. The last such mention (the
  * one settled on) with a day that's still to come; null when none was said.
  */
-export function nextMeetingIn(transcript: string, dueIn: (text: string) => string | null, today: string): { text: string; date: string } | null {
+export function nextMeetingIn(transcript: string, dueIn: (text: string) => string | null, today: string): { text: string; date: string; time?: string } | null {
   const sentences = transcript.split(/(?<=[.!?])\s+|\n+/)
-  let found: { text: string; date: string } | null = null
+  let found: { text: string; date: string; time?: string } | null = null
   for (const s of sentences) {
     if (!/\b(meet(?:ing)?|catch up|sync|reconvene|regroup|check in|touch base|get together|follow[- ]up (?:call|meeting)|call again)\b/i.test(s)) continue
     // said of a meeting to come, not one that happened
     if (!/\b(next|again|let'?s|we'?ll|we will|we should|shall we|schedule|book|set up|plan to|follow[- ]up|reconvene|regroup)\b/i.test(s)) continue
     if (/\b(last|previous|earlier)\s+(meeting|week|time)\b/i.test(s)) continue
     const date = dueIn(s)
-    if (date && date > today) found = { text: s.replace(/^\s*[A-Z][\w .'-]{0,30}:\s+/, '').trim(), date }
+    // "at 3pm", "at 10:30"
+    const at = /\bat\s+(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)/i.exec(s)
+    const time = at ? parseTime(at[1].replace(/\./g, '')) : null
+    if (date && date > today) found = { text: s.replace(/^\s*[A-Z][\w .'-]{0,30}:\s+/, '').trim(), date, ...(time ? { time } : {}) }
   }
   return found
 }
 
 /** The next meeting as a to-do under "Action items" (instead of "No action items", if that's all there is). */
-export function addNextMeeting(markdown: string, next: { date: string }): string {
+export function addNextMeeting(markdown: string, next: { date: string; time?: string }): string {
   if (/^\s*[-*]\s+\[[ x]\]\s+.*\b(meeting|meet|catch up)\b.*!\d{4}-\d{2}-\d{2}/im.test(markdown)) return markdown
-  const item = `- [ ] Next meeting !${next.date}`
+  const item = `- [ ] Next meeting ${dueMarkdown(next.date, next.time)}`
   const lines = markdown.split('\n')
   const head = lines.findIndex((l) => /^#{1,4}\s*action items\b/i.test(l))
   if (head < 0) return `${markdown.trimEnd()}\n\n## Action items\n\n${item}\n`

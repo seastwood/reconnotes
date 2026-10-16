@@ -24,3 +24,11 @@ describe('the next meeting, from what was said', () => {
     expect(addNextMeeting(already, { date: '2026-10-22' })).toBe(already)
   })
 })
+
+describe('a time with the next meeting', () => {
+  it('is kept when said', () => {
+    const next = nextMeetingIn("Let's meet again on Friday at 3pm.", due, '2026-10-14')
+    expect(next).toMatchObject({ date: '2026-10-16', time: '15:00' })
+    expect(addNextMeeting('## Action items\n\n- [ ] No action items', next!)).toBe('## Action items\n\n- [ ] Next meeting !2026-10-16@15:00')
+  })
+})

@@ -84,8 +84,8 @@ It's built for one person's daily notes, and anyone can run it.
   (one card or several), a test bench compares models on your own samples, and a monthly spending
   cap guards a Claude API key.
 - **Meetings.** *New meeting* (the people icon above the note list) makes a meeting note and starts
-  recording; when you stop, you get a summary, decisions and action items with due dates, each
-  point linked to where it was said in the recording. With the speaker service, the transcript is
+  recording; when you stop, you get a summary, decisions and action items with due dates (and the next
+  meeting, when one was agreed), each point linked to where it was said in the recording. With the speaker service, the transcript is
   told apart by voice, and voices you've named are recognised in later meetings.
 - **Every day and week.** *Tasks* lists every to-do in every note. Your dated to-dos can appear in Apple or
   Google Calendar (*Settings › Calendar & weekly digest*), and a weekly digest note sums up the
@@ -113,7 +113,8 @@ It's built for one person's daily notes, and anyone can run it.
   off on its own. Setup links connect a new device in one tap.
 - **Quick and versatile.** ⌘K runs any command or opens any note. You can select several notes, or
   swipe a note for Move, Pin or Delete, and Undo is offered after each. Notes can have tables,
-  repeating due dates (`!every monday`) and a calendar. Folders can be *kept offline*, and a single
+  due dates with a time for the reminder (`!friday 3pm`), repeating ones (`!every monday`) and a
+  calendar. Folders can be *kept offline*, and a single
   note can be shared as a **read-only link**. Saved searches can be pinned to the sidebar as
   smart folders, and folders can have a password (opened with Face ID in the app).
 - **iPhone and iPad extras.** Scan documents with the camera, and add notes from the Home Screen or

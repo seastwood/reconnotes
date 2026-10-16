@@ -276,14 +276,16 @@ function inlines(tokens: Token[] | undefined, ctx: Ctx, marks: Marks = {}): (Inl
     // [[Note title]] / [[Note|label]] links between notes
     // and !due dates, when the caller knows them
     let last = 0
-    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]|!(\d{4}-\d{2}-\d{2}[^\s.,;:)]*)|⸢([^⸣\n]{1,60})⸣/g)) {
+    for (const match of t.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]|!(\d{4}-\d{2}-\d{2}(?:@\d{1,2}:\d{2})?[^\s.,;:)]*)|⸢([^⸣\n]{1,60})⸣/g)) {
       let node: Y.XmlElement | Y.XmlText | null = null
       if (match[4] !== undefined) {
         // a word the AI guessed: shown with a dotted underline in the note
         node = text(match[4], { ...m, uncertain: {} })
       } else if (match[3] !== undefined) {
-        const attrs = ctx.dueFor?.(match[3])
-        if (attrs) node = el('dueDate', { ...attrs, id: newId() })
+        // "!2026-10-14@15:00": a time with it
+        const [date, time] = match[3].split('@')
+        const attrs = ctx.dueFor?.(date)
+        if (attrs) node = el('dueDate', { ...attrs, ...(time ? { time: time.padStart(5, '0') } : {}), id: newId() })
       } else {
         const id = ctx.noteFor(match[1].trim())
         // [[Note|its own words]]: the words kept as the link's label

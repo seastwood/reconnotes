@@ -55,7 +55,7 @@ function inlineText(node: PMNode): string {
     if (c.isText && c.marks.some((m) => m.type.name === 'link' && String(m.attrs.href ?? '').startsWith('listen:'))) return
     if (c.isText) s += c.text
     else if (c.type.name === 'hardBreak') s += '\n'
-    else if (c.type.name === 'dueDate') s += `!${c.attrs.date}`
+    else if (c.type.name === 'dueDate') s += `!${c.attrs.date}${c.attrs.time ? `@${c.attrs.time}` : ''}`
     else if (c.type.name === 'noteLink') s += `[[${c.attrs.title || 'note'}]]`
     else s += c.textContent
   })

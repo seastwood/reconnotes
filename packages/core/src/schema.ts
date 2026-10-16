@@ -81,7 +81,7 @@ export interface NoteData {
   /** ids of the notes this note links to */
   links: string[]
   /** due dates in the note (see due.ts) */
-  due: { id: string; date: string; text: string; done: boolean; repeat?: import('./due').Repeat | null }[]
+  due: { id: string; date: string; text: string; done: boolean; repeat?: import('./due').Repeat | null; time?: string | null }[]
   /** set when the note was made from a file added to a folder: shown as that file */
   file: { name: string; mime: string; size: number } | null
   /** the web page it was imported from (checked for updates) */

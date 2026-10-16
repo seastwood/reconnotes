@@ -93,7 +93,7 @@ export class Tasks {
 
   /**
    * An iCalendar (.ics) feed of the open to-dos with a due date, as all-day
-   * events – subscribe to it in Apple Calendar, Google Calendar or Outlook.
+   * events (or at their time, when they have one) – subscribe to it in Apple Calendar, Google Calendar or Outlook.
    * Locked folders are left out (a calendar app can't unlock them).
    */
   ics(allowed: (noteId: string) => boolean, appUrl: string): string {
@@ -113,14 +113,17 @@ export class Tasks {
         'BEGIN:VEVENT',
         `UID:${uid}@reconnotes`,
         `DTSTAMP:${stamp}`,
-        `DTSTART;VALUE=DATE:${day(t.due)}`,
-        `DTEND;VALUE=DATE:${nextDay(t.due)}`,
+        // with a time: at that time (the calendar's own time zone – "floating"), with an alert; else all day
+        ...(t.time
+          ? [`DTSTART:${day(t.due)}T${t.time.replace(':', '')}00`, 'DURATION:PT30M']
+          : [`DTSTART;VALUE=DATE:${day(t.due)}`, `DTEND;VALUE=DATE:${nextDay(t.due)}`]),
         `SUMMARY:${esc(t.text)}`,
         `DESCRIPTION:${esc(`From “${t.title || 'Untitled'}”${t.folder.length ? ` in ${t.folder.join(' › ')}` : ''}\nOpen it in the app: reconnotes://open?note=${t.noteId}&find=${encodeURIComponent(findText(t.text))}`)}`,
         // (opening it lands on the item in the note)
         `URL:${appUrl}/#note=${t.noteId}&find=${encodeURIComponent(findText(t.text))}`,
         ...(t.repeat ? [`RRULE:${RRULE[t.repeat]}`] : []),
         'TRANSP:TRANSPARENT',
+        ...(t.time ? ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(t.text)}`, 'TRIGGER:PT0M', 'END:VALARM'] : []),
         'END:VEVENT',
       )
     }
@@ -183,7 +186,7 @@ function dueIdAt(doc: Y.Doc, i: number): string | null {
 export function findText(text: string): string {
   const plain = text
     .replace(/\s*\[▶[^\]]*\]\(listen:[^)]*\)/g, '')
-    .replace(/\s*!\d{4}-\d{2}-\d{2}/g, '')
+    .replace(/\s*!\d{4}-\d{2}-\d{2}(?:@\d{1,2}:\d{2})?/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[*_`#>]/g, '')
     .replace(/\s+/g, ' ')

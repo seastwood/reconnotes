@@ -21,6 +21,8 @@ export interface DueItem {
   done: boolean
   /** repeats: when ticked it moves to the next date instead (see Repeat) */
   repeat?: Repeat | null
+  /** a time of day ("15:00"): the reminder comes then (else in the morning) */
+  time?: string | null
 }
 
 /** How a due date repeats. */
@@ -178,6 +180,33 @@ export function formatDue(date: string, now = new Date()): string {
   return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(y !== today.getFullYear() ? { year: 'numeric' } : {}) })
 }
 
+/** A time of day as said – "3pm", "3:30 pm", "15:00", "9am" – as "HH:MM" (24-hour), or null. */
+export function parseTime(word: string): string | null {
+  const m = /^\s*(?:at\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a|p)?\s*$/i.exec(word)
+  if (!m) return null
+  let h = Number(m[1])
+  const min = m[2] ? Number(m[2]) : 0
+  const ap = m[3]?.toLowerCase()
+  // a bare number ("!fri 3") isn't a time; "15:00" is
+  if (!ap && !m[2]) return null
+  if (ap) {
+    if (h < 1 || h > 12) return null
+    if (ap.startsWith('p') && h !== 12) h += 12
+    if (ap.startsWith('a') && h === 12) h = 0
+  }
+  if (h > 23 || min > 59) return null
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
+/** "15:00" → "3 PM" (or "15:00", as this device shows times). */
+export function formatTime(time: string): string {
+  const [h, m] = time.split(':').map(Number)
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', ...(m ? { minute: '2-digit' } : {}) })
+}
+
+/** A due date as written in Markdown: "!2026-10-14", or "!2026-10-14@15:00" with a time. */
+export const dueMarkdown = (date: string, time?: string | null) => `!${date}${time ? `@${time}` : ''}`
+
 /** Days from today (negative = overdue). */
 export function daysUntil(date: string, now = new Date()): number {
   const [y, m, d] = date.split('-').map(Number)
@@ -206,8 +235,9 @@ export function extractDue(doc: Y.Doc): DueItem[] {
         const date = c.getAttribute('date') as string | undefined
         const id = c.getAttribute('id') as string | undefined
         const repeat = (c.getAttribute('repeat') as Repeat | undefined) ?? null
+        const time = (c.getAttribute('time') as string | undefined) ?? null
         if (date && id)
-          out.push({ id, date, done: item?.done ?? false, text: (item ? textOf(item.el) : textOf(el)).replace(/\s+/g, ' ').trim(), ...(repeat ? { repeat } : {}) })
+          out.push({ id, date, done: item?.done ?? false, text: (item ? textOf(item.el) : textOf(el)).replace(/\s+/g, ' ').trim(), ...(repeat ? { repeat } : {}), ...(time ? { time } : {}) })
         continue
       }
       const checked = c.getAttribute('checked') as unknown
@@ -317,6 +347,8 @@ export interface TaskItem {
   /** its due date, if it has one */
   due?: string
   repeat?: Repeat | null
+  /** the due date's time of day ("15:00"), if it has one */
+  time?: string | null
 }
 
 /**
@@ -325,10 +357,11 @@ export interface TaskItem {
  */
 export function extractTasks(doc: Y.Doc): TaskItem[] {
   const out: TaskItem[] = []
-  const own = (el: Y.XmlElement): { text: string; due?: string; repeat?: Repeat | null } => {
+  const own = (el: Y.XmlElement): { text: string; due?: string; repeat?: Repeat | null; time?: string | null } => {
     let text = ''
     let due: string | undefined
     let repeat: Repeat | null | undefined
+    let time: string | null | undefined
     const walk = (e: Y.XmlElement | Y.XmlFragment) => {
       for (const c of e.toArray()) {
         if (c instanceof Y.XmlText) text += c.toString().replace(/<[^>]+>/g, '')
@@ -337,12 +370,13 @@ export function extractTasks(doc: Y.Doc): TaskItem[] {
           if (c.nodeName === 'dueDate') {
             due ??= (c.getAttribute('date') as string | undefined) ?? undefined
             repeat ??= (c.getAttribute('repeat') as Repeat | undefined) ?? null
+            time ??= (c.getAttribute('time') as string | undefined) ?? null
           } else walk(c)
         }
       }
     }
     walk(el)
-    return { text: text.replace(/\s+/g, ' ').trim(), due, repeat }
+    return { text: text.replace(/\s+/g, ' ').trim(), due, repeat, time }
   }
   let n = -1
   const walk = (el: Y.XmlElement | Y.XmlFragment, plain: boolean) => {
@@ -352,7 +386,7 @@ export function extractTasks(doc: Y.Doc): TaskItem[] {
         n++
         const checked = c.getAttribute('checked') as unknown
         const o = own(c)
-        if (!plain) out.push({ i: n, text: o.text, done: checked === true || checked === 'true', ...(o.due ? { due: o.due } : {}), ...(o.repeat ? { repeat: o.repeat } : {}) })
+        if (!plain) out.push({ i: n, text: o.text, done: checked === true || checked === 'true', ...(o.due ? { due: o.due } : {}), ...(o.repeat ? { repeat: o.repeat } : {}), ...(o.time ? { time: o.time } : {}) })
       }
       walk(c, plain || isPlainList(c))
     }

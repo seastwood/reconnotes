@@ -1,5 +1,6 @@
 import * as Y from 'yjs'
 import { getContent, getTranscripts } from './schema'
+import { dueMarkdown } from './due'
 
 /**
  * Convert a note's rich text to Markdown. Used for human-readable backups,
@@ -38,7 +39,7 @@ export function noteToMarkdown(
         }
       } else if (child instanceof Y.XmlElement) {
         if (child.nodeName === 'hardBreak') s += '  \n'
-        else if (child.nodeName === 'dueDate') s += `!${child.getAttribute('date') as string}`
+        else if (child.nodeName === 'dueDate') s += dueMarkdown(child.getAttribute('date') as string, child.getAttribute('time') as string | undefined)
         else if (child.nodeName === 'noteLink') {
           const title = (child.getAttribute('title') as string) || 'note'
           const label = child.getAttribute('label') as string | undefined

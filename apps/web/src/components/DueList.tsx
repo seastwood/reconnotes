@@ -6,7 +6,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Plus, Repeat as RepeatIcon } f
 import { isoDate, occurrences, REPEAT_LABELS, type Repeat } from '@reconnotes/core'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { refuseIfReadOnly } from '../lib/readOnly'
-import { addDueItem, completeDue, createNote, daysUntil, formatDue, getContent, getNotes, newId, noteDocName, readNote, setDueDate } from '@reconnotes/core'
+import { addDueItem, completeDue, createNote, daysUntil, formatDue, formatTime, getContent, getNotes, newId, noteDocName, readNote, setDueDate } from '@reconnotes/core'
 import { showToast } from '../lib/toast'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { sync } from '../lib/sync'
@@ -20,6 +20,7 @@ interface Row {
   text: string
   checklist: boolean
   repeat?: Repeat | null
+  time?: string | null
 }
 
 const GROUPS: { label: string; test: (days: number) => boolean }[] = [
@@ -50,7 +51,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
       ws.notes
         .filter((n) => !n.trashedAt && !n.template)
         .flatMap((n) => n.due.filter((d) => !d.done).map((d) => ({ noteId: n.id, noteTitle: n.title || 'Untitled', ...d, checklist: true })))
-        .sort((a, b) => a.date.localeCompare(b.date)),
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '99').localeCompare(b.time ?? '99')),
     [ws.notes],
   )
   const [mode, setModeState] = useState<'list' | 'calendar'>(() => safeLocalGet('reconnotes.dueMode', 'list'))
@@ -75,7 +76,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
     return (
       <>
         {switcher}
-        <li className="empty-hint">Nothing due. Type “!friday” (or !tomorrow, !oct 12, !every monday) in a checklist item to give it a date.</li>
+        <li className="empty-hint">Nothing due. Type “!friday” (or !tomorrow, !oct 12, !every monday) in a checklist item to give it a date – and a time after it (“!friday 3pm”) for a reminder then.</li>
       </>
     )
   return (
@@ -100,6 +101,7 @@ export function DueList({ activeNoteId, onOpen }: { activeNoteId: string | null;
                     <div className="note-title">{r.text || 'Untitled item'}</div>
                     <div className="note-snippet">
                       {formatDue(r.date)}
+                      {r.time && ` ${formatTime(r.time)}`}
                       {r.repeat && <RepeatIcon size={11} className="due-repeat" aria-label={REPEAT_LABELS[r.repeat]} />} · {r.noteTitle}
                     </div>
                   </div>
@@ -349,7 +351,7 @@ function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId
                       onClick={(e) => (e.stopPropagation(), open(r))}
                       {...(r.date === d ? drag.handle(r) : {})}
                     >
-                      {r.repeat && <RepeatIcon size={10} />} {r.text || 'Untitled item'}
+                      {r.repeat && <RepeatIcon size={10} />} {r.time && <b>{formatTime(r.time)}</b>} {r.text || 'Untitled item'}
                     </span>
                   ))}
                   {here.length > 3 && <span className="cal-more">+{here.length - 3} more</span>}
@@ -378,6 +380,7 @@ function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId
             <div>
               <div className="note-title">{r.text || 'Untitled item'}</div>
               <div className="note-snippet">
+                {r.time ? `${formatTime(r.time)} · ` : ''}
                 {r.repeat ? `${REPEAT_LABELS[r.repeat]} · ` : ''}
                 {r.noteTitle}
               </div>

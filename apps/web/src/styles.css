@@ -7341,3 +7341,17 @@ button.ask-chat-title:disabled {
   flex: none;
   padding: 5px;
 }
+
+/* a due date's time */
+.due-time {
+  margin-left: 4px;
+  opacity: 0.85;
+}
+.due-time-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.due-time-row .due-input {
+  flex: 1;
+}

@@ -121,7 +121,8 @@ export function extractNote(doc: Y.Doc, extraText: Record<string, string> = {}):
       }
       if (name === 'dueDate') {
         const d = node.getAttribute('date') as string | undefined
-        if (d) cur += ` !${d}`
+        const t = node.getAttribute('time') as string | undefined
+        if (d) cur += ` !${d}${t ? `@${t}` : ''}`
         return
       }
       if (name === 'noteLink') {
