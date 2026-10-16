@@ -165,7 +165,7 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders, onHide, expande
             <PanelLeft size={20} />
           </button>
         )}
-        <h2>Jobs</h2>
+        <span className="list-head-gap" />
         {onHide && (
           <button className="icon" onClick={onHide} aria-label="Hide this list" title="Hide this list – the folders stay">
             <PanelLeftClose size={20} />
@@ -202,6 +202,8 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders, onHide, expande
           )}
         </div>
       </header>
+      {/* the title on a line of its own, under the buttons – as in the notes list */}
+      <h2 className="list-title">Jobs</h2>
       <div className="notes jobs-scroll">
         {!isSyncConfigured() && <p className="empty-hint">Jobs run on your ReconNotes server. Connect one in Settings to use AI features.</p>}
         {error && isSyncConfigured() && <p className="jobs-error">Can’t reach the server: {error}</p>}
