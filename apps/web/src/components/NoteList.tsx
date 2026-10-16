@@ -127,6 +127,12 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
   }, [ws.notes, view, sort, reverse, liveFolders])
 
   // a folder's own folders, listed above its notes
+  // the folder this one is in (a subfolder's way back up)
+  const parentFolder = useMemo(() => {
+    if (view.kind !== 'folder') return null
+    const parentId = ws.folders.find((f) => f.id === view.folderId)?.parentId
+    return parentId ? (ws.folders.find((f) => f.id === parentId && !f.trashedAt) ?? null) : null
+  }, [view, ws.folders])
   const subfolders = useMemo(() => {
     if (view.kind !== 'folder') return []
     return sortFolders(
@@ -359,6 +365,24 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
           </>
         )}
       </header>
+      {/* in a subfolder: back up to the folder it's in (drop notes on it to move them up) */}
+      {parentFolder && !selecting && (
+        <button
+          className={`list-up${dropOn === parentFolder.id ? ' drop-into' : ''}`}
+          onClick={() => onOpenFolder?.(parentFolder.id)}
+          title={`Back to “${parentFolder.name}”`}
+          onDragOver={(e) => (e.preventDefault(), setDropOn(parentFolder.id))}
+          onDragLeave={() => setDropOn(null)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDropOn(null)
+            const p = getDrag(e)
+            if (p?.kind === 'note') moveNotes(p.ids ?? [p.id], parentFolder.id)
+          }}
+        >
+          <ChevronLeft size={16} /> {parentFolder.name}
+        </button>
+      )}
       {/* the folder's name on a line of its own, under the buttons – not squeezed between them */}
       <h2 className="list-title">{selecting ? (selected.size ? `${selected.size} selected` : 'Select notes') : title}</h2>
 

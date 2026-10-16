@@ -23,6 +23,7 @@ startOfflineFolders()
 startJobs()
 pinToViewport()
 stopSidewaysScroll()
+keepCaretAboveKeyboard()
 
 /**
  * Moving the cursor in a field (e.g. dragging on the space bar) makes iOS
@@ -105,6 +106,54 @@ function pinToViewport() {
     setTimeout(show, 750)
   })
   apply()
+}
+
+/**
+ * Typing in a note low on the screen: once the keyboard is up (and the app has shrunk above it),
+ * the line being typed on is scrolled up into view. iOS would do it by scrolling the page, which
+ * the app undoes (above) – so the note's own scroll area does it instead, here.
+ */
+function keepCaretAboveKeyboard() {
+  const vv = window.visualViewport
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const scroller = (el: HTMLElement | null): HTMLElement | null => {
+    for (let p = el; p; p = p.parentElement) {
+      const y = getComputedStyle(p).overflowY
+      if ((y === 'auto' || y === 'scroll') && p.scrollHeight > p.clientHeight) return p
+    }
+    return null
+  }
+  const check = () => {
+    const el = document.activeElement
+    if (!keyboard.get().open || !(el instanceof HTMLElement) || !el.isContentEditable) return
+    const sel = window.getSelection()
+    if (!sel?.rangeCount) return
+    const at = sel.getRangeAt(0).cloneRange()
+    at.collapse(false)
+    let r: DOMRect | undefined = at.getClientRects()[0] ?? at.getBoundingClientRect()
+    // an empty line has no text to measure: its block instead
+    if (!r || (!r.height && !r.top)) {
+      const n = sel.focusNode
+      r = (n instanceof Element ? n : n?.parentElement)?.getBoundingClientRect()
+    }
+    if (!r) return
+    const bottom = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 28
+    if (r.bottom <= bottom) return
+    const box = scroller(el)
+    box?.scrollBy({ top: r.bottom - bottom + 48, behavior: 'smooth' })
+  }
+  const soon = (ms = 60) => {
+    clearTimeout(timer)
+    timer = setTimeout(check, ms)
+  }
+  // the keyboard has just come up (the app shrinks a moment later), the cursor moved, or a new line
+  keyboard.subscribe(() => {
+    if (!keyboard.get().open) return
+    soon(120)
+    setTimeout(check, 450)
+  })
+  vv?.addEventListener('resize', () => soon(80))
+  document.addEventListener('selectionchange', () => soon())
 }
 
 // Offline support: cache the app shell so it opens with no connection.

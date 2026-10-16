@@ -7593,3 +7593,27 @@ button.ask-chat-title:disabled {
   display: block;
   border-radius: 7px;
 }
+
+/* a subfolder's way back up to the folder it's in, above its name */
+.list-up {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  margin: 0 12px -2px 8px;
+  padding: 4px 8px 2px 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-up:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+.list-up.drop-into {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
