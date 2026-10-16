@@ -7582,38 +7582,29 @@ button.ask-chat-title:disabled {
   padding-left: 18px;
 }
 
-/* the app's icon in place of its name, top left */
-.sidebar-head h1 {
-  display: flex;
-  align-items: center;
+/* the app's name, top left: Rajdhani (SIL Open Font License, bundled – works offline) */
+@font-face {
+  font-family: 'Rajdhani';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('./assets/fonts/rajdhani-latin-700-normal.woff2') format('woff2');
 }
-.app-logo {
-  width: 30px;
-  height: 30px;
-  display: block;
-  border-radius: 7px;
+.sidebar-head h1.app-name {
+  font-family: 'Rajdhani', var(--font);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
-
-/* a subfolder's way back up to the folder it's in, above its name */
-.list-up {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: calc(100% - 24px);
-  margin: 0 12px -2px 8px;
-  padding: 4px 8px 2px 2px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--accent-text);
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.app-name-recon {
+  color: #8a6a2c;
 }
-.list-up:hover {
-  background: rgba(127, 127, 127, 0.12);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .app-name-recon {
+    color: #d2b06c;
+  }
 }
-.list-up.drop-into {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+:root[data-theme='dark'] .app-name-recon {
+  color: #d2b06c;
 }
