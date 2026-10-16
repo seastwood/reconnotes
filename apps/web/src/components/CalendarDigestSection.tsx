@@ -16,6 +16,59 @@ const DAYS = Array.from({ length: 7 }, (_, i) => new Date(2026, 9, 4 + i).toLoca
 const HOURS = Array.from({ length: 24 }, (_, h) => new Date(2026, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric' }))
 
 /**
+ * "Subscribe to calendar" (under the Due calendar): your dated to-dos in Apple Calendar, Google
+ * Calendar or Outlook – the calendar app opens to add it; the address can be copied too.
+ */
+export function SubscribeCalendar() {
+  const [feed, setFeed] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const load = async () => {
+    if (feed) return feed
+    try {
+      const url = (await api<{ url: string }>('GET', '/api/calendar')).url
+      setFeed(url)
+      return url
+    } catch (e) {
+      setError((e as Error).message)
+      return null
+    }
+  }
+  const subscribe = async () => {
+    const url = await load()
+    if (url) openExternal(url.replace(/^https?:/, 'webcal:'))
+    setOpen(true)
+  }
+  const copy = async () => {
+    const url = await load()
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      showToast('Calendar address copied')
+    } catch {
+      prompt('Copy this address', url)
+    }
+  }
+  return (
+    <div className="cal-subscribe">
+      <button onClick={() => void subscribe()}>
+        <CalendarPlus size={16} /> Subscribe to calendar
+      </button>
+      {open && (
+        <p className="hint">
+          Your calendar app should offer to add it. If it didn’t – Google Calendar on a computer, say – add a calendar “from URL” with this address:{' '}
+          <button className="text" onClick={() => void copy()}>
+            <Copy size={13} /> Copy address
+          </button>
+          . It stays up to date as you add and tick to-dos; locked folders are left out. (Settings › Calendar & weekly digest has it too.)
+        </p>
+      )}
+      {error && <p className="error-text">{error}</p>}
+    </div>
+  )
+}
+
+/**
  * Settings › Calendar & weekly digest: subscribe to your due dates in any
  * calendar app, and get a note about your week every week.
  */

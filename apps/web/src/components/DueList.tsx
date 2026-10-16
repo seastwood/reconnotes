@@ -10,6 +10,7 @@ import { addDueItem, completeDue, createNote, daysUntil, formatDue, getContent, 
 import { showToast } from '../lib/toast'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { sync } from '../lib/sync'
+import { SubscribeCalendar } from './CalendarDigestSection'
 
 interface Row {
   noteId: string
@@ -406,6 +407,7 @@ function DueCalendar({ rows, activeNoteId, onOpen }: { rows: Row[]; activeNoteId
           />
         </li>
       </ul>
+      <SubscribeCalendar />
       {drag.layer}
     </li>
   )

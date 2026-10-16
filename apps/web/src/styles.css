@@ -7213,3 +7213,25 @@ button.ask-chat-title:disabled {
   font: inherit;
   outline: none;
 }
+
+/* under the Due calendar: subscribe to it in a calendar app */
+.cal-subscribe {
+  padding: 16px 4px 24px;
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  text-align: center;
+}
+.cal-subscribe > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cal-subscribe .hint {
+  text-align: left;
+  margin: 10px 0 0;
+}
+.cal-subscribe .hint button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
