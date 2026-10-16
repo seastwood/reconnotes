@@ -42,3 +42,20 @@ describe('two kinds of checklist', () => {
     expect(noteToMarkdown(doc)).not.toMatch(/<!-- list -->\n- \[x\] pay rent/)
   })
 })
+
+describe('moving and adding due items', async () => {
+  const { addDueItem, setDueDate } = await import('../src')
+  it('adds a dated to-do and moves it', () => {
+    const doc = new Y.Doc()
+    addDueItem(doc, 'Order dumpster', '2026-10-05', 'due1')
+    addDueItem(doc, 'Call inspector', '2026-10-06', 'due2')
+    expect(getContent(doc).length).toBe(1) // one to-do list
+    expect(extractDue(doc).map((d) => [d.text, d.date])).toEqual([
+      ['Order dumpster', '2026-10-05'],
+      ['Call inspector', '2026-10-06'],
+    ])
+    expect(setDueDate(doc, 'due1', '2026-10-12')).toBe(true)
+    expect(extractDue(doc)[0].date).toBe('2026-10-12')
+    expect(setDueDate(doc, 'nope', '2026-10-12')).toBe(false)
+  })
+})

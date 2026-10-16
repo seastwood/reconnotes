@@ -238,6 +238,48 @@ export function setDueDone(doc: Y.Doc, dueId: string, done: boolean): boolean {
   return found
 }
 
+/** Move a due date to another day (a repeating one: its series starts there). Returns whether it was found. */
+export function setDueDate(doc: Y.Doc, dueId: string, date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+  let found = false
+  const walk = (el: Y.XmlElement | Y.XmlFragment) => {
+    for (const c of el.toArray()) {
+      if (found || !(c instanceof Y.XmlElement)) continue
+      if (c.nodeName === 'dueDate' && c.getAttribute('id') === dueId) {
+        c.setAttribute('date', date)
+        found = true
+        return
+      }
+      walk(c)
+    }
+  }
+  doc.transact(() => walk(getContent(doc)))
+  return found
+}
+
+/** A new to-do due on `date`, at the end of the note (into its last to-do list, if it ends with one). */
+export function addDueItem(doc: Y.Doc, text: string, date: string, id: string): void {
+  doc.transact(() => {
+    const frag = getContent(doc)
+    const p = new Y.XmlElement('paragraph')
+    p.insert(0, [new Y.XmlText(`${text.trim()} `)])
+    const due = new Y.XmlElement('dueDate')
+    due.setAttribute('date', date)
+    due.setAttribute('id', id)
+    p.insert(1, [due])
+    const item = new Y.XmlElement('taskItem')
+    item.setAttribute('checked', false as unknown as string)
+    item.insert(0, [p])
+    const last = frag.length ? frag.get(frag.length - 1) : null
+    if (last instanceof Y.XmlElement && last.nodeName === 'taskList' && last.getAttribute('kind') !== 'list') last.insert(last.length, [item])
+    else {
+      const list = new Y.XmlElement('taskList')
+      list.insert(0, [item])
+      frag.insert(frag.length, [list])
+    }
+  })
+}
+
 /**
  * Finish a due item: a repeating one moves on to its next date (and stays
  * unticked); any other is ticked. Returns the next date for a repeating item.
