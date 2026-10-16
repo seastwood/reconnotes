@@ -13,7 +13,7 @@ function serviceWorker(): Plugin {
     apply: 'build',
     generateBundle(_opts, bundle) {
       const files = Object.keys(bundle).filter((f) => !f.endsWith('.map'))
-      const assets = ['/', ...files.map((f) => '/' + f), '/manifest.webmanifest', '/icon.svg', '/icon-180.png', '/icon-512.png']
+      const assets = ['/', ...files.map((f) => '/' + f), '/manifest.webmanifest', '/favicon-64.png', '/icon-180.png', '/icon-512.png', '/icon-rounded-192.png', '/icon-rounded-512.png']
       const version = createHash('sha1').update(assets.join()).digest('hex').slice(0, 10)
       const source = `// generated at build time
 const CACHE = 'reconnotes-${version}'
