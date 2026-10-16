@@ -130,8 +130,9 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
     const EDGE = 24
     type Drag = { mode: 'open' | 'close'; x0: number; y0: number; locked: boolean; wasHidden: boolean; target: AskChatTarget | null; last: { x: number; t: number }[] }
     let d: Drag | null = null
-    const el = () => document.querySelector<HTMLElement>('.ask-chat:not(.docked)')
-    const W = () => innerWidth
+    // what moves: the chat over the note (phone), or the panel beside it (and its width)
+    const el = () => (dockedRef.current ? document.querySelector<HTMLElement>('.ask-dock') : document.querySelector<HTMLElement>('.ask-chat:not(.docked)'))
+    const W = () => (dockedRef.current ? (document.querySelector('.ask-dock')?.getBoundingClientRect().width ?? innerWidth) : innerWidth)
     const place = (x: number, animate: boolean) => {
       const e = el()
       if (!e) return
@@ -183,12 +184,12 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
         if (Math.abs(dx) < 8) return
         if ((d.mode === 'open' && dx > 0) || (d.mode === 'close' && dx < 0)) return void (d = null)
         d.locked = true
-        if (dockedRef.current) return
+        if (dockedRef.current && d.mode === 'open') return
         // in it comes, from the edge
         if (d.mode === 'open') askChat.set({ target: d.target, hidden: false, browsing: false, dragX: W() })
       }
       if (ev.cancelable) ev.preventDefault()
-      if (dockedRef.current) return
+      if (dockedRef.current && d.mode === 'open') return
       d.last = [...d.last.slice(-4), { x: t.clientX, t: performance.now() }]
       place(d.mode === 'open' ? Math.max(0, Math.min(W(), W() + dx)) : Math.max(0, dx), false)
     }
@@ -198,9 +199,8 @@ function useChatSlide(docked: boolean, openable: () => AskChatTarget | null) {
       d = null
       const t = ev.changedTouches[0]
       const dx = (t?.clientX ?? drag.x0) - drag.x0
-      if (dockedRef.current) {
-        if (drag.mode === 'open' && dx < -50 && drag.target) openAskChat(drag.target)
-        if (drag.mode === 'close' && dx > 60) closeAskChat()
+      if (dockedRef.current && drag.mode === 'open') {
+        if (dx < -50 && drag.target) openAskChat(drag.target)
         return
       }
       // how fast at the end (px/ms; + rightwards)
