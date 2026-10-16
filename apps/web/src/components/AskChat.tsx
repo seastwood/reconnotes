@@ -591,7 +591,8 @@ function AskChat({
                   : 'What does it say about…?'
         }
         disabled={busy}
-        autoFocus={empty}
+        // (a touch screen: no keyboard until the box is tapped)
+        autoFocus={empty && !window.matchMedia?.('(pointer: coarse)').matches}
         error={error}
         onSend={send}
       />
