@@ -8,6 +8,12 @@ import type { AskResult } from './AskPanel'
  * server keeps them: each question with its answer and sources.
  */
 
+/** what one change took out and put in (Markdown) */
+export interface EditChange {
+  before: string
+  after: string
+}
+
 export interface SavedTurn {
   question: string
   answer: string
@@ -17,7 +23,7 @@ export interface SavedTurn {
   /** the AI's own answer, not from the notes */
   general?: boolean
   /** a change made to the note ("Edit"): its job, how many blocks changed, whether it was taken back */
-  edit?: { job: string; changed: number; reverted?: boolean }
+  edit?: { job: string; changed: number; reverted?: boolean; changes?: EditChange[] }
   at: number
 }
 export interface Conversation {

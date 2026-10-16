@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ArrowUpDown, BookOpen, MessagesSquare, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, ArrowUpDown, BookOpen, Diff, Redo2, MessagesSquare, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
@@ -10,7 +10,7 @@ import { useMedia } from '../lib/media'
 import { useWorkspace } from '../lib/workspace'
 import { ALL_NOTES, DOCK_MEDIA, askChat, browseChats, chatKey, closeAskChat, hideAskChat, lastChatTarget, openAskChat, openChatAt, showAskChat, stopBrowsing, type AskChatTarget } from '../lib/askChat'
 import { Popover } from './Popover'
-import { useAskHistory, when, type Conversation } from './AskHistory'
+import { useAskHistory, when, type Conversation, type EditChange } from './AskHistory'
 import { AskAnswer, Turn, type AskResult } from './AskPanel'
 import { ReferencesBar } from './References'
 import { SaveAsNoteDialog } from './SaveAsNoteDialog'
@@ -533,7 +533,7 @@ function AskChat({
                 </div>
                 <div className="ask-chat-a ask-panel">
                   {t.edit ? (
-                    <EditDone answer={t.answer} job={t.edit.job} changed={t.edit.changed} reverted={Boolean(t.edit.reverted)} />
+                    <EditDone answer={t.answer} job={t.edit.job} changed={t.edit.changed} reverted={Boolean(t.edit.reverted)} changes={t.edit.changes} />
                   ) : (
                     <>
                       <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
@@ -555,6 +555,7 @@ function AskChat({
                       job={j.id}
                       changed={Number((j.result?.edit as { changed?: number } | undefined)?.changed ?? 0)}
                       reverted={Boolean(j.result?.reverted)}
+                      changes={(j.result?.edit as { changes?: EditChange[] } | undefined)?.changes}
                     />
                   ) : (
                     <Turn job={j} onRetry={() => retry(j)} onOpen={go} />
@@ -633,17 +634,34 @@ const CHANGE_REQUEST =
 /** the chat windows set to Edit (by key) */
 const EDITS = 'reconnotes.askEdit'
 
-/** A change your AI made to the note ("Edit"), with Revert. */
-function EditDone({ answer, job, changed, reverted: was }: { answer: string; job: string; changed: number; reverted: boolean }) {
+/** A change's Markdown as it looks in the note: checkboxes and round checks for "- [ ] ", no list markers. */
+function readable(md: string): string {
+  let plain = false
+  return md
+    .split('\n')
+    .flatMap((line) => {
+      if (/^\s*<!--\s*list\s*-->\s*$/.test(line)) return (plain = true), []
+      if (!/^\s*- \[[ xX]\] /.test(line) && line.trim()) plain = false
+      return [line.replace(/^(\s*)- \[( |x|X)\] /, (_m, sp: string, x: string) => `${sp}${x === ' ' ? (plain ? '○' : '☐') : plain ? '◉' : '☑'} `)]
+    })
+    .join('\n')
+}
+
+/**
+ * A change your AI made to the note ("Edit"): Revert takes it back and Reapply puts it back – flip
+ * between them to compare – and "Show changes" sets out what it took out and put in.
+ */
+function EditDone({ answer, job, changed, reverted: was, changes = [] }: { answer: string; job: string; changed: number; reverted: boolean; changes?: EditChange[] }) {
   const [reverted, setReverted] = useState(was)
   const [busy, setBusy] = useState(false)
+  const [showing, setShowing] = useState(false)
   useEffect(() => setReverted(was), [was])
-  const revert = async () => {
+  const flip = async () => {
     setBusy(true)
     try {
-      await api('POST', `/api/ask/edit/${job}/revert`)
-      setReverted(true)
-      showToast('Put back as it was')
+      await api('POST', `/api/ask/edit/${job}/${reverted ? 'reapply' : 'revert'}`)
+      showToast(reverted ? 'The change is back' : 'Put back as it was')
+      setReverted(!reverted)
     } catch (e) {
       showToast((e as Error).message)
     } finally {
@@ -655,16 +673,39 @@ function EditDone({ answer, job, changed, reverted: was }: { answer: string; job
       <p>
         <PencilLine size={14} /> {answer}
       </p>
-      {changed > 0 &&
-        (reverted ? (
-          <span className="hint">
-            <Undo2 size={13} /> Reverted
-          </span>
-        ) : (
-          <button className="text ask-revert" onClick={() => void revert()} disabled={busy}>
-            {busy ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />} Revert
+      {changed > 0 && (
+        <div className="ask-edit-actions">
+          {changes.length > 0 && (
+            <button className="text" onClick={() => setShowing(!showing)} aria-expanded={showing}>
+              <Diff size={14} /> {showing ? 'Hide changes' : 'Show changes'}
+            </button>
+          )}
+          <button className="text ask-revert" onClick={() => void flip()} disabled={busy} title={reverted ? 'Put the change back' : 'Put the note back as it was'}>
+            {busy ? <Loader2 size={14} className="spin" /> : reverted ? <Redo2 size={14} /> : <RotateCcw size={14} />} {reverted ? 'Reapply' : 'Revert'}
           </button>
-        ))}
+        </div>
+      )}
+      {reverted && changed > 0 && <span className="hint ask-edit-state">Reverted – the note is as it was before.</span>}
+      {showing && (
+        <div className="ask-edit-diff">
+          {changes.map((c, i) => (
+            <div key={i} className="ask-edit-change">
+              {c.before && (
+                <div className="ask-edit-before">
+                  <span className="ask-edit-label">Before</span>
+                  <pre>{readable(c.before)}</pre>
+                </div>
+              )}
+              {c.after && (
+                <div className="ask-edit-after">
+                  <span className="ask-edit-label">After</span>
+                  <pre>{readable(c.after)}</pre>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

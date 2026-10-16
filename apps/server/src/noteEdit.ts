@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { getContent, noteToMarkdown } from '@reconnotes/core'
 
 /**
  * Editing a note with AI ("Edit" in the chat)
@@ -82,7 +83,22 @@ const children = (f: Y.XmlFragment) => f.toArray().filter((c): c is Y.XmlElement
  * Put the AI's version into the note: only the blocks that differ change. `next`: its blocks, in a
  * fragment of their own (already in a document, so they can be compared and copied).
  */
-export function applyEdit(frag: Y.XmlFragment, next: Y.XmlFragment): { record: EditRecord; changed: number } {
+/** Blocks as Markdown, to show what a change took out and put in. */
+function asMarkdown(nodes: (Y.XmlElement | Y.XmlText)[]): string {
+  if (!nodes.length) return ''
+  const d = new Y.Doc()
+  getContent(d).insert(0, nodes.map((n) => n.clone()))
+  const md = noteToMarkdown(d).trim()
+  return md.length > 3000 ? md.slice(0, 3000) + '\n…' : md
+}
+
+/** What one change did: the note's lines before and after (Markdown). */
+export interface Change {
+  before: string
+  after: string
+}
+
+export function applyEdit(frag: Y.XmlFragment, next: Y.XmlFragment): { record: EditRecord; changed: number; changes: Change[] } {
   const before = children(frag)
   const after = children(next)
   const gaps = diffBlocks(before.map(blockKey), after.map(blockKey))
@@ -94,6 +110,8 @@ export function applyEdit(frag: Y.XmlFragment, next: Y.XmlFragment): { record: E
     if (taken.length) oldFrag.insert(oldFrag.length, taken)
     record.gaps.push({ at: g.j0, keys: after.slice(g.j0, g.j1).map(blockKey), removed: g.i1 - g.i0 })
   }
+  // what each change takes out and puts in (read before the old blocks go)
+  const changes = gaps.slice(0, 20).map((g) => ({ before: asMarkdown(before.slice(g.i0, g.i1)), after: asMarkdown(after.slice(g.j0, g.j1)) }))
   // from the end, so the places before stay where they are
   for (const g of [...gaps].reverse()) {
     if (g.i1 > g.i0) frag.delete(g.i0, g.i1 - g.i0)
@@ -101,19 +119,20 @@ export function applyEdit(frag: Y.XmlFragment, next: Y.XmlFragment): { record: E
     if (put.length) frag.insert(g.i0, put)
   }
   record.old = Buffer.from(Y.encodeStateAsUpdate(oldDoc)).toString('base64')
-  return { record, changed: gaps.reduce((s, g) => s + Math.max(g.i1 - g.i0, g.j1 - g.j0), 0) }
+  return { record, changed: gaps.reduce((s, g) => s + Math.max(g.i1 - g.i0, g.j1 - g.j0), 0), changes }
 }
 
 /**
  * Take an edit back: each change's blocks swapped for the ones it took out. They're found by their
  * words (nearest to where they were, if the note has changed around them); if any were changed since,
- * nothing is done and false comes back.
+ * nothing is done and null comes back. Else what takes this back in turn (to put the edit back again).
  */
-export function revertEdit(frag: Y.XmlFragment, record: EditRecord): boolean {
+export function revertEdit(frag: Y.XmlFragment, record: EditRecord): EditRecord | null {
   const oldDoc = new Y.Doc()
   Y.applyUpdate(oldDoc, Buffer.from(record.old, 'base64'))
   const old = children(oldDoc.getXmlFragment('old'))
-  const keys = children(frag).map(blockKey)
+  const now = children(frag)
+  const keys = now.map(blockKey)
   // where each change's blocks are now
   const places: number[] = []
   let shift = 0
@@ -125,7 +144,7 @@ export function revertEdit(frag: Y.XmlFragment, record: EditRecord): boolean {
       for (let p = 0; p + g.keys.length <= keys.length; p++) {
         if (g.keys.every((k, x) => keys[p + x] === k) && !places.includes(p) && (best < 0 || Math.abs(p - want) < Math.abs(best - want))) best = p
       }
-    if (best < 0) return false
+    if (best < 0) return null
     places.push(best)
     shift = best - g.at
   }
@@ -136,13 +155,26 @@ export function revertEdit(frag: Y.XmlFragment, record: EditRecord): boolean {
     from += g.removed
     return part
   })
-  const order = record.gaps.map((_, k) => k).sort((x, y) => places[y] - places[x])
-  for (const k of order) {
+  // what takes this back: the blocks about to be taken out, and where the old ones will be
+  const ascending = record.gaps.map((_, k) => k).sort((x, y) => places[x] - places[y])
+  const backDoc = new Y.Doc()
+  const backFrag = backDoc.getXmlFragment('old')
+  const back: EditRecord = { gaps: [], old: '' }
+  let offset = 0
+  for (const k of ascending) {
+    const g = record.gaps[k]
+    const taken = now.slice(places[k], places[k] + g.keys.length).map((n) => n.clone())
+    if (taken.length) backFrag.insert(backFrag.length, taken)
+    back.gaps.push({ at: places[k] + offset, keys: olds[k].map(blockKey), removed: g.keys.length })
+    offset += olds[k].length - g.keys.length
+  }
+  back.old = Buffer.from(Y.encodeStateAsUpdate(backDoc)).toString('base64')
+  for (const k of [...ascending].reverse()) {
     const g = record.gaps[k]
     if (g.keys.length) frag.delete(places[k], g.keys.length)
     if (olds[k].length) frag.insert(places[k], olds[k].map((n) => n.clone()))
   }
-  return true
+  return back
 }
 
 /**

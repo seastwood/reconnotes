@@ -332,8 +332,11 @@ export function mergeVoices(
 
 /** for snapshots before a redo replaces a result */
 let versionStore: Store | null = null
-/** Take back an "Edit" made from the chat (set up with the handlers). Null when done; else why not. */
-export let revertEditJob: (job: Job) => Promise<string | null> = async () => 'Not ready yet.'
+/**
+ * Take back an "Edit" made from the chat – or, taken back, put it back again (set up with the
+ * handlers). Null when done; else why not.
+ */
+export let flipEditJob: (job: Job, revert: boolean) => Promise<string | null> = async () => 'Not ready yet.'
 
 export function registerJobHandlers(config: Config, store: Store, sync: SyncEngine, ai: Ai, jobs: Jobs, samples?: Samples) {
   versionStore = store
@@ -565,8 +568,9 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     // "Anything": the AI's own answer, not from the notes (a recipe for the Recipes folder)
     if (job.input.mode === 'edit') {
       const e = await editAsked(job)
-      saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: e.answer, sources: [], edit: { job: job.id, changed: e.changed }, at: Date.now() })
-      return { result: { answer: e.answer, sources: [], question: String(job.input.question ?? ''), edit: { changed: e.changed }, noteId: e.noteId }, agent: e.agent }
+      const changes = 'changes' in e ? e.changes : []
+      saveTurn(store, job.id, job.input, { question: String(job.input.question ?? ''), answer: e.answer, sources: [], edit: { job: job.id, changed: e.changed, changes }, at: Date.now() })
+      return { result: { answer: e.answer, sources: [], question: String(job.input.question ?? ''), edit: { changed: e.changed, changes }, noteId: e.noteId }, agent: e.agent }
     }
     const r: Awaited<ReturnType<typeof askNotes>> & { general?: boolean } =
       job.input.mode === 'general'
@@ -722,7 +726,7 @@ The request again: ${request}`
     await sync.change(noteDocName(noteId), (d) => {
       applied = applyEdit(getContent(d), scratch!.getXmlFragment('content'))
     })
-    const { record, changed } = applied! as ReturnType<typeof applyEdit>
+    const { record, changed, changes } = applied! as ReturnType<typeof applyEdit>
     if (changed) fs.writeFileSync(jobs.filePath(job.id), JSON.stringify(record))
     const after = sync.getDoc(noteDocName(noteId))
     if (after) {
@@ -730,28 +734,30 @@ The request again: ${request}`
       await sync.change(WORKSPACE_DOC, (w) => updateNote(w, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
     }
     const answer = changed ? said || 'Changed the note as asked.' : 'Nothing needed changing – the note is as it was.'
-    return { answer, sources: [], changed, agent, noteId }
+    return { answer, sources: [], changed, changes, agent, noteId }
   }
 
-  /** Take an "Edit" back (from the chat). Null: done; else why not. */
-  revertEditJob = async (job: Job): Promise<string | null> => {
+  /** Take an "Edit" back, or put it back (from the chat). Null: done; else why not. */
+  flipEditJob = async (job: Job, revert: boolean): Promise<string | null> => {
     const file = jobs.filePath(job.id)
-    if (job.result?.reverted) return null
+    if (Boolean(job.result?.reverted) === revert) return null
     if (!fs.existsSync(file)) return 'This change can’t be taken back from here any more – the note’s History has it as it was.'
+    // the file holds what takes the note's current state back: the edit, or (reverted) its revert
     const record = JSON.parse(fs.readFileSync(file, 'utf8')) as EditRecord
     const noteId = String(job.result?.noteId ?? '')
-    let ok = false
+    let back: EditRecord | null = null
     await sync.change(noteDocName(noteId), (d) => {
-      ok = revertEdit(getContent(d), record)
+      back = revertEdit(getContent(d), record)
     })
-    if (!ok) return 'Those lines have changed since, so they weren’t put back – the note’s History has it as it was before the edit.'
+    if (!back) return revert ? 'Those lines have changed since, so they weren’t put back – the note’s History has it as it was before the edit.' : 'The note has changed there since, so the edit wasn’t put back.'
+    fs.writeFileSync(file, JSON.stringify(back))
     const after = sync.getDoc(noteDocName(noteId))
     if (after) {
       const ex = extractNote(after)
       await sync.change(WORKSPACE_DOC, (w) => updateNote(w, noteId, { title: ex.title, snippet: ex.snippet, tags: ex.tags, links: ex.links }))
     }
-    jobs.setResult(job.id, { ...(job.result ?? {}), reverted: true })
-    markEditReverted(store, typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id, job.id, true)
+    jobs.setResult(job.id, { ...(job.result ?? {}), reverted: revert })
+    markEditReverted(store, typeof job.input.thread === 'string' && job.input.thread ? job.input.thread : job.id, job.id, revert)
     return null
   }
 

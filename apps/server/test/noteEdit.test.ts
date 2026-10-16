@@ -51,8 +51,22 @@ describe('editing a note with AI', () => {
 
     // typed meanwhile, elsewhere: revert still finds the change
     note.getXmlFragment('content').insert(0, [para('Added later')])
-    expect(revertEdit(note.getXmlFragment('content'), record)).toBe(true)
+    const back = revertEdit(note.getXmlFragment('content'), record)
+    expect(back).not.toBeNull()
     expect(texts(note).map((k) => k.replace(/<[^>]+>/g, ''))).toEqual(['Added later', 'Groceries', 'milk', 'eggs', 'Call mom'])
+    // and back again (to compare), and back once more
+    const again = revertEdit(note.getXmlFragment('content'), back!)
+    expect(again).not.toBeNull()
+    expect(texts(note).slice(1)).toEqual(texts(ai))
+    expect(revertEdit(note.getXmlFragment('content'), again!)).not.toBeNull()
+    expect(texts(note).map((k) => k.replace(/<[^>]+>/g, ''))).toEqual(['Added later', 'Groceries', 'milk', 'eggs', 'Call mom'])
+  })
+
+  it('says what each change took out and put in', () => {
+    const note = doc([para('Groceries'), para('milk'), para('eggs')])
+    const ai = doc([para('Groceries'), checklist(['milk', 'eggs'])])
+    const { changes } = applyEdit(note.getXmlFragment('content'), ai.getXmlFragment('content'))
+    expect(changes).toEqual([{ before: 'milk\n\neggs', after: '- [ ] milk\n- [ ] eggs' }])
   })
 
   it("won't revert over blocks changed since", () => {
@@ -61,7 +75,7 @@ describe('editing a note with AI', () => {
     const { record } = applyEdit(note.getXmlFragment('content'), ai.getXmlFragment('content'))
     const f = note.getXmlFragment('content')
     ;(f.get(1) as Y.XmlElement).get(0) instanceof Y.XmlText && ((f.get(1) as Y.XmlElement).get(0) as Y.XmlText).insert(3, '!')
-    expect(revertEdit(f, record)).toBe(false)
+    expect(revertEdit(f, record)).toBeNull()
   })
 })
 

@@ -22,7 +22,7 @@ export interface AskTurnSaved {
   /** answered by the AI itself, not from the notes ("Anything" in the chat) */
   general?: boolean
   /** a change made to the note ("Edit"): its job, how many blocks changed, whether it was taken back */
-  edit?: { job: string; changed: number; reverted?: boolean }
+  edit?: { job: string; changed: number; reverted?: boolean; changes?: { before: string; after: string }[] }
   at: number
 }
 
