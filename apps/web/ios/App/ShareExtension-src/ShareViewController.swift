@@ -3,7 +3,9 @@ import UniformTypeIdentifiers
 
 /// "Share → ReconNotes": saves what was shared (links, text, photos, PDFs,
 /// recordings, files) into the App Group inbox and closes. ReconNotes turns
-/// it into a new note the next time it's opened.
+/// it into a new note the next time it's opened – or adds it to the end of a
+/// note picked here (your pinned and recent notes, which the app keeps in
+/// ShareTargets.json).
 ///
 /// Needs the App Group `group.com.reconnotes.app` on both the app and this
 /// extension (Signing & Capabilities › App Groups) – see the README.
@@ -28,10 +30,101 @@ class ShareViewController: UIViewController {
             banner.widthAnchor.constraint(equalToConstant: 260),
             banner.heightAnchor.constraint(equalToConstant: 64),
         ])
-        Task { await save() }
+        targets = loadTargets()
+        if targets.isEmpty {
+            Task { await save(target: nil) }
+        } else {
+            banner.isHidden = true
+            showPicker()
+        }
     }
 
-    private func save() async {
+    // MARK: - where it goes: a new note, or the end of a note you pick
+
+    private var targets: [(id: String, title: String)] = []
+    private let card = UIView()
+
+    private func loadTargets() -> [(id: String, title: String)] {
+        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup),
+              let data = try? Data(contentsOf: container.appendingPathComponent("ShareTargets.json")),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let notes = obj["notes"] as? [[String: String]] else { return [] }
+        return notes.prefix(8).compactMap { n in
+            guard let id = n["id"] else { return nil }
+            let title = (n["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (id, title.isEmpty ? "Untitled" : title)
+        }
+    }
+
+    private func row(_ title: String, image: String, tag: Int, bold: Bool = false) -> UIButton {
+        var config = UIButton.Configuration.plain()
+        config.title = title
+        config.image = UIImage(systemName: image)
+        config.imagePadding = 10
+        config.titleLineBreakMode = .byTruncatingTail
+        config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
+            var a = attrs
+            a.font = UIFont.preferredFont(forTextStyle: bold ? .headline : .body)
+            return a
+        }
+        let b = UIButton(configuration: config)
+        b.contentHorizontalAlignment = .leading
+        b.tag = tag
+        b.addTarget(self, action: #selector(picked(_:)), for: .touchUpInside)
+        return b
+    }
+
+    private func showPicker() {
+        card.backgroundColor = .systemBackground
+        card.layer.cornerRadius = 16
+        card.layer.masksToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let head = UILabel()
+        head.text = "Add to ReconNotes"
+        head.font = .preferredFont(forTextStyle: .headline)
+        head.textAlignment = .center
+        head.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        stack.addArrangedSubview(head)
+        stack.addArrangedSubview(row("New note", image: "square.and.pencil", tag: 0, bold: true))
+        let sub = UILabel()
+        sub.text = "   ADD TO THE END OF"
+        sub.font = .preferredFont(forTextStyle: .caption1)
+        sub.textColor = .secondaryLabel
+        sub.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        stack.addArrangedSubview(sub)
+        for (i, t) in targets.enumerated() { stack.addArrangedSubview(row(t.title, image: "doc.text", tag: i + 1)) }
+        let cancel = row("Cancel", image: "xmark", tag: -1)
+        cancel.tintColor = .secondaryLabel
+        stack.addArrangedSubview(cancel)
+        card.addSubview(stack)
+        view.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            card.widthAnchor.constraint(equalToConstant: 320),
+            stack.topAnchor.constraint(equalTo: card.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -4),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+        ])
+    }
+
+    @objc private func picked(_ sender: UIButton) {
+        if sender.tag < 0 {
+            extensionContext?.completeRequest(returningItems: nil)
+            return
+        }
+        let target: (id: String, title: String)? = sender.tag == 0 ? nil : targets[sender.tag - 1]
+        card.removeFromSuperview()
+        banner.isHidden = false
+        Task { await save(target: target) }
+    }
+
+    private func save(target: (id: String, title: String)?) async {
         guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
             return finish("Turn on the App Group for ReconNotes in Xcode (see the README).", ok: false)
         }
@@ -53,10 +146,11 @@ class ShareViewController: UIViewController {
         }
         var share: [String: Any] = ["id": id, "createdAt": Date().timeIntervalSince1970 * 1000, "items": items]
         if let title { share["title"] = title }
+        if let target { share["target"] = target.id }
         if let data = try? JSONSerialization.data(withJSONObject: share) {
             try? data.write(to: dir.appendingPathComponent("share.json"))
         }
-        finish("Added to ReconNotes ✓", ok: true)
+        finish(target.map { "Added to “\($0.title)” ✓" } ?? "Added to ReconNotes ✓", ok: true)
     }
 
     /// One shared thing: a file (photo, PDF, recording…), a link, or text.

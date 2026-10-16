@@ -18,3 +18,7 @@ export function noteOpened(id: string | null) {
 }
 
 export const useRecentNotes = () => useStore(recent, (s) => s.ids)
+
+export const recentNoteIds = () => recent.get().ids
+/** Call `fn` whenever the recent notes change. */
+export const onRecentNotes = (fn: () => void) => recent.subscribe(fn)

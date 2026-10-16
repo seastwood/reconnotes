@@ -428,7 +428,8 @@ pictures, PDFs, recordings and other files: each becomes a new note. Nothing to 
 
 **Share → ReconNotes (share sheet) and the Quick capture widget.** To share links from Safari,
 photos from Photos, recordings from Voice Memos and so on, and to get the Home Screen and Lock Screen
-widget, add the app extensions once, on the Mac:
+widget, add the app extensions once, on the Mac. Sharing offers *New note* or one of your pinned
+and recent notes to add to the end of.
 
 ```bash
 gem install --user-install xcodeproj                      # once (or: sudo gem install xcodeproj)

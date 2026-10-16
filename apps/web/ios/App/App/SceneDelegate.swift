@@ -514,6 +514,9 @@ public class PdfSharePlugin: CAPPlugin, CAPBridgedPlugin, WKNavigationDelegate {
 ///
 ///     ShareInbox.take() → { shares: [{ …share.json, dir }] }
 ///     ShareInbox.remove({ ids })
+///     ShareInbox.setTargets({ notes: [{ id, title }] }) – the notes the Share Extension offers to
+///       add to (pinned and recent ones), written to the App Group as ShareTargets.json; a share
+///       for one of them has `target: <note id>`
 @objc(ShareInboxPlugin)
 public class ShareInboxPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ShareInboxPlugin"
@@ -521,6 +524,7 @@ public class ShareInboxPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "take", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setTargets", returnType: CAPPluginReturnPromise),
     ]
 
     static var appGroup: String {
@@ -577,6 +581,18 @@ public class ShareInboxPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
         call.resolve(["shares": shares])
+    }
+
+    @objc func setTargets(_ call: CAPPluginCall) {
+        guard let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroup) else { return call.resolve() }
+        let notes: [[String: String]] = (call.getArray("notes") ?? []).prefix(10).compactMap { value in
+            guard let n = value as? JSObject, let id = n["id"] as? String, let title = n["title"] as? String else { return nil }
+            return ["id": id, "title": title]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: ["notes": notes]) {
+            try? data.write(to: group.appendingPathComponent("ShareTargets.json"))
+        }
+        call.resolve()
     }
 
     @objc func remove(_ call: CAPPluginCall) {
