@@ -31,6 +31,7 @@ import {
   SearchX,
   Users,
   PenOff,
+  Pin,
 } from 'lucide-react'
 import {
   buildTree,
@@ -142,6 +143,11 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
   // saved searches shown here (pin them in the search suggestions)
   const smart = useSavedSearches().filter((s) => s.pinned)
   const ws = useWorkspace()
+  // pinned notes, wherever they are: one tap away
+  const pinnedNotes = useMemo(
+    () => ws.notes.filter((n) => n.pinned && !n.trashedAt && !n.template).sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled')).slice(0, 12),
+    [ws.notes],
+  )
   // the folders search looks in (chosen with "Search in this folder…" or the filter): shown before you type
   const scope = useSearchScope()
   const scopeName = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
@@ -574,6 +580,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
       )}
       {!search.trim() && searchFocus && (
         <SearchSuggestions
+          onOpenNote={(id) => onOpenResult(id, '')}
           onPick={(q, folders) => {
             if (folders) setSearchFolders(folders)
             onSearch(q)
@@ -617,6 +624,21 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
             <MessagesSquare size={16} /> <span className="folder-name">Chats</span>
             <UnreadChats />
           </div>
+        )}
+        {pinnedNotes.length > 0 && (
+          <>
+            <div className="section-label">Pinned</div>
+            {pinnedNotes.map((n) => (
+              <div
+                key={n.id}
+                className={`folder-row special pinned-note${n.id === activeNoteId ? ' active' : ''}`}
+                onClick={() => onOpenResult(n.id, '')}
+                title={n.title || 'Untitled'}
+              >
+                <Pin size={15} /> <span className="folder-name">{n.title || 'Untitled'}</span>
+              </div>
+            ))}
+          </>
         )}
         {smart.length > 0 && (
           <>

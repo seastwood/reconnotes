@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileText, Folder, Hash, Search, Zap } from 'lucide-react'
 import { matchScore, useCommands } from '../lib/commands'
 import { useWorkspace } from '../lib/workspace'
+import { useRecentNotes } from '../lib/recentNotes'
 
 interface Item {
   key: string
@@ -28,6 +29,7 @@ const ICON = { command: Zap, note: FileText, folder: Folder, tag: Hash, search: 
 export function CommandPalette({ onClose, onOpenNote, onOpenFolder, onOpenTag, onSearch }: Props) {
   const commands = useCommands()
   const ws = useWorkspace()
+  const recentIds = useRecentNotes()
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const list = useRef<HTMLUListElement>(null)
@@ -55,16 +57,22 @@ export function CommandPalette({ onClose, onOpenNote, onOpenFolder, onOpenTag, o
         if (score) out.push({ key: `t:${t}`, label: `#${t}`, detail: 'Tag', kind: 'tag', score, run: () => onOpenTag(t) })
       }
     } else {
-      // nothing typed: recent notes after the commands
-      for (const n of [...ws.notes].filter((n) => !n.trashedAt && !n.template).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5)) {
-        out.push({ key: `n:${n.id}`, label: n.title || 'Untitled', detail: 'Recent note', kind: 'note', score: 0, run: () => onOpenNote(n.id) })
+      // nothing typed: the notes opened last (then the ones edited last), then the commands
+      const live = new Map(ws.notes.filter((n) => !n.trashedAt && !n.template).map((n) => [n.id, n]))
+      const ids = [...recentIds.filter((id) => live.has(id)), ...[...live.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((n) => n.id)]
+      const recent: Item[] = []
+      for (const id of [...new Set(ids)].slice(0, 6)) {
+        const n = live.get(id)!
+        recent.push({ key: `n:${n.id}`, label: n.title || 'Untitled', detail: recentIds.includes(id) ? 'Opened recently' : 'Edited recently', kind: 'note', score: 1000, run: () => onOpenNote(n.id) })
       }
+      // (first: going back to a note is what ⌘K is used for most)
+      out.unshift(...recent)
     }
     const sorted = out.sort((a, b) => b.score - a.score).slice(0, 60)
     // always offer to search inside notes, too
     if (q.trim()) sorted.push({ key: 'search', label: `Search everything for “${q.trim()}”`, detail: 'Search', kind: 'command', score: 0, run: () => onSearch(q.trim()) })
     return sorted
-  }, [commands, ws, q, onOpenNote, onOpenFolder, onOpenTag, onSearch])
+  }, [commands, ws, q, onOpenNote, onOpenFolder, onOpenTag, onSearch, recentIds])
 
   useEffect(() => setSel(0), [q])
   useEffect(() => {

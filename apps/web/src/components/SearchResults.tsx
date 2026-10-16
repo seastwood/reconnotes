@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowUpDown, History, Star, AudioLines, File as FileIcon, Folder, Image as ImageIcon, ListFilter, Lock, PenLine, Sparkles, X, Pin, PinOff } from 'lucide-react'
+import { ArrowUpDown, FileText, History, Star, AudioLines, File as FileIcon, Folder, Image as ImageIcon, ListFilter, Lock, PenLine, Sparkles, X, Pin, PinOff } from 'lucide-react'
 import { buildTree, effectiveFolderId, folderPaths, foldersNamedIn, type FolderData, type NoteData, type TreeNode } from '@reconnotes/core'
 import { localText, searchNotes, type SearchResult } from '../lib/search'
 import { parseQuery, textPasses, type ParsedQuery } from '../lib/searchQuery'
@@ -8,6 +8,7 @@ import { setSearchFolders, toggleSearchFolder, useSearchScope } from '../lib/sea
 import { useFolderAccess } from '../lib/folderLock'
 import { safeLocalGet, safeLocalSet } from '../lib/store'
 import { useWorkspace } from '../lib/workspace'
+import { useRecentNotes } from '../lib/recentNotes'
 import { useProgressive } from '../lib/progressive'
 import { AskPanel } from './AskPanel'
 import { Popover } from './Popover'
@@ -445,8 +446,10 @@ function findTermFor(r: SearchResult, p: ParsedQuery): string | undefined {
 }
 
 /** Under the empty search box: saved and recent searches, and what you can type. */
-export function SearchSuggestions({ onPick }: { onPick: (query: string, folders?: string[]) => void }) {
+export function SearchSuggestions({ onPick, onOpenNote }: { onPick: (query: string, folders?: string[]) => void; onOpenNote?: (noteId: string) => void }) {
   const recent = useRecentSearches()
+  // the notes opened last (not ones in locked folders)
+  const recentIds = useRecentNotes()
   const savedList = useSavedSearches()
   const ws = useWorkspace()
   const name = (id: string) => (id === 'none' ? 'Not in a folder' : (ws.folders.find((f) => f.id === id)?.name ?? 'Folder'))
@@ -489,10 +492,27 @@ export function SearchSuggestions({ onPick }: { onPick: (query: string, folders?
           ))}
         </>
       )}
+      {onOpenNote && (() => {
+        const notes = recentIds
+          .map((id) => ws.notes.find((n) => n.id === id && !n.trashedAt && !ws.lockedNoteIds.has(n.id)))
+          .filter((n): n is NonNullable<typeof n> => Boolean(n))
+          .slice(0, 5)
+        return notes.length > 0 ? (
+          <>
+            <div className="section-label">Opened recently</div>
+            {notes.map((n) => (
+              <div key={n.id} className="suggestion" onClick={() => onOpenNote(n.id)}>
+                <FileText size={14} className="suggestion-icon" />
+                <span className="suggestion-text">{n.title || 'Untitled'}</span>
+              </div>
+            ))}
+          </>
+        ) : null
+      })()}
       {recent.length > 0 && (
         <>
           <div className="section-label">
-            Recent
+            Recent searches
             <button className="text" onClick={clearRecentSearches}>
               Clear
             </button>

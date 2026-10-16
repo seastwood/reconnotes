@@ -29,6 +29,7 @@ import { Panel } from './components/Panel'
 import { ImageViewerHost } from './components/ImageViewer'
 import { CommandPalette } from './components/CommandPalette'
 import { shouldShowTour } from './components/Tour'
+import { noteOpened } from './lib/recentNotes'
 import { registerCommands } from './lib/commands'
 import { createFolder, createNote, listNotes, updateNote } from '@reconnotes/core'
 import { pinNotes, trashNotes } from './lib/noteActions'
@@ -372,6 +373,8 @@ export function App() {
   // iOS app: a recording still running (the page was reloaded) shows again
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => resumeRecording(nav.noteId), [])
+  // the notes opened last (⌘K and search offer them)
+  useEffect(() => noteOpened(nav.noteId), [nav.noteId])
   // iOS app: tapping a notification from the server opens what it's about
   useEffect(() => startPush({ note: (id) => openFromReminder.current(id), search: (q) => appRef.current.showSearch(q) }), [])
   // iOS app: things shared to ReconNotes become notes
