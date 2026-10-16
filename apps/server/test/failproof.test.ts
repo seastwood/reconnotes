@@ -15,6 +15,7 @@ let app: App
 let base: string
 let dir: string
 let fake: http.Server
+const loaded = new Set(['reader:latest'])
 let url: string
 let readerId: string
 let goodId: string
@@ -29,7 +30,14 @@ beforeAll(async () => {
     res.writeHead(200, { 'Content-Type': 'application/json' })
     if (req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['completion', 'vision'] }))
     if (req.url === '/api/version') return res.end(JSON.stringify({ version: '0.9.0' }))
-    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [{ name: 'reader:latest', size: 5 * 1048576 * 1000, size_vram: 5 * 1048576 * 1000 }] }))
+    // what's loaded, like Ollama: a request loads its model, keep_alive 0 unloads it
+    if (req.url === '/api/ps') return res.end(JSON.stringify({ models: [...loaded].map((name) => ({ name, size: 5 * 1048576 * 1000, size_vram: 5 * 1048576 * 1000 })) }))
+    const name = typeof json.model === 'string' ? (json.model.includes(':') ? json.model : `${json.model}:latest`) : null
+    if (name && json.keep_alive === 0) {
+      loaded.delete(name)
+      return res.end(JSON.stringify({ done: true }))
+    }
+    if (name) loaded.add(name)
     // "reader" misreads, "good" reads it right
     const content = json.model === 'good' ? 'Order safety glasses' : 'Order safty glases'
     res.end(JSON.stringify({ message: { role: 'assistant', content }, done_reason: 'stop', eval_count: 5 }))
