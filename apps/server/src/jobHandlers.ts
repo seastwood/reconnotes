@@ -51,7 +51,7 @@ import { scopeFromInput } from './access'
 import type { AskTurn } from './ask'
 import { buildDigest, digestFolder } from './digest'
 import { markdownToNodes, type Ctx } from './importNotes'
-import { attendeeNames, meetingNotesText } from './meetingNotes'
+import { addNextMeeting, attendeeNames, meetingNotesText, nextMeetingIn } from './meetingNotes'
 import { askRefs, markEditReverted, saveTurn, setAskRefs } from './askHistory'
 import { applyEdit, blockKey, diffBlocks, findPart, revertEdit, wholeNoteAsList, type EditRecord } from './noteEdit'
 import { adoptImport, importWebPages, importsFor, refreshImport } from './webImport'
@@ -1120,7 +1120,7 @@ The request again: ${request}`
     const heard = turns && voices >= 2 ? labelledTranscript(turns, names) : transcript
     const r = await ai.meetingNotes(notes, heard, todayLabel(Date.now(), tzOffset), { attendees, people, voices, named: Object.values(names), fresh })
     // "by Friday" → a due date on the to-do (the AI isn't trusted with the calendar)
-    const md = r.text
+    let md = r.text
       .split('\n')
       .map((l) => {
         const m = l.match(/^(\s*[-*]\s+\[ \]\s+)(.*)$/)
@@ -1129,6 +1129,9 @@ The request again: ${request}`
         return due ? `${m[1]}${m[2]} !${due}` : l
       })
       .join('\n')
+    // a next meeting agreed on: a to-do on that day (in Due, the calendar feed and reminders)
+    const next = nextMeetingIn(heard, (t) => dueDateIn(t, Date.now(), tzOffset), dueDateIn('today', Date.now(), tzOffset) ?? '')
+    if (next) md = addNextMeeting(md, next)
     // each point with a ▶ link to where it was said in the recording (where words have times)
     const withLinks = att && said.length ? addListenLinks(md, said, att.id, await meaningOfPoints(md, said)).markdown : md
     await writeResult(sync, noteId, job.id, withLinks, 'end', replaced(job) ?? earlierNotes(job, noteId, String(attachmentId)), { dueFor: (date) => (/^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : null) })

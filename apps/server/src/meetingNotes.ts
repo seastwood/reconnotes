@@ -331,3 +331,40 @@ export function normalizeMeetingNotes(text: string): string {
 }
 
 export { attendeeNames } from '@reconnotes/core'
+
+/**
+ * The next meeting, when one was agreed ("let's meet again next Thursday", "catch up on the 22nd"):
+ * a to-do on that day, so it's in Due, the calendar feed and reminders. The last such mention (the
+ * one settled on) with a day that's still to come; null when none was said.
+ */
+export function nextMeetingIn(transcript: string, dueIn: (text: string) => string | null, today: string): { text: string; date: string } | null {
+  const sentences = transcript.split(/(?<=[.!?])\s+|\n+/)
+  let found: { text: string; date: string } | null = null
+  for (const s of sentences) {
+    if (!/\b(meet(?:ing)?|catch up|sync|reconvene|regroup|check in|touch base|get together|follow[- ]up (?:call|meeting)|call again)\b/i.test(s)) continue
+    // said of a meeting to come, not one that happened
+    if (!/\b(next|again|let'?s|we'?ll|we will|we should|shall we|schedule|book|set up|plan to|follow[- ]up|reconvene|regroup)\b/i.test(s)) continue
+    if (/\b(last|previous|earlier)\s+(meeting|week|time)\b/i.test(s)) continue
+    const date = dueIn(s)
+    if (date && date > today) found = { text: s.replace(/^\s*[A-Z][\w .'-]{0,30}:\s+/, '').trim(), date }
+  }
+  return found
+}
+
+/** The next meeting as a to-do under "Action items" (instead of "No action items", if that's all there is). */
+export function addNextMeeting(markdown: string, next: { date: string }): string {
+  if (/^\s*[-*]\s+\[[ x]\]\s+.*\b(meeting|meet|catch up)\b.*!\d{4}-\d{2}-\d{2}/im.test(markdown)) return markdown
+  const item = `- [ ] Next meeting !${next.date}`
+  const lines = markdown.split('\n')
+  const head = lines.findIndex((l) => /^#{1,4}\s*action items\b/i.test(l))
+  if (head < 0) return `${markdown.trimEnd()}\n\n## Action items\n\n${item}\n`
+  const none = lines.findIndex((l, i) => i > head && /^\s*[-*]\s+\[ \]\s+no action items\b/i.test(l))
+  if (none >= 0) lines[none] = item
+  else {
+    // after the section's last item
+    let at = head + 1
+    for (let i = head + 1; i < lines.length && !/^#{1,4}\s/.test(lines[i]); i++) if (lines[i].trim()) at = i + 1
+    lines.splice(at, 0, item)
+  }
+  return lines.join('\n')
+}
