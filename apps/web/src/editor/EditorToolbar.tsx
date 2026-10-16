@@ -66,6 +66,7 @@ import {
   LockOpen,
   CircleCheck,
   RotateCcw,
+  Tag,
 } from 'lucide-react'
 import { setNoteReadOnly, type ReadOnlyState } from '../lib/readOnly'
 import { getNotes, noteDocName, noteToMarkdown, readNote, updateNote } from '@reconnotes/core'
@@ -86,6 +87,7 @@ import { meetingStart } from '../lib/meeting'
 import { useStore } from '../lib/store'
 import { takeQuickAction } from '../lib/appLinks'
 import { askChat, closeAskChat, openAskChat } from '../lib/askChat'
+import { suggestTitle } from './SuggestTitle'
 import { openRefs, useRefs } from '../lib/refs'
 import { Capacitor } from '@capacitor/core'
 
@@ -680,6 +682,9 @@ export function EditorToolbar({ editor, noteId, folderId, onOpenNote, onBack, on
             </button>
             <button onClick={() => (setMenu(null), void run('Finding to-dos…', () => noteAction(editor, noteId, 'todos')))}>
               <ListTodo size={16} /> Extract to-dos
+            </button>
+            <button onClick={() => (setMenu(null), void run('Asking…', () => suggestTitle(noteId)))} title="A title and #tags from your AI – shown above the note to use or leave">
+              <Tag size={16} /> Suggest a title and tags
             </button>
             <button onClick={() => (setMenu(null), void run('Cleaning up…', () => cleanUpSelection(editor, noteId)))} title="Fix spelling, grammar and clarity of the selected text">
               <WandSparkles size={16} /> Clean up wording{editor.state.selection.empty ? ' (select text first)' : ''}

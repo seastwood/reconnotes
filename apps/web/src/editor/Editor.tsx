@@ -37,6 +37,7 @@ import { MeetingSetup } from './MeetingSetup'
 import { useStore } from '../lib/store'
 import { meetingSetup } from '../lib/meeting'
 import { notePart } from '../lib/askChat'
+import { SuggestTitleBar, suggestAfterPaste, suggestTitle } from './SuggestTitle'
 import { ListenButtons } from './listenButtons'
 import { LinkOpener } from './linkOpener'
 import { LinkPicker, LinkedFrom, NoteLink } from './noteLink'
@@ -161,6 +162,8 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
         handlePaste: (view, event) => {
           if (readOnlyRef.current) return true
           const files = Array.from(event.clipboardData?.files ?? [])
+          // a lot pasted into an empty note: a title and tags are suggested
+          if (!files.length) suggestAfterPaste(noteId, event.clipboardData?.getData('text/plain') ?? '', view.state.doc.textContent.trim().length < 3)
           if (!files.length) return false
           // copied from ReconNotes (a checklist item with its pictures…): the blocks, not just the picture
           if (event.clipboardData?.getData('text/html').includes('data-reconnotes-blocks')) return false
@@ -275,6 +278,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
       { id: 'convert', label: 'Convert all handwriting to text', section: S, keywords: 'ocr recognise', run: () => void convertAllHandwriting(editor, noteId) },
       { id: 'summary', label: 'Summarise with AI', section: S, keywords: 'summary ai', run: () => void noteAction(editor, noteId, 'summary').catch((e) => errorText(e) && alert(errorText(e))) },
       { id: 'todos', label: 'Extract to-dos with AI', section: S, keywords: 'tasks ai', run: () => void noteAction(editor, noteId, 'todos').catch((e) => errorText(e) && alert(errorText(e))) },
+      { id: 'suggest-title', label: 'Suggest a title and tags with AI', section: S, keywords: 'name tag ai', run: () => void suggestTitle(noteId).catch((e) => errorText(e) && alert(errorText(e))) },
       { id: 'compile', label: 'Compile into a clean document with AI', section: S, keywords: 'ai tidy', run: () => void compileNote(editor, noteId).then((id) => onOpenNoteRef.current(id)).catch((e) => errorText(e) && alert(errorText(e))) },
       { id: 'template', label: 'Save as template', section: S, run: () => void saveAsTemplate(noteId) },
     ])
@@ -429,6 +433,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           {find && <FindBar key={find.n} editor={editor} initial={find.text} focus={find.focus} onClose={() => setFind(null)} canReplace={!readOnly} />}
           {onShowFolder && <NotePath noteId={noteId} folderId={folderId} onShow={onShowFolder} />}
           <div className="editor-scroll" ref={scrollRef} onPointerDownCapture={onPointerDownCapture}>
+            <SuggestTitleBar editor={editor} noteId={noteId} readOnly={readOnly} />
             {settingUp && (
               <MeetingSetup
                 noteId={noteId}

@@ -264,6 +264,43 @@ export class Ai {
   }
 
   /**
+   * A title and a few #tags for a note (pasted in, shared or written without one). `known`: tags
+   * already used in the library – used again where they fit, so like notes gather together.
+   */
+  async suggestTitle(markdown: string, known: string[]): Promise<{ title: string; tags: string[]; agent: string }> {
+    const prompt = `Suggest a title and tags for the note below.
+
+- Title: short (2 to 8 words), saying what the note is – like a document's name. No quotes, no ending full stop.
+- Tags: 1 to 3 single words or hyphenated-words, lowercase, for what kind of note it is or its subject.${known.length ? ` Use these where one fits: ${known.join(', ')}.` : ''}
+
+Answer with exactly two lines:
+Title: …
+Tags: …
+
+The note:
+<<<
+${markdown.slice(0, 6000)}
+>>>`
+    const { result, agent } = await this.agents.run('compile', async (backend) => {
+      const raw = await backend.generate([{ text: withExtra(prompt) }], 200)
+      return unwrapModelOutput(raw.replace(/<think>[\s\S]*?<\/think>/g, '')).trim()
+    })
+    const title = (/^\s*\**title\**\s*:\s*(.+)$/im.exec(result)?.[1] ?? '')
+      .replace(/^["“'*#\s]+|["”'*.\s]+$/g, '')
+      .slice(0, 80)
+    const tags = [
+      ...new Set(
+        (/^\s*\**tags\**\s*:\s*(.+)$/im.exec(result)?.[1] ?? '')
+          .split(/[,\s]+/)
+          .map((t) => t.replace(/^#/, '').toLocaleLowerCase().replace(/[^\p{L}\p{N}_-]/gu, ''))
+          .filter((t) => /\p{L}/u.test(t) && t.length >= 2 && t.length <= 30),
+      ),
+    ].slice(0, 3)
+    log.info(`suggested a title via "${agent.name}": "${title}" ${tags.map((t) => '#' + t).join(' ')}`)
+    return { title, tags, agent: agent.name }
+  }
+
+  /**
    * Meeting notes from a recording's transcript and what was written during
    * the meeting: a summary, decisions, and the action items as a checklist.
    */

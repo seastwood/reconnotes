@@ -84,6 +84,7 @@ export const JOB_KINDS: Record<string, string> = {
   'page-tidy': 'Tidy with AI',
   'recipe-photos': 'Recipe from photos',
   'photo-pages': 'Note from photos',
+  'suggest-title': 'Suggest a title and tags',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -256,6 +257,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'page-tidy': 'compile',
   'recipe-photos': 'images',
   'photo-pages': 'images',
+  'suggest-title': 'compile',
 }
 
 /** a voice heard for less than this (seconds, or share of all the talk) isn't one of the meeting's main voices */
@@ -545,6 +547,25 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
       return { result: { noteId, text: preview(text) }, agent }
     })
   }
+
+  // a title and #tags for a note, offered in it to take or leave
+  jobs.register('suggest-title', async (job) => {
+    const noteId = job.input.noteId as string
+    const doc = noteDoc(noteId)
+    const markdown = noteToMarkdown(doc, { attachmentText: true })
+    if (markdown.replace(/\s+/g, '').length < 20) throw new Error('There isn’t enough in this note to name it yet.')
+    const have = new Set(extractNote(doc).tags)
+    // the library's tags, most used first
+    const count = new Map<string, number>()
+    getNotes(sync.getDoc(WORKSPACE_DOC) ?? new Y.Doc()).forEach((m) => {
+      const n = readNote(m)
+      if (!n.trashedAt) for (const t of n.tags ?? []) count.set(t, (count.get(t) ?? 0) + 1)
+    })
+    const known = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([t]) => t)
+    const { title, tags, agent } = await ai.suggestTitle(markdown, known)
+    if (!title && !tags.length) throw new Error('Your AI didn’t suggest anything.')
+    return { result: { noteId, title, tags: tags.filter((t) => !have.has(t)) }, agent }
+  })
 
   // these give text back to the app, which puts it where it belongs
   jobs.register('clean', async (job) => {
