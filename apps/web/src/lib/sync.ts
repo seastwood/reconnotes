@@ -10,7 +10,7 @@ import {
   noteIdFromDocName,
   updateNote,
 } from '@reconnotes/core'
-import { Store } from './store'
+import { Store, safeLocalGet, safeLocalSet } from './store'
 import { isSyncConfigured, settings, syncUrl } from './settings'
 import { saveNoteText } from './search'
 import { flushUploads } from './attachments'
@@ -33,16 +33,39 @@ export interface SyncStatus {
   state: SyncState
   /** documents with local changes the server hasn't confirmed yet */
   pending: number
+  /** notes (and the note list) changed on this device and not on the server yet – kept across restarts */
+  unsynced: number
+  /** when everything was last in step with the server (kept across restarts) */
   lastSyncedAt: number | null
   backgroundSyncing: boolean
 }
 
+/** documents changed here that the server hasn't confirmed (by name), and when all was last in step */
+const UNSYNCED = 'reconnotes.unsynced'
+const LAST_SYNCED = 'reconnotes.lastSynced'
+const unsynced = new Set(safeLocalGet<string[]>(UNSYNCED, []))
+
 export const syncStatus = new Store<SyncStatus>({
   state: isSyncConfigured() ? 'connecting' : 'local',
   pending: 0,
-  lastSyncedAt: null,
+  unsynced: unsynced.size,
+  lastSyncedAt: safeLocalGet<number | null>(LAST_SYNCED, null),
   backgroundSyncing: false,
 })
+
+/** A document changed here: unsynced until the server has it. */
+function changedHere(name: string) {
+  if (!isSyncConfigured() || unsynced.has(name)) return
+  unsynced.add(name)
+  safeLocalSet(UNSYNCED, [...unsynced])
+  syncStatus.set({ unsynced: unsynced.size })
+}
+/** The server has a document as it is here. */
+function confirmed(name: string) {
+  if (!unsynced.delete(name)) return
+  safeLocalSet(UNSYNCED, [...unsynced])
+  syncStatus.set({ unsynced: unsynced.size })
+}
 
 class DocHandle {
   readonly doc = new Y.Doc()
@@ -58,6 +81,10 @@ class DocHandle {
   ) {
     this.idb = new IndexeddbPersistence(`reconnotes:${name}`, this.doc)
     this.loaded = this.idb.whenSynced.then(() => undefined)
+    // a change made here (not one from the server or read back from this device's copy)
+    this.doc.on('update', (_u: Uint8Array, origin: unknown) => {
+      if (origin !== this.provider && origin !== this.idb) changedHere(name)
+    })
   }
 
   attach(socket: HocuspocusProviderWebsocket) {
@@ -186,6 +213,7 @@ export class SyncManager {
 
   destroy(h: DocHandle) {
     if (h.refs > 0 || this.handles.get(h.name) !== h) return
+    if (h.synced) confirmed(h.name)
     this.handles.delete(h.name)
     h.destroy()
     this.recount()
@@ -193,9 +221,14 @@ export class SyncManager {
 
   recount() {
     let pending = 0
-    for (const h of this.handles.values()) if (h.provider && h.provider.unsyncedChanges > 0) pending++
+    for (const h of this.handles.values()) {
+      if (h.provider && h.provider.unsyncedChanges > 0) pending++
+      if (h.synced) confirmed(h.name)
+    }
     const allSynced = [...this.handles.values()].every((h) => !h.provider || h.synced)
-    syncStatus.set({ pending, ...(allSynced && this.socket ? { lastSyncedAt: Date.now() } : {}) })
+    const now = allSynced && this.socket && syncStatus.get().state === 'online' ? Date.now() : null
+    if (now) safeLocalSet(LAST_SYNCED, now)
+    syncStatus.set({ pending, ...(now ? { lastSyncedAt: now } : {}) })
   }
 
   /**
@@ -255,7 +288,11 @@ export class SyncManager {
       await this.workspace.loaded
       const ids: string[] = []
       getNotes(this.workspace.doc).forEach((_m, id) => ids.push(id))
-      const queue = ids.map(noteDocName).filter((n) => !this.handles.has(n))
+      // what was changed here first (it's only on this device until then)
+      const names = ids.map(noteDocName)
+      const queue = [...names.filter((n) => unsynced.has(n)), ...names.filter((n) => !unsynced.has(n))].filter((n) => !this.handles.has(n))
+      // notes deleted for good since: nothing to send
+      for (const n of [...unsynced]) if (n !== WORKSPACE_DOC && !names.includes(n)) confirmed(n)
       const worker = async () => {
         for (let name = queue.shift(); name; name = queue.shift()) {
           if (!this.socket || syncStatus.get().state !== 'online') return
@@ -263,6 +300,7 @@ export class SyncManager {
           try {
             await handle.loaded
             await waitUntil(() => handle.synced, 20_000)
+            confirmed(name)
           } catch {
             /* slow or offline – picked up next round */
           } finally {

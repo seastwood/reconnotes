@@ -260,10 +260,58 @@ button.text {
   letter-spacing: -0.01em;
 }
 .sync-badge {
+  position: relative;
   width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
+}
+/* changes waiting for the server */
+.sync-count {
+  position: absolute;
+  top: 1px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #e0912b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.sync-badge.stale {
+  color: #e0912b;
+}
+.sync-badge.stale .sync-count {
+  background: var(--danger);
+}
+.sync-panel {
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 12px 4px;
+  font-size: 13.5px;
+}
+.sync-panel-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.sync-panel p {
+  margin: 8px 0;
+  line-height: 1.4;
+}
+.sync-warn {
+  color: #b36b12;
+}
+.sync-panel button.text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
 }
 .sync-online {
   color: #2e9d4f;
