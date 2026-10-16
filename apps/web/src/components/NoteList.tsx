@@ -3,7 +3,7 @@ import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
 import { useFolderAccess } from '../lib/folderLock'
-import { PenOff, ArrowUpDown, Folder, Lock, ChevronRight, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare } from 'lucide-react'
+import { PenOff, ArrowUpDown, Folder, Lock, ChevronRight, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare, PanelLeftClose } from 'lucide-react'
 import {
   createNote,
   deleteNoteForever,
@@ -48,6 +48,8 @@ interface Props {
   onBack?: () => void
   /** show/hide the folders panel (iPad and desktop) */
   onToggleFolders?: () => void
+  /** put this list away, the folders staying (computer, with the folders showing) */
+  onHide?: () => void
   /** iPad / computer: the column is widened over the note area */
   expanded?: boolean
   onToggleExpand?: () => void
@@ -67,7 +69,7 @@ function formatDate(ts: number) {
   return d.toLocaleDateString()
 }
 
-export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expanded, onToggleExpand, onMoveNote, onMoveNotes, onOpenFolder }: Props) {
+export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide, expanded, onToggleExpand, onMoveNote, onMoveNotes, onOpenFolder }: Props) {
   // how many references each note has (the notes Ask reads with it)
   const allRefs = useStore(refsStore, (s) => s.all)
   useEffect(() => void loadRefs(), [])
@@ -269,6 +271,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, expand
           </button>
         )}
         <span className="list-head-gap" />
+        {onHide && (
+          <button className="icon" onClick={onHide} aria-label="Hide this list" title="Hide this list – the folders stay">
+            <PanelLeftClose size={20} />
+          </button>
+        )}
         {onToggleExpand && <ExpandButton expanded={Boolean(expanded)} onToggle={onToggleExpand} />}
         {canSelect && (
           <button

@@ -11,6 +11,7 @@ import { copyBlock } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { attendeeCount, attendeeNames, getContent, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
+import { TextSelection } from '@tiptap/pm/state'
 import { isMarkdownFile, noteFromMarkdown } from '../lib/markdownNotes'
 import { navigateToNote } from '../lib/jobs'
 import { workspaceDoc } from '../lib/workspace'
@@ -225,6 +226,35 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     if (typeof pos === 'number') editor.chain().setNodeSelection(pos).run()
   }
 
+  // selected, a click anywhere else (or Escape) lets it go – even outside the note's text, where
+  // the editor itself wouldn't move the selection (the margins, another panel)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!selected || markingUp) return
+    const release = () => {
+      const pos = getPos()
+      if (typeof pos !== 'number' || !(editor.state.selection as { node?: unknown }).node) return
+      const after = Math.min(pos + node.nodeSize, editor.state.doc.content.size)
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(after))))
+    }
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      // its own buttons and handle, its viewer, menus and dialogs opened from it
+      if (!t || wrapRef.current?.contains(t) || t.closest('.image-viewer, .menu, .dialog, .dialog-backdrop')) return
+      // in the note's text the editor moves the selection by itself
+      if (editor.view.dom.contains(t) && t.closest('.ProseMirror > *')) return
+      release()
+    }
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && release()
+    document.addEventListener('pointerdown', down, true)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('keydown', key)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, markingUp])
+
   const width = node.attrs.width as number | null
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -248,7 +278,7 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     window.addEventListener('pointerup', up)
   }
   return (
-    <NodeViewWrapper className={`image-block${selected ? ' selected' : ''}${markingUp ? ' marking-up' : ''}`} data-drag-handle="">
+    <NodeViewWrapper ref={wrapRef} className={`image-block${selected ? ' selected' : ''}${markingUp ? ' marking-up' : ''}`} data-drag-handle="">
       {url && broken ? (
         <div className="attachment-placeholder">This picture can’t be shown{node.attrs.alt ? `: ${node.attrs.alt}` : ''}</div>
       ) : url ? (

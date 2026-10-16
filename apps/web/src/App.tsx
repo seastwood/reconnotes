@@ -464,12 +464,21 @@ export function App() {
   const [listExpanded, setListExpanded] = useState(false)
   const sidebarInline = !narrow && wide && layout === 3
   const sidebarVisible = narrow ? pane === 'folders' : sidebarInline || overlay
-  const listVisible = narrow ? pane === 'list' : layout >= 2
+  // computer / iPad, with the folders showing: the notes list can be put away on its own
+  const [listHidden, setListHiddenState] = useState(() => safeLocalGet<{ v: boolean }>('reconnotes.listHidden', { v: false }).v)
+  const setListHidden = (v: boolean) => {
+    setListHiddenState(v)
+    safeLocalSet('reconnotes.listHidden', { v })
+  }
+  const listAway = listHidden && sidebarInline
+  const listVisible = narrow ? pane === 'list' : layout >= 2 && !listAway
   const editorVisible = narrow ? pane === 'note' : true
 
   /** Editor's sidebar button: cycle 3 → 2 → 1 → 3 columns (like Apple Notes). */
   const cyclePanels = () => {
     setOverlay(false)
+    // the notes list put away: it comes back first
+    if (listAway) return setListHidden(false)
     if (wide) setLayout(layout === 3 ? 2 : layout === 2 ? 1 : 3)
     else setLayout(layout >= 2 ? 1 : 2)
   }
@@ -481,6 +490,7 @@ export function App() {
    */
   const openNext = () => {
     if (narrow) setPane(pane === 'note' && !(fromSearch && search.trim()) ? 'list' : 'folders')
+    else if (listAway) setListHidden(false)
     else if (layout === 1) setLayout(2)
     else if (wide) setLayout(3)
     else setOverlay(true)
@@ -565,7 +575,7 @@ export function App() {
     const css = getComputedStyle(document.querySelector('.app') ?? document.documentElement)
     const px = (name: string, fallback: number) => parseFloat(css.getPropertyValue(name)) || fallback
     const chatW = document.querySelector('.ask-dock')?.getBoundingClientRect().width ?? 420
-    const noteW = (l: 1 | 2 | 3) => innerWidth - chatW - (l >= 3 ? px('--sidebar-w', 260) : 0) - (l >= 2 ? px('--list-w', 320) : 0)
+    const noteW = (l: 1 | 2 | 3) => innerWidth - chatW - (l >= 3 ? px('--sidebar-w', 260) : 0) - (l >= 2 && !(listHidden && l === 3) ? px('--list-w', 320) : 0)
     let fit = layout
     while (fit > 1 && noteW(fit) < 460) fit = (fit - 1) as 1 | 2
     if (fit !== layout) {
@@ -576,6 +586,7 @@ export function App() {
   }, [chatDocked])
   const showView = (view: View) => {
     setNav({ ...nav, view })
+    if (listHidden) setListHidden(false)
     if (narrow) setPane('list')
     else if (layout === 1) setLayout(2)
   }
@@ -664,6 +675,8 @@ export function App() {
             if (narrow) setPane('list')
             else if (overlay) setOverlay(false)
             if (!narrow && layout === 1) setLayout(2)
+            // choosing a folder brings its notes back
+            if (listHidden) setListHidden(false)
           }}
           onClose={narrow ? undefined : () => (overlay ? setOverlay(false) : setLayout(2))}
           onSettings={() => setSettingsOpen(true)}
@@ -686,6 +699,7 @@ export function App() {
               onOpenNote={openNote}
               onBack={narrow ? () => setPane('folders') : undefined}
               onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
+              onHide={sidebarInline ? () => setListHidden(true) : undefined}
               expanded={listExpanded}
               onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             />
@@ -696,6 +710,7 @@ export function App() {
             onOpen={openNote}
             onBack={narrow ? () => setPane('folders') : undefined}
             onToggleFolders={!narrow && !sidebarInline ? toggleFolders : undefined}
+            onHide={sidebarInline ? () => setListHidden(true) : undefined}
             expanded={listExpanded}
             onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             onMoveNote={(id) => setMoving({ kind: 'note', id })}
@@ -719,7 +734,7 @@ export function App() {
               onFollowLink={followFromNote}
               onBack={narrow ? () => setPane(fromSearch && search.trim() ? 'folders' : 'list') : undefined}
               onTogglePanels={narrow ? undefined : cyclePanels}
-              fullScreen={!narrow && layout === 1}
+              fullScreen={!narrow && (layout === 1 || listAway)}
               initialFind={findOnOpen?.noteId === nav.noteId ? findOnOpen : undefined}
               onShowFolder={(view) => {
                 // out of the search results: the folders show, this one chosen, the note in its list

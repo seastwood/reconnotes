@@ -30,8 +30,7 @@ import {
   Sparkles,
   Trash2,
   WandSparkles,
-  XCircle,
-} from 'lucide-react'
+  XCircle, PanelLeftClose } from 'lucide-react'
 import {
   cancelJob,
   clearFinishedJobs,
@@ -107,6 +106,8 @@ interface Props {
   /** iPad / computer: the column is widened over the note area */
   expanded?: boolean
   onToggleExpand?: () => void
+  /** put this list away, the folders staying (computer, with the folders showing) */
+  onHide?: () => void
 }
 
 /**
@@ -115,7 +116,7 @@ interface Props {
  * links to the results, the errors, and ways to cancel, pause, retry or
  * redo with extra instructions.
  */
-export function JobsPanel({ onOpenNote, onBack, onToggleFolders, expanded = false, onToggleExpand }: Props) {
+export function JobsPanel({ onOpenNote, onBack, onToggleFolders, onHide, expanded = false, onToggleExpand }: Props) {
   const { jobs, paused, loaded, error, kinds } = useJobs((s) => s)
   const [showAuto, setShowAuto] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -165,6 +166,11 @@ export function JobsPanel({ onOpenNote, onBack, onToggleFolders, expanded = fals
           </button>
         )}
         <h2>Jobs</h2>
+        {onHide && (
+          <button className="icon" onClick={onHide} aria-label="Hide this list" title="Hide this list – the folders stay">
+            <PanelLeftClose size={20} />
+          </button>
+        )}
         {onToggleExpand && <ExpandButton expanded={Boolean(expanded)} onToggle={onToggleExpand} />}
         <button
           className={`icon${paused ? ' on' : ''}`}
