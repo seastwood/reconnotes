@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, Bell, Bot, PenTool, RefreshCw, ScanText, ScrollText, SlidersHorizontal, X, type LucideIcon } from 'lucide-react'
+import { X } from 'lucide-react'
 import { PromptsSection } from './PromptsSection'
 import { settings, useSettings, type PencilInTextMode, type Theme } from '../lib/settings'
 import { serverInfo } from '../lib/ai'
@@ -16,67 +16,10 @@ import { notificationsSupported } from '../lib/notify'
 import { deviceOcrAvailable } from '../lib/deviceOcr'
 import { deviceSpeechAvailable } from '../lib/speech'
 
-/**
- * Settings: a page of its own, in categories – a list down the side on a wide screen, tabs along
- * the top on a phone. The category you were last in opens next time.
- */
-export type SettingsTab = 'general' | 'sync' | 'ai' | 'prompts' | 'recognition' | 'pencil' | 'notifications' | 'data'
+import { SETTINGS_TABS, type SettingsTab } from './settingsTabs'
 
-export const SETTINGS_TABS: {
-  id: SettingsTab
-  label: string
-  icon: LucideIcon
-  blurb: string
-}[] = [
-  {
-    id: 'general',
-    label: 'General',
-    icon: SlidersHorizontal,
-    blurb: 'How ReconNotes looks and behaves on this device.',
-  },
-  {
-    id: 'sync',
-    label: 'Sync & devices',
-    icon: RefreshCw,
-    blurb: 'Your ReconNotes server, and the devices that use it.',
-  },
-  {
-    id: 'ai',
-    label: 'AI agents',
-    icon: Bot,
-    blurb: 'The models your server uses, and which one does what.',
-  },
-  {
-    id: 'prompts',
-    label: 'Prompts',
-    icon: ScrollText,
-    blurb: 'What the AI is told for each kind of job – change it, or put it back to the default.',
-  },
-  {
-    id: 'recognition',
-    label: 'Handwriting & speech',
-    icon: ScanText,
-    blurb: 'Reading handwriting, pictures and recordings – on your server and on this device.',
-  },
-  {
-    id: 'pencil',
-    label: 'Pencil & drawing',
-    icon: PenTool,
-    blurb: 'Apple Pencil, finger drawing and shapes.',
-  },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: Bell,
-    blurb: 'Reminders, notifications, your calendar feed and the weekly digest.',
-  },
-  {
-    id: 'data',
-    label: 'Sharing & backups',
-    icon: Archive,
-    blurb: 'What’s shared with others, backups of your library, offsite copies, and moving notes in and out.',
-  },
-]
+export { SETTINGS_TABS, type SettingsTab } from './settingsTabs'
+
 const LAST_TAB = 'reconnotes.settingsTab'
 
 function lastTab(): SettingsTab {
@@ -89,6 +32,10 @@ function lastTab(): SettingsTab {
   return 'general'
 }
 
+/**
+ * Settings: a page of its own, in categories – a list down the side on a wide screen, tabs along
+ * the top on a phone. The category you were last in opens next time.
+ */
 export function SettingsDialog({ onClose, tab: initial }: { onClose: () => void; tab?: SettingsTab }) {
   const s = useSettings((x) => x)
   const connected = Boolean(s.serverUrl && s.token)

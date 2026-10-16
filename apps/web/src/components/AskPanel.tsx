@@ -4,7 +4,7 @@ import { ALL_NOTES, openChatAt } from '../lib/askChat'
 import { marked } from '../lib/markdown'
 import { isSyncConfigured } from '../lib/settings'
 import { cancelJob, isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
-import { duration } from './JobsPanel'
+import { duration } from '../lib/duration'
 
 interface Source {
   n: number

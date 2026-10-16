@@ -1,13 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, PanelLeft, X } from 'lucide-react'
 import { getNotes, readNote } from '@reconnotes/core'
 import { Sidebar, type View } from './components/Sidebar'
 import { NoteList } from './components/NoteList'
-import { JobsPanel } from './components/JobsPanel'
 import { setJobNavigator } from './lib/jobs'
-import { SETTINGS_TABS, SettingsDialog, type SettingsTab } from './components/SettingsDialog'
-import { MoveDialog, type MoveTarget } from './components/MoveDialog'
+import { SETTINGS_TABS, type SettingsTab } from './components/settingsTabs'
+import type { MoveTarget } from './components/MoveDialog'
 import { NoteEditor } from './editor/Editor'
 import { useNoteDoc, useWorkspace, workspaceDoc } from './lib/workspace'
 import { settings, useSettings } from './lib/settings'
@@ -19,7 +18,7 @@ import { startPush } from './lib/push'
 import { resumeRecording } from './lib/recorder'
 import { RecordingPill } from './components/RecordingPill'
 import { LockedScreen } from './components/LockedScreen'
-import { WebImportDialog, type ImportTab, type PhotoKind } from './components/WebImportDialog'
+import type { ImportTab, PhotoKind } from './components/WebImportDialog'
 import { AskChatHost } from './components/AskChat'
 import { ReferencesHost } from './components/References'
 import { useFolderAccess } from './lib/folderLock'
@@ -29,7 +28,7 @@ import { HideKeyboardButton } from './components/HideKeyboardButton'
 import { Panel } from './components/Panel'
 import { ImageViewerHost } from './components/ImageViewer'
 import { CommandPalette } from './components/CommandPalette'
-import { Tour, shouldShowTour } from './components/Tour'
+import { shouldShowTour } from './components/Tour'
 import { registerCommands } from './lib/commands'
 import { createFolder, createNote, listNotes, updateNote } from '@reconnotes/core'
 import { pinNotes, trashNotes } from './lib/noteActions'
@@ -41,6 +40,13 @@ import { getContent, noteDocName } from '@reconnotes/core'
 import { sync } from './lib/sync'
 import { useMedia } from './lib/media'
 import { startMeeting } from './lib/meeting'
+
+// opened now and then: loaded the first time they are (a smaller app to start)
+const SettingsDialog = lazy(() => import('./components/SettingsDialog').then((m) => ({ default: m.SettingsDialog })))
+const MoveDialog = lazy(() => import('./components/MoveDialog').then((m) => ({ default: m.MoveDialog })))
+const WebImportDialog = lazy(() => import('./components/WebImportDialog').then((m) => ({ default: m.WebImportDialog })))
+const JobsPanel = lazy(() => import('./components/JobsPanel').then((m) => ({ default: m.JobsPanel })))
+const Tour = lazy(() => import('./components/Tour').then((m) => ({ default: m.Tour })))
 
 function useTheme() {
   const theme = useSettings((s) => s.theme)
@@ -775,6 +781,7 @@ export function App() {
       <Panel show={listVisible || peek === 'list'} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list" instant={narrow ? instant || peek !== null : sideDrag !== null} style={narrow ? peekStyle('list') : sideStyle('list')}>
         <div className="list-col">
           {nav.view.kind === 'jobs' ? (
+            <Suspense fallback={null}>
             <JobsPanel
               onOpenNote={openNote}
               onBack={narrow ? () => setPane('folders') : undefined}
@@ -783,6 +790,7 @@ export function App() {
               expanded={listExpanded}
               onToggleExpand={narrow ? undefined : () => setListExpanded(!listExpanded)}
             />
+            </Suspense>
           ) : (
           <NoteList
             view={nav.view}
@@ -850,8 +858,10 @@ export function App() {
         current={note && nav.noteId && !note.trashedAt ? { noteId: nav.noteId, title: note.title, folderId: note.folderId ?? null } : null}
         noteOnScreen={noteShown && editorVisible && !noteLockedBy}
       />
-      {settingsOpen && <SettingsDialog tab={settingsOpen === true ? undefined : settingsOpen} onClose={() => setSettingsOpen(false)} />}
-      {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
+      <Suspense fallback={null}>
+        {settingsOpen && <SettingsDialog tab={settingsOpen === true ? undefined : settingsOpen} onClose={() => setSettingsOpen(false)} />}
+        {moving && <MoveDialog target={moving} onClose={() => setMoving(null)} />}
+      </Suspense>
       {/* the way back from a link: centred on the whole screen, where "Back to chat" sits (above it when both show) */}
       {backTo.length > 0 &&
         nav.noteId &&
@@ -874,8 +884,10 @@ export function App() {
       <ImageViewerHost />
 
       <ReferencesHost onOpen={followLink} />
-      {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen('sync')} />}
-      {webImport && <WebImportDialog folderId={webImport.folderId} startOn={webImport.startOn} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
+      <Suspense fallback={null}>
+        {tourOpen && <Tour onClose={() => setTourOpen(false)} onSettings={() => setSettingsOpen('sync')} />}
+        {webImport && <WebImportDialog folderId={webImport.folderId} startOn={webImport.startOn} onClose={() => setWebImport(null)} onOpen={(id) => openNote(id)} />}
+      </Suspense>
       {paletteOpen && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}

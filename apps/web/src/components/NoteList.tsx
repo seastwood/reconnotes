@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Popover } from './Popover'
 import { ExpandButton } from './ExpandButton'
 import { LockedScreen } from './LockedScreen'
@@ -36,9 +36,11 @@ import { NoteRow } from './NoteRow'
 import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 import { duplicateNote, saveAsTemplate } from '../lib/templates'
 import { openAskChat } from '../lib/askChat'
-import { WebImportDialog } from './WebImportDialog'
 import { useStore } from '../lib/store'
 import { loadRefs, openRefs, refsStore } from '../lib/refs'
+
+// opened now and then: loaded the first time it is
+const WebImportDialog = lazy(() => import('./WebImportDialog').then((m) => ({ default: m.WebImportDialog })))
 
 interface Props {
   view: View
@@ -596,7 +598,11 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
           )}
         </div>
       )}
-      {webImport && <WebImportDialog folderId={view.kind === 'folder' ? view.folderId : null} onClose={() => setWebImport(false)} onOpen={onOpen} />}
+      {webImport && (
+        <Suspense fallback={null}>
+          <WebImportDialog folderId={view.kind === 'folder' ? view.folderId : null} onClose={() => setWebImport(false)} onOpen={onOpen} />
+        </Suspense>
+      )}
     </section>
   )
 }
