@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ArrowUpDown, BookOpen, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, History, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, ArrowUpDown, BookOpen, MessagesSquare, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
@@ -454,10 +454,13 @@ function AskChat({
             <X size={19} />
           </button>
         ) : (
-          <button className="text ask-chat-back" onClick={closeAskChat} aria-label="Back to the note">
-            <ChevronLeft size={20} /> {target.noteId ? 'Note' : 'Back'}
+          <button className="icon" onClick={closeAskChat} aria-label={target.noteId ? 'Back to the note' : 'Back'} title="Back">
+            <ChevronLeft size={22} />
           </button>
         )}
+        <button className="icon" aria-label="All chats" title="All chats" onClick={browseChats}>
+          <MessagesSquare size={19} />
+        </button>
         <button className="ask-chat-title" onClick={openSubject} disabled={target.all} title={target.noteId ? 'Open the note' : target.folderId ? 'Show the folder' : undefined}>
           <span className="ask-chat-kicker">
             <MessageCircleQuestion size={13} /> {about}
@@ -466,9 +469,6 @@ function AskChat({
         </button>
         <button className="icon" aria-label="Save the chat as a note" title="Save the chat as a note" onClick={() => setSaving(allTurns)} disabled={!allTurns.length}>
           <FilePlus2 size={19} />
-        </button>
-        <button className="icon" aria-label="All chats" title="All chats" onClick={browseChats}>
-          <History size={19} />
         </button>
         <button ref={newBtn} className="icon" aria-label="New chat" title="New chat" onClick={() => setNewMenu((v) => !v)}>
           <SquarePen size={19} />
@@ -825,8 +825,8 @@ function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: 
     <div className={`ask-chat ask-browser${docked ? ' docked' : ''}`} role={docked ? 'complementary' : 'dialog'} aria-label="Chats">
       <header className="ask-chat-head">
         {target ? (
-          <button className="text ask-chat-back" onClick={stopBrowsing} aria-label="Back to the chat">
-            <ChevronLeft size={20} /> Chat
+          <button className="icon" onClick={stopBrowsing} aria-label="Back to the chat" title="Back to the chat">
+            <ChevronLeft size={22} />
           </button>
         ) : (
           <button className="icon" onClick={closeAskChat} aria-label="Close" title="Close">
@@ -835,7 +835,7 @@ function ChatBrowser({ docked, current }: { docked: boolean; current: { noteId: 
         )}
         <div className="ask-chat-title static">
           <span className="ask-chat-kicker">
-            <History size={13} /> Ask
+            <MessagesSquare size={13} /> Ask
           </span>
           <span className="ask-chat-name">All chats</span>
         </div>
