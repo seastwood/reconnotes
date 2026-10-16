@@ -320,14 +320,14 @@ function AskChat({
         notes: [target.noteId!],
         unlocked: access.unlockedIds,
       }
-  const send = async (question: string, as: 'notes' | 'general' = mode) => {
+  const send = async (question: string, as: 'notes' | 'general' | 'edit' = edit ? 'edit' : mode) => {
     setError(null)
     if (!isSyncConfigured()) return setError('Asking uses the AI agents on your ReconNotes server – connect one in Settings.')
     const input: Record<string, unknown> = {
       ...scope,
       tzOffset: new Date().getTimezoneOffset(),
       question,
-      ...(as === 'general' ? { mode: 'general' } : edit ? { mode: 'edit' } : {}),
+      ...(as === 'general' ? { mode: 'general' } : as === 'edit' ? { mode: 'edit' } : {}),
     }
     try {
       if (!chatId) {
@@ -390,6 +390,20 @@ function AskChat({
       <Sparkles size={14} /> Answer without my notes
     </button>
   )
+  // asked in Ask what reads like a change to make ("make this a checklist"): one tap does it as an edit
+  const asEdit = (q: string) =>
+    canEdit && !edit && CHANGE_REQUEST.test(q) ? (
+      <button
+        className="text ask-save"
+        disabled={busy}
+        onClick={() => {
+          setEditing(true)
+          void send(q, 'edit').catch(() => {})
+        }}
+      >
+        <PencilLine size={14} /> Make this change to the note
+      </button>
+    ) : null
   const allTurns: TurnToSave[] = [...saved.filter((t) => !t.edit).map((t) => ({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })), ...doneLive]
   const saveButton = (t: TurnToSave) => (
     <button className="text ask-save" onClick={() => setSaving([t])}>
@@ -525,6 +539,7 @@ function AskChat({
                       <AskAnswer result={{ answer: t.answer, sources: t.sources, cites: t.cites, read: t.read, general: t.general }} onOpen={go} />
                       {saveButton({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })}
                       {notFound(t) && i === saved.length - 1 && !live.length && withoutNotes(t.question)}
+                      {i === saved.length - 1 && !live.length && asEdit(t.question)}
                     </>
                   )}
                 </div>
@@ -546,6 +561,7 @@ function AskChat({
                   )}
                   {j.status === 'done' && typeof j.result?.answer === 'string' && saveButton(doneLive.find((t) => t.question === String(j.input.question))!)}
                   {j.status === 'done' && j === live[live.length - 1] && notFound(j.result as unknown as AskResult) && withoutNotes(String(j.input.question))}
+                  {j.input.mode !== 'edit' && j.status === 'done' && j === live[live.length - 1] && asEdit(String(j.input.question))}
                 </div>
               </div>
             ))}
@@ -610,6 +626,10 @@ function AskChat({
 
 /** what each chat window answers from (by its key): 'notes' or 'general' */
 const MODES = 'reconnotes.askMode'
+/** a request to change the note, not a question about it ("turn this into a checklist", "sort the list") */
+const CHANGE_REQUEST =
+  /^\s*(?:please\s+|can you\s+|could you\s+|would you\s+)*(?:make|turn|convert|change|format|reformat|rewrite|reword|organi[sz]e|reorgani[sz]e|sort|alphabeti[sz]e|put|move|add|insert|remove|delete|fix|correct|clean up|tidy|split|merge|combine|group|number|bullet|bold|highlight|rename|replace|translate|shorten|expand)\b/i
+
 /** the chat windows set to Edit (by key) */
 const EDITS = 'reconnotes.askEdit'
 
