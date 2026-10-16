@@ -60,62 +60,128 @@ function useTheme() {
 }
 
 /**
- * Horizontal swipes with a finger: in from the left screen edge (→ onLeftEdge),
- * in from the right edge (→ onRightEdge), leftwards starting on a side panel
- * (→ onClose), or rightwards starting on one (→ onOpen). Pencil and mouse are
- * ignored, and so are mostly-vertical moves (scrolling).
+ * iPad (and touch computers): the folders and notes columns follow the finger. Swipe right from the
+ * left edge, or on a column, and the next column slides in as you drag – the note making room; swipe
+ * left on a column and it slides away. Let go far enough along (or with a flick) and it goes there,
+ * else it slides back. What can't follow (the folders over the note, on a narrower screen; the link
+ * trail) happens on the flick, as before. Pencil and mouse are ignored, and so are vertical moves.
  */
-function useEdgeSwipe(enabled: boolean, onLeftEdge: () => void, onRightEdge: () => void, onClose: () => void, onOpen: () => void) {
-  const handlers = useRef({ enabled, onLeftEdge, onRightEdge, onClose, onOpen })
-  handlers.current = { enabled, onLeftEdge, onRightEdge, onClose, onOpen }
+type Column = 'folders' | 'list'
+function useSideSwipe(
+  enabled: boolean,
+  api: {
+    /** the column a swipe right brings in (null: one that can't follow the finger – `open` does it) */
+    willOpen: () => Column | null
+    /** the column a swipe left puts away (null: as above, with `close`) */
+    willClose: () => Column | null
+    open: () => void
+    close: () => void
+    /** a note reached by a link: back along the links (no sliding), if there is one */
+    linkBack: () => boolean
+    /** the finger is moving this column (opening: it's on screen, starting fully to the left) */
+    begin: (c: Column, opening: boolean) => void
+    /** done: shown or not; `undo` puts the columns back as they were before an opening that went back */
+    end: (undo: boolean) => void
+  },
+) {
+  const ref = useRef({ enabled, api })
+  ref.current = { enabled, api }
   useEffect(() => {
     const EDGE = 28
-    let start: { x: number; y: number; fromEdge: boolean; fromRight: boolean; onPanel: boolean; t: number } | null = null
-    const touchType = (t: Touch) => (t as Touch & { touchType?: string }).touchType
-    const onStart = (e: TouchEvent) => {
+    type Drag = { x0: number; y0: number; fromEdge: boolean; onPanel: boolean; t0: number; locked: null | { opening: boolean; col: Column | null }; last: { x: number; t: number }[] }
+    let d: Drag | null = null
+    const CLS: Record<Column, string> = { folders: '.panel-sidebar', list: '.panel-list' }
+    const el = (c: Column) => document.querySelector<HTMLElement>(CLS[c])
+    const width = (c: Column) => el(c)?.getBoundingClientRect().width || 300
+    const put = (c: Column, margin: number, animate: boolean) => {
+      const e = el(c)
+      if (!e) return
+      e.style.transition = animate ? 'margin-left 200ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'
+      e.style.marginLeft = `${margin}px`
+    }
+    const clear = (c: Column) => {
+      const e = el(c)
+      if (e) e.style.transition = e.style.marginLeft = ''
+    }
+    const down = (e: TouchEvent) => {
+      d = null
       const t = e.touches[0]
-      if (!handlers.current.enabled || e.touches.length !== 1 || touchType(t) === 'stylus') {
-        start = null
+      if (!ref.current.enabled || e.touches.length !== 1 || !t || (t as Touch & { touchType?: string }).touchType === 'stylus') return
+      const target = e.target as Element
+      // the picture viewer and the chat have their own gestures
+      if (target.closest?.('.image-viewer, .ask-chat, .ask-dock, .dialog, .menu, .cook-mode') || document.querySelector('.ask-chat:not(.docked)')) return
+      const fromEdge = t.clientX <= EDGE
+      const onPanel = Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]')
+      if (!fromEdge && !onPanel) return
+      d = { x0: t.clientX, y0: t.clientY, fromEdge, onPanel, t0: Date.now(), locked: null, last: [] }
+    }
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (!d || !t) return
+      const dx = t.clientX - d.x0
+      const dy = t.clientY - d.y0
+      if (!d.locked) {
+        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) return void (d = null) // scrolling
+        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+        const opening = dx > 0
+        if (!opening && !d.onPanel) return void (d = null)
+        if (opening && d.fromEdge && ref.current.api.linkBack()) return void (d = null)
+        const col = opening ? ref.current.api.willOpen() : ref.current.api.willClose()
+        d.locked = { opening, col }
+        if (col) {
+          ref.current.api.begin(col, opening)
+          if (opening) ref.current.api.open()
+        }
+      }
+      if (e.cancelable) e.preventDefault()
+      const { opening, col } = d.locked
+      if (!col) return
+      d.last = [...d.last.slice(-4), { x: t.clientX, t: performance.now() }]
+      const w = width(col)
+      put(col, opening ? Math.min(0, Math.max(-w, -w + dx)) : Math.min(0, Math.max(-w, dx)), false)
+    }
+    const up = (e: TouchEvent) => {
+      const drag = d
+      d = null
+      if (!drag?.locked) return
+      const t = e.changedTouches[0]
+      const dx = (t?.clientX ?? drag.x0) - drag.x0
+      const { opening, col } = drag.locked
+      if (!col) {
+        // what can't follow the finger: on a flick, as before
+        if (Date.now() - drag.t0 < 800 && Math.abs(dx) > 60) (opening ? ref.current.api.open : ref.current.api.close)()
         return
       }
-      const target = e.target as Element
-      if (target.closest?.('.image-viewer')) return void (start = null) // the viewer has its own gestures
-      // the chat has its own (slid in from the right edge, and back out from its left)
-      if (target.closest?.('.ask-chat, .ask-dock') || document.querySelector('.ask-chat:not(.docked)')) return void (start = null)
-      start = {
-        x: t.clientX,
-        y: t.clientY,
-        fromEdge: t.clientX <= EDGE,
-        fromRight: t.clientX >= window.innerWidth - EDGE,
-        onPanel: Boolean(target.closest?.('.sidebar, .list-col')) && !target.closest?.('input, textarea, [contenteditable="true"]'),
-        t: Date.now(),
+      const a = drag.last[0]
+      const b = drag.last[drag.last.length - 1]
+      const v = a && b && b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0
+      const w = width(col)
+      const go = opening ? dx > w * 0.35 || v > 0.45 : -dx > w * 0.35 || v < -0.45
+      if (opening) {
+        put(col, go ? 0 : -w, true)
+        setTimeout(() => {
+          ref.current.api.end(!go)
+          // (let go too soon: it's leaving – kept out of sight until it's gone)
+          if (go) clear(col)
+        }, 210)
+      } else {
+        put(col, go ? -w : 0, true)
+        setTimeout(() => {
+          if (go) ref.current.api.close()
+          ref.current.api.end(false)
+          if (!go) clear(col)
+        }, 210)
       }
-      if (!start.fromEdge && !start.fromRight && !start.onPanel) start = null
     }
-    const onEnd = (e: TouchEvent) => {
-      if (!start) return
-      const t = e.changedTouches[0]
-      const dx = t.clientX - start.x
-      const dy = t.clientY - start.y
-      const quick = Date.now() - start.t < 800
-      const horizontal = Math.abs(dx) > 60 && Math.abs(dy) < Math.abs(dx) * 0.6
-      if (quick && horizontal) {
-        if (start.fromEdge && dx > 0) handlers.current.onLeftEdge()
-        // (in from the right edge, over a note: the chat – AskChat.tsx – slides in)
-        else if (start.fromRight && dx < 0) handlers.current.onRightEdge()
-        else if (start.onPanel && dx < 0) handlers.current.onClose()
-        else if (start.onPanel && dx > 0) handlers.current.onOpen()
-      }
-      start = null
-    }
-    const onCancel = () => (start = null)
-    window.addEventListener('touchstart', onStart, { passive: true, capture: true })
-    window.addEventListener('touchend', onEnd, { passive: true, capture: true })
-    window.addEventListener('touchcancel', onCancel, { passive: true, capture: true })
+    window.addEventListener('touchstart', down, { passive: true, capture: true })
+    window.addEventListener('touchmove', move, { passive: false, capture: true })
+    window.addEventListener('touchend', up, { passive: true, capture: true })
+    window.addEventListener('touchcancel', up, { passive: true, capture: true })
     return () => {
-      window.removeEventListener('touchstart', onStart, { capture: true })
-      window.removeEventListener('touchend', onEnd, { capture: true })
-      window.removeEventListener('touchcancel', onCancel, { capture: true })
+      window.removeEventListener('touchstart', down, { capture: true })
+      window.removeEventListener('touchmove', move, { capture: true })
+      window.removeEventListener('touchend', up, { capture: true })
+      window.removeEventListener('touchcancel', up, { capture: true })
     }
   }, [])
 }
@@ -526,16 +592,30 @@ export function App() {
       setPeek(null)
     },
   })
-  useEdgeSwipe(
-    !narrow,
-    () => {
-      if (!(noteShown && step('back'))) openNext()
+  // iPad / computer: the columns follow the finger (sideDrag: which one, while it does)
+  const [sideDrag, setSideDrag] = useState<{ col: Column; opening: boolean; before: { layout: 1 | 2 | 3; listHidden: boolean } } | null>(null)
+  const sideDragRef = useRef(sideDrag)
+  sideDragRef.current = sideDrag
+  useSideSwipe(!narrow, {
+    willOpen: () => (listAway || layout === 1 ? 'list' : wide && layout === 2 ? 'folders' : null),
+    willClose: () => (overlay ? null : sidebarInline ? 'folders' : layout >= 2 && nav.noteId ? 'list' : null),
+    open: openNext,
+    close: closeOne,
+    linkBack: () => noteShown && step('back'),
+    begin: (col, opening) => setSideDrag({ col, opening, before: { layout, listHidden } }),
+    end: (undo) => {
+      // pulled in, then let go too soon: the columns as they were
+      const d = sideDragRef.current
+      if (undo && d) {
+        setLayout(d.before.layout)
+        setListHidden(d.before.listHidden)
+      }
+      // (a moment later: the column just shown or hidden mustn't slide again on its own)
+      setTimeout(() => setSideDrag(null), 80)
     },
-    // the right edge is the chat's: folders › notes › note › chat, one swipe at a time
-    () => undefined,
-    closeOne,
-    openNext,
-  )
+  })
+  /** the column the finger moves: no slide of its own; one being pulled in starts out of sight */
+  const sideStyle = (col: Column): React.CSSProperties | undefined => (sideDrag?.col === col && sideDrag.opening ? { marginLeft: 'calc(-1 * var(--pw))' } : undefined)
 
   /** Notes list's sidebar button: show/hide the folders. */
   const toggleFolders = () => {
@@ -663,8 +743,8 @@ export function App() {
         mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
         dir={navDir.current}
         className="panel-sidebar"
-        instant={narrow && (instant || peek !== null)}
-        style={peekStyle('folders')}
+        instant={narrow ? instant || peek !== null : sideDrag !== null}
+        style={narrow ? peekStyle('folders') : sideStyle('folders')}
       >
         {overlay && !sidebarInline && <div className="sidebar-backdrop" onClick={() => setOverlay(false)} />}
         <Sidebar
@@ -692,7 +772,7 @@ export function App() {
           }}
         />
       </Panel>
-      <Panel show={listVisible || peek === 'list'} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list" instant={narrow && (instant || peek !== null)} style={peekStyle('list')}>
+      <Panel show={listVisible || peek === 'list'} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list" instant={narrow ? instant || peek !== null : sideDrag !== null} style={narrow ? peekStyle('list') : sideStyle('list')}>
         <div className="list-col">
           {nav.view.kind === 'jobs' ? (
             <JobsPanel
