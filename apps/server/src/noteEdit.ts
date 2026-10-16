@@ -177,52 +177,87 @@ export function revertEdit(frag: Y.XmlFragment, record: EditRecord): EditRecord 
   return back
 }
 
+/** Which kind of list a request asks for ("not a to-do list" counts against it), or null. */
+export function listKindAsked(request: string): 'numbered' | 'bullets' | 'todo' | 'checklist' | null {
+  const r = request.toLowerCase()
+  const todo = /\bto[- ]?dos?\b|\btasks?\b/
+  const check = /\bcheck ?lists?\b|\btick ?lists?\b|\bshopping\b|\bgrocer|\bpacking\b/
+  const notTodo = /\bnot (?:an? |the )?(?:to[- ]?dos?|tasks?)\b/.test(r)
+  const notCheck = /\bnot (?:an? |the )?(?:check ?lists?|tick ?lists?)\b/.test(r)
+  const wantsTodo = todo.test(r) && !notTodo
+  const wantsCheck = check.test(r) && !notCheck
+  if (wantsTodo && wantsCheck) return null
+  if (wantsCheck) return 'checklist'
+  if (wantsTodo) return 'todo'
+  if (/\bnumber(?:ed)?\b/.test(r)) return 'numbered'
+  if (/\bbullet/.test(r)) return 'bullets'
+  return null
+}
+
 /**
- * "Make this a checklist / bulleted / numbered list", of the whole note, done without the AI (when it
- * gave the note back unchanged): each line of text becomes an item – headings, pictures, quotes,
- * tables and lists already there stay as they are. Null: not that kind of request.
+ * "Make this a checklist / a to-do list / bullets / a numbered list", of the whole note (or the
+ * selected part), done here and not by the AI – it's exact and instant: each line of text becomes
+ * an item, and lists already there become that kind too (ticks kept). Headings, pictures, quotes,
+ * tables and code stay as they are. Null: not that kind of request.
  */
 export function wholeNoteAsList(md: string, request: string): { markdown: string; said: string } | null {
   const r = request.toLowerCase()
-  // about the whole note ("this", "it", "the note"), not a part of it
-  if (!/\b(this|it|the note|this note|everything|all of (?:it|this)|the whole (?:note|thing)|the list|these)\b/.test(r)) return null
-  if (/\b(under|section|part|paragraph|heading|first|last|only|except|line \d|lines \d)\b/.test(r)) return null
-  const kind = /\bnumber(?:ed)?\b/.test(r)
-    ? 'numbered'
-    : /\bbullet/.test(r)
-      ? 'bullets'
-      : /\bto-?dos?\b|\btasks?\b/.test(r)
-        ? 'todo'
-        : /\bcheck ?list|\btick|\bshopping|\bgrocer|\bpacking/.test(r)
-          ? 'checklist'
-          : null
+  // about a part of the note, or adding something new: the AI's to do
+  if (/\b(under|section|part|paragraph|heading|first|last|only|except|line \d|lines \d|between|after|before)\b/.test(r)) return null
+  if (/\b(add|insert|create|write|append|new|another)\b/.test(r)) return null
+  const kind = listKindAsked(request)
   if (!kind) return null
+  // and it is a change of shape, not something else that mentions a list ("sort the checklist")
+  if (!/\b(make|turn|convert|change|format|reformat|into|as|to|be|said|want|meant|should)\b/.test(r)) return null
   const out: string[] = []
   let inList = false
+  let inCode = false
   let n = 1
   let made = 0
   for (const line of md.split('\n')) {
     const t = line.trim()
-    const keep = !t || /^(#|⟦|>|\||```|<!--|[-*+] |\d+[.)] )/.test(t)
-    if (keep) {
-      if (t) inList = false
+    if (t.startsWith('```')) {
+      inCode = !inCode
+      inList = false
       out.push(line)
       continue
     }
+    if (inCode) {
+      out.push(line)
+      continue
+    }
+    // the list marker is written again where it belongs
+    if (/^<!--\s*list\s*-->$/.test(t)) continue
+    if (!t) {
+      // (a blank line between items doesn't split the list)
+      if (!inList) out.push(line)
+      continue
+    }
+    if (/^(#|⟦|>|\||<!--)/.test(t)) {
+      if (inList) out.push('')
+      inList = false
+      out.push(line)
+      continue
+    }
+    const item = /^(\s*)(?:[-*+]|\d+[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/.exec(line)
+    const indent = item ? item[1].replace(/\t/g, '  ') : ''
+    const ticked = item ? /x/i.test(item[2] ?? '') : false
+    const text = item ? item[3].trim() : t
+    if (!text) continue
     if (!inList) {
-      // one list for a run of lines (blank lines between them don't split it)
       while (out.length && !out[out.length - 1].trim()) out.pop()
       if (out.length) out.push('')
       if (kind === 'checklist') out.push('<!-- list -->')
       inList = true
       n = 1
     }
-    out.push(kind === 'numbered' ? `${n++}. ${t}` : kind === 'bullets' ? `- ${t}` : `- [ ] ${t}`)
+    const mark = kind === 'numbered' ? `${indent ? 1 : n++}. ` : kind === 'bullets' ? '- ' : ticked ? '- [x] ' : '- [ ] '
+    out.push(`${indent}${mark}${text}`)
     made++
   }
   if (!made) return null
   const what = kind === 'numbered' ? 'a numbered list' : kind === 'bullets' ? 'a bulleted list' : kind === 'todo' ? 'a to-do list' : 'a checklist'
-  return { markdown: out.join('\n'), said: `Made the note ${what}.` }
+  return { markdown: out.join('\n').trim(), said: `Made it ${what}.` }
 }
 
 /** A block's words alone (no spaces – compared with what the editor said was selected). */

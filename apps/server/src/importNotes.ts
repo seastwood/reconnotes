@@ -372,12 +372,14 @@ function paragraphs(tokens: Token[] | undefined, ctx: Ctx): Y.XmlElement[] {
 
 function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
   const out: Y.XmlElement[] = []
-  // "<!-- list -->" before a checklist: a plain one (shopping, packing), not to-dos
+  // "<!-- list -->" before a checklist: a plain one (shopping, packing), not to-dos – the next
+  // checklist, even with a line of text between (an AI doesn't always put it right before); a
+  // heading or another list ends it
   let plain = false
   for (const tok of tokens) {
     if (tok.type === 'space') continue
     const wasPlain = plain
-    plain = false
+    if (tok.type === 'list' || tok.type === 'heading') plain = false
     switch (tok.type) {
       case 'heading': {
         const h = tok as Tokens.Heading
@@ -424,11 +426,8 @@ function blocks(tokens: Token[], ctx: Ctx): Y.XmlElement[] {
         break
       }
       case 'html': {
-        if (/^\s*<!--\s*list\s*-->\s*$/i.test((tok as Tokens.HTML).text)) {
-          plain = true
-          break
-        }
-        const t = (tok as Tokens.HTML).text.replace(/<[^>]+>/g, '').trim()
+        if (/<!--\s*list\s*-->/i.test((tok as Tokens.HTML).text)) plain = true
+        const t = (tok as Tokens.HTML).text.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '').trim()
         if (t) out.push(para([text(decode(t))]))
         break
       }

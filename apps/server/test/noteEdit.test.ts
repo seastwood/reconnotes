@@ -95,14 +95,32 @@ describe('making the whole note a list, when the AI won’t', async () => {
   const md = '3 lbs ground beef\n\n2 large yellow onions\n\n# Toppings\n\nSour cream\n\n⟦IMAGE:abc12345⟧'
   it('turns each line into an item, keeping headings and pictures', () => {
     expect(wholeNoteAsList(md, 'Convert this into a checklist')?.markdown).toBe(
-      '<!-- list -->\n- [ ] 3 lbs ground beef\n\n- [ ] 2 large yellow onions\n\n# Toppings\n\n<!-- list -->\n- [ ] Sour cream\n\n⟦IMAGE:abc12345⟧',
+      '<!-- list -->\n- [ ] 3 lbs ground beef\n- [ ] 2 large yellow onions\n\n# Toppings\n\n<!-- list -->\n- [ ] Sour cream\n\n⟦IMAGE:abc12345⟧',
     )
-    expect(wholeNoteAsList(md, 'make it a numbered list')?.markdown).toContain('1. 3 lbs ground beef\n\n2. 2 large yellow onions')
+    expect(wholeNoteAsList(md, 'make it a numbered list')?.markdown).toContain('1. 3 lbs ground beef\n2. 2 large yellow onions')
     expect(wholeNoteAsList(md, 'make this a to-do list')?.markdown).not.toContain('<!-- list -->')
+  })
+  it('turns lists already there into the kind asked for – a checklist, not to-dos', () => {
+    // half plain lines, half to-dos (an earlier try), as in the note it went wrong on
+    const mixed = '3 lbs ground beef\n\nChili powder\n\n- [ ] Ground cumin\n- [x] Smoked paprika\n\nCornbread mix'
+    const out = wholeNoteAsList(mixed, 'I said checklist, not to do list')!.markdown
+    expect(out).toBe('<!-- list -->\n- [ ] 3 lbs ground beef\n- [ ] Chili powder\n- [ ] Ground cumin\n- [x] Smoked paprika\n- [ ] Cornbread mix')
+    expect(wholeNoteAsList('<!-- list -->\n- [ ] Milk\n- [ ] Eggs', 'make it a to-do list')!.markdown).toBe('- [ ] Milk\n- [ ] Eggs')
+    expect(wholeNoteAsList('- Milk\n- Eggs', 'Make it into a checklist')!.markdown).toBe('<!-- list -->\n- [ ] Milk\n- [ ] Eggs')
+  })
+  it('tells checklists from to-dos in what was asked', async () => {
+    const { listKindAsked } = await import('../src/noteEdit')
+    expect(listKindAsked('Make it into a checklist')).toBe('checklist')
+    expect(listKindAsked('I said checklist, not to do list')).toBe('checklist')
+    expect(listKindAsked('a to-do list please, not a checklist')).toBe('todo')
+    expect(listKindAsked('make these my tasks')).toBe('todo')
+    expect(listKindAsked('fix the spelling')).toBeNull()
   })
   it('leaves a request about a part of the note to the AI', () => {
     expect(wholeNoteAsList(md, 'make the lines under Toppings a checklist')).toBeNull()
     expect(wholeNoteAsList(md, 'fix the spelling')).toBeNull()
+    expect(wholeNoteAsList(md, 'add a checklist of things to pack')).toBeNull()
+    expect(wholeNoteAsList(md, 'sort the checklist')).toBeNull()
   })
 })
 

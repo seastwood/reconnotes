@@ -751,12 +751,28 @@ The request again: ${request}`
     let scratch: Y.Doc | null = null
     let said = ''
     let agent = ''
-    for (const again of [false, true]) {
+    // "make this a checklist / to-do list / bullets / numbered list": done exactly, here, not by the AI
+    const direct = wholeNoteAsList(md, request)
+    if (direct) {
+      const made = asBlocks(direct.markdown)
+      if (differs(made)) {
+        scratch = made
+        said = direct.said
+        agent = 'ReconNotes'
+      } else {
+        return { answer: `It’s ${direct.said.replace(/^Made it /, '').replace(/\.$/, '')} already.`, sources: [], changed: 0, agent: 'ReconNotes', noteId }
+      }
+    }
+    for (const again of scratch ? [] : [false, true]) {
       const out = await ai.editNote(editPrompt(again), budget, () => reportProgress(again ? 'Changing the note (trying again)…' : 'Changing the note…'))
       agent = out.agent
       const split = out.text.split(/\n?\s*={3,}\s*CHANGED\s*={3,}\s*\n?/i)
       const markdown = split[0].replace(/^<<<\s*\n|\n\s*>>>\s*$/g, '').trim()
-      said = (split[1] ?? '').trim().split('\n')[0]?.trim() ?? ''
+      // (what it says, without the Markdown's inner workings: "added <!-- list --> tag")
+      said = ((split[1] ?? '').trim().split('\n')[0]?.trim() ?? '')
+        .replace(/\s*(?:and\s+)?(?:added|adding|with|using|plus)?\s*(?:an?\s+|the\s+)?["'`]?<!--[^>]*-->["'`]?\s*(?:tag|line|marker|comment)?(?:\s+as\b[^.,;]*)?/gi, '')
+        .replace(/\s+([.,;])/g, '$1')
+        .trim()
       if (!markdown) continue
       const made = asBlocks(markdown)
       if (differs(made)) {
@@ -767,7 +783,7 @@ The request again: ${request}`
     }
     // still unchanged, and it's the whole note made a list: done here
     if (!scratch) {
-      const listed = wholeNoteAsList(md, part ? `this: ${request}` : request)
+      const listed = wholeNoteAsList(md, request)
       if (listed) {
         const made = asBlocks(listed.markdown)
         if (differs(made)) {
