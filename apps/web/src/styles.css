@@ -7055,3 +7055,9 @@ button.ask-chat-title:disabled {
 .ask-edit-done > p {
   flex-basis: 100%;
 }
+
+/* a checkbox easy to hit with a finger: the tap area reaches beyond the box */
+.note-content ul[data-type='taskList'] li > label {
+  padding: 6px 8px 6px 6px;
+  margin: calc(0.22em - 6px) -8px -6px -6px;
+}

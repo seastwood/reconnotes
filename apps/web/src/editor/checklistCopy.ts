@@ -200,6 +200,9 @@ export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
      * drawn over the note, not in it (the editor would redraw the item).
      */
     let armed: { pos: number; mark: HTMLElement } | null = null
+    // a finger on a checkbox: where it went down, and whether a hold already used it (copied)
+    let touch: { x: number; y: number; at: number } | null = null
+    let heldCopy = false
     const cancel = () => {
       if (hold) clearTimeout(hold.timer)
       hold = null
@@ -261,6 +264,7 @@ export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
               const was = armed
               disarm()
               if (!was) return false
+              heldCopy = true
               copyChecklistItem(view, was.pos, doc)
               // the click that ends the hold mustn't tick the box
               const swallow = (ev: Event) => {
@@ -280,6 +284,40 @@ export const ChecklistClipboard = Extension.create<{ doc: Y.Doc | null }>({
               return false
             },
             pointercancel: () => (cancel(), disarm(), false),
+            // A finger's tap on a checkbox ticks it – and only that: iOS would put the cursor in the
+            // item's text (and bring up the keyboard). The tap is taken here, and the box ticked.
+            touchstart: (_view, e) => {
+              const t = e.touches[0]
+              touch = t && (e.target as HTMLElement).closest?.('ul[data-type="taskList"] > li > label') ? { x: t.clientX, y: t.clientY, at: Date.now() } : null
+              heldCopy = false
+              return false
+            },
+            touchend: (view, e) => {
+              const start = touch
+              touch = null
+              const box = (e.target as HTMLElement).closest?.('ul[data-type="taskList"] > li > label')
+              const t = e.changedTouches[0]
+              if (!start || !box || !t || !view.editable) return false
+              e.preventDefault()
+              if (heldCopy || Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) return true
+              const li = box.parentElement as HTMLElement
+              let inside: number
+              try {
+                inside = textPosIn(view, li)
+              } catch {
+                return true
+              }
+              const $pos = view.state.doc.resolve(inside)
+              for (let d = $pos.depth; d > 0; d--) {
+                const node = $pos.node(d)
+                if (node.type.name !== 'taskItem') continue
+                const checked = !node.attrs.checked
+                view.dispatch(view.state.tr.setNodeMarkup($pos.before(d), undefined, { ...node.attrs, checked }))
+                if (settings.get().sortChecked !== false) setTimeout(() => sortItem(view, li), 350)
+                break
+              }
+              return true
+            },
             // no iOS callout / menu on a held checkbox
             contextmenu: (_view, e) => {
               if ((e.target as HTMLElement).closest?.('ul[data-type="taskList"] > li > label')) {
