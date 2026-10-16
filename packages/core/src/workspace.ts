@@ -311,7 +311,7 @@ export function moveNote(doc: Y.Doc, id: string, folderId: string | null, index?
   updateNote(doc, id, { folderId, order })
 }
 
-/** Permanently remove a trashed note's metadata. Its content doc is purged by the server. */
+/** Permanently remove a trashed note's entry (its contents stay on the server, so it can be put back). */
 export function deleteNoteForever(doc: Y.Doc, id: string) {
   getNotes(doc).delete(id)
 }

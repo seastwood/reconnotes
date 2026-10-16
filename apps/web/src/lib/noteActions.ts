@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { getContent, getNotes, listFolders, noteDocName, readNote, moveNote, updateNote } from '@reconnotes/core'
+import { emptyTrash, getContent, getFolders, getNotes, listFolders, noteDocName, readNote, moveNote, restoreFolder, trashFolder, updateNote } from '@reconnotes/core'
 import { workspaceDoc } from './workspace'
 import { sync } from './sync'
 import { showToast } from './toast'
@@ -33,6 +33,55 @@ export function trashNotes(ids: string[]) {
   const now = Date.now()
   workspaceDoc.transact(() => ids.forEach((id) => updateNote(workspaceDoc, id, { trashedAt: now })))
   showToast(`${plural(ids.length, 'note')} moved to Recently Deleted`, () => restore(saved))
+}
+
+/** A folder (its subfolders and notes too) to Recently Deleted – with Undo. */
+export function trashFolderUndoable(id: string) {
+  const name = listFolders(workspaceDoc).find((f) => f.id === id)?.name
+  trashFolder(workspaceDoc, id)
+  showToast(`${name ? `“${name}”` : 'Folder'} moved to Recently Deleted`, () => restoreFolder(workspaceDoc, id))
+}
+
+/** Notes' and folders' entries, as they are (to put back after a permanent delete). */
+function entries(kind: 'notes' | 'folders', ids: string[]) {
+  const map = kind === 'notes' ? getNotes(workspaceDoc) : getFolders(workspaceDoc)
+  return ids.flatMap((id) => {
+    const m = map.get(id)
+    return m ? [{ id, data: m.toJSON() as Record<string, unknown> }] : []
+  })
+}
+function putBack(kind: 'notes' | 'folders', saved: ReturnType<typeof entries>) {
+  const map = kind === 'notes' ? getNotes(workspaceDoc) : getFolders(workspaceDoc)
+  workspaceDoc.transact(() => {
+    for (const { id, data } of saved) {
+      if (map.has(id)) continue
+      const m = new Y.Map<unknown>()
+      for (const [k, v] of Object.entries(data)) m.set(k, v)
+      map.set(id, m as never)
+    }
+  })
+}
+
+/**
+ * Delete notes for good (from Recently Deleted) – with Undo for a little while: their contents are
+ * still on the server, so putting their entries back brings them back whole.
+ */
+export function deleteNotesForever(ids: string[]) {
+  const saved = entries('notes', ids)
+  const map = getNotes(workspaceDoc)
+  workspaceDoc.transact(() => ids.forEach((id) => map.delete(id)))
+  showToast(`${plural(saved.length, 'note')} deleted`, () => putBack('notes', saved), 8000)
+}
+
+/** Empty Recently Deleted – with Undo for a little while. */
+export function emptyTrashUndoable() {
+  const notes: string[] = []
+  const folders: string[] = []
+  getNotes(workspaceDoc).forEach((m, id) => void (m.get('trashedAt') && notes.push(id)))
+  getFolders(workspaceDoc).forEach((m, id) => void (m.get('trashedAt') && folders.push(id)))
+  const saved = { notes: entries('notes', notes), folders: entries('folders', folders) }
+  emptyTrash(workspaceDoc)
+  showToast(`Recently Deleted emptied`, () => (putBack('folders', saved.folders), putBack('notes', saved.notes)), 8000)
 }
 
 export function restoreNotes(ids: string[]) {

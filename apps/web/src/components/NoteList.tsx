@@ -6,9 +6,7 @@ import { useFolderAccess } from '../lib/folderLock'
 import { PenOff, ArrowUpDown, Folder, Lock, ChevronRight, ChevronLeft, Copy, Import, FolderInput, PanelLeft, Pin, SquarePen, RotateCcw, Trash2, LayoutTemplate, Sparkles, Paperclip, FileText, CircleCheck, Hash, Users, BookOpen, MoreHorizontal, PinOff, MessageCircleQuestion, CheckSquare, PanelLeftClose } from 'lucide-react'
 import {
   createNote,
-  deleteNoteForever,
   effectiveFolderId,
-  emptyTrash,
   getNotes,
   getSettings,
   moveNote,
@@ -33,7 +31,7 @@ import { addFilesToFolder, fileKind, formatSize } from '../lib/files'
 import { getDrag, setDrag, type View } from './Sidebar'
 import { SORT_LABELS, SortChoices, sortDirection } from './SortChoices'
 import { NoteRow } from './NoteRow'
-import { moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
+import { deleteNotesForever, emptyTrashUndoable, moveNotes, pinNotes, restoreNotes, tagNotes, trashNotes } from '../lib/noteActions'
 import { duplicateNote, saveAsTemplate } from '../lib/templates'
 import { openAskChat } from '../lib/askChat'
 import { useStore } from '../lib/store'
@@ -304,7 +302,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
         )}
         {view.kind === 'trash' ? (
           notes.length + trashedFolders.length > 0 && (
-            <button className="text danger" onClick={() => confirm('Permanently delete everything in Recently Deleted?') && emptyTrash(workspaceDoc)}>
+            <button className="text danger" onClick={() => confirm('Permanently delete everything in Recently Deleted?') && emptyTrashUndoable()}>
               Empty
             </button>
           )
@@ -463,7 +461,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
                 <button onClick={(e) => (e.stopPropagation(), restoreNotes([n.id]))}>
                   <RotateCcw size={14} /> Restore
                 </button>
-                <button className="danger" onClick={(e) => (e.stopPropagation(), confirm('Delete this note permanently?') && deleteNoteForever(workspaceDoc, n.id))}>
+                <button className="danger" onClick={(e) => (e.stopPropagation(), deleteNotesForever([n.id]))}>
                   <Trash2 size={14} /> Delete
                 </button>
               </div>
@@ -558,7 +556,7 @@ export function NoteList({ view, noteId, onOpen, onBack, onToggleFolders, onHide
                 disabled={!ids.length}
                 onClick={() => {
                   if (!confirm(`Permanently delete ${ids.length} note${ids.length === 1 ? '' : 's'}?`)) return
-                  ids.forEach((id) => deleteNoteForever(workspaceDoc, id))
+                  deleteNotesForever(ids)
                   stopSelecting()
                 }}
               >

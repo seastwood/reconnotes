@@ -39,7 +39,6 @@ import {
   getSettings,
   moveFolder,
   moveNote,
-  trashFolder,
   updateFolder,
   type SortMode,
   type TreeNode,
@@ -48,7 +47,7 @@ import {
 } from '@reconnotes/core'
 import { useWorkspace, workspaceDoc } from '../lib/workspace'
 import { isKeptOffline, setKeepOffline, useOffline } from '../lib/offline'
-import { moveNotes, trashNotes } from '../lib/noteActions'
+import { moveNotes, trashFolderUndoable, trashNotes } from '../lib/noteActions'
 import { SyncBadge } from './SyncBadge'
 import { useStore } from '../lib/store'
 import { useJobs } from '../lib/jobs'
@@ -490,7 +489,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
                     </button>
                   )
                 )}
-                <button className="danger" onClick={() => trashFolder(workspaceDoc, f.id)}>
+                <button className="danger" onClick={() => trashFolderUndoable(f.id)}>
                   Delete folder
                 </button>
                   </>
@@ -731,7 +730,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             const p = getDrag(e)
-            if (p?.kind === 'folder') trashFolder(workspaceDoc, p.id)
+            if (p?.kind === 'folder') trashFolderUndoable(p.id)
             else if (p?.kind === 'note') trashNotes(p.ids ?? [p.id])
           }}
         >
