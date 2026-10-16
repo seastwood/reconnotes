@@ -506,7 +506,7 @@ export function Sidebar({ overlay, onClose, view, onView, onSettings, onCommands
     <aside className={`sidebar${overlay ? ' overlay' : ''}`}>
       <header className="sidebar-head">
         <h1 className="app-name">
-          <span className="app-name-recon">Recon</span> Notes
+          <span className="app-name-recon">Recon</span>Notes
         </h1>
         <SyncBadge />
         <button className="icon" onClick={onSettings} aria-label="Settings">
