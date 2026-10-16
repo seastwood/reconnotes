@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Loader2, RotateCcw } from 'lucide-react'
+import { ChevronRight, Loader2, RotateCcw, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { api } from '../lib/api'
 
 interface Backup {
@@ -12,6 +12,18 @@ interface BackupNote {
   title: string
   folder: string
   status: 'same' | 'changed' | 'deleted' | 'trashed'
+}
+
+/** The server reading its newest backup back, as a restore would (monthly, or when asked). */
+interface BackupCheck {
+  at: number
+  backup: string | null
+  ok: boolean
+  notes: number
+  readable: number
+  attachments: number
+  missingAttachments: number
+  problems: string[]
 }
 
 const STATUS: Record<BackupNote['status'], string> = {
@@ -37,12 +49,14 @@ export function BackupsSection() {
   const [showAll, setShowAll] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [check, setCheck] = useState<BackupCheck | null>(null)
 
   const load = () =>
-    api<{ details: Backup[]; intervalHours: number }>('GET', '/api/backups')
+    api<{ details: Backup[]; intervalHours: number; check?: BackupCheck | null }>('GET', '/api/backups')
       .then((r) => {
         setBackups(r.details)
         setInterval(r.intervalHours)
+        setCheck(r.check ?? null)
       })
       .catch((e) => setMessage(`❌ ${(e as Error).message}`))
   useEffect(() => void load(), [])
@@ -82,6 +96,13 @@ export function BackupsSection() {
       return 'Backup made.'
     })
 
+  const checkNow = () =>
+    run('check', async () => {
+      const r = await api<{ check: BackupCheck }>('POST', '/api/backups/check')
+      setCheck(r.check)
+      return r.check.ok ? 'The newest backup restores fine.' : 'The check found a problem – see below.'
+    })
+
   const restore = (name: string, all: boolean) => {
     const what = all ? 'every note' : `${picked.size} note${picked.size === 1 ? '' : 's'}`
     const warn = all ? '\n\nNotes made since then go to Recently Deleted.' : ''
@@ -113,7 +134,28 @@ export function BackupsSection() {
         <button onClick={backUpNow} disabled={busy !== null}>
           {busy === 'backup' ? 'Backing up…' : 'Back up now'}
         </button>
+        <button onClick={checkNow} disabled={busy !== null} title="Read the newest backup back the way a restore would – your notes aren’t touched">
+          {busy === 'check' ? 'Checking…' : 'Check it restores'}
+        </button>
       </div>
+      {check && (
+        <div className={`backup-check${check.ok ? ' ok' : ' bad'}`}>
+          {check.ok ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
+          <div>
+            {check.ok
+              ? `Restore check passed ${new Date(check.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: all ${check.readable} notes${check.attachments ? ` and ${check.attachments} attachments` : ''} in the newest backup read back fine.`
+              : `Restore check ${new Date(check.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} found a problem:`}
+            {!check.ok && (
+              <ul>
+                {check.problems.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            )}
+            <span className="hint"> Checked by itself once a month.</span>
+          </div>
+        </div>
+      )}
       {message && <p className="status">{message}</p>}
       {backups === null ? (
         <p className="hint">

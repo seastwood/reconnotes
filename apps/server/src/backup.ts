@@ -15,6 +15,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { log } from './log'
 import { copyOffsite } from './offsite'
+import { checkIfDue } from './backupCheck'
 
 /**
  * Backups
@@ -49,6 +50,8 @@ export async function runBackup(config: Config, store: Store, sync: SyncEngine, 
   )
   prune(config.backupDir, config.backupKeep)
   log.info(`backup written to ${dir} (${notes} notes, ${copied} new attachments)`)
+  // once a month: make sure a backup really restores (read back, never touching the live notes)
+  checkIfDue(config, store)
   // and a copy somewhere else, when set up (in the background: it can take a while)
   const offsite = copyOffsite(store, dir, store.blobDir).catch((err) => log.warn(`offsite backup failed: ${(err as Error).message}`))
   if (opts.waitOffsite) await offsite

@@ -29,6 +29,7 @@ import {
   warmOllama,
 } from './agents'
 import { initialTextStatus, queueAttachment, retryAttachments, attendeesFor, groupOfAttachment } from './attachments'
+import { checkBackup, lastBackupCheck } from './backupCheck'
 import { listBackups, runBackup } from './backup'
 import { copyOffsite, offsiteSettings, testOffsite, type OffsiteSettings, type OffsiteStatus } from './offsite'
 import { exportZip } from './exportZip'
@@ -851,8 +852,10 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
 
   // --- Backups & export ---------------------------------------------------
   route('GET', '/api/backups', (_req, res) =>
-    json(res, 200, { backups: listBackups(config), details: describeBackups(config, listBackups(config)), intervalHours: config.backupIntervalHours }),
+    json(res, 200, { backups: listBackups(config), details: describeBackups(config, listBackups(config)), intervalHours: config.backupIntervalHours, check: lastBackupCheck(store) }),
   )
+  // read the newest backup back as a restore would (the live notes aren't touched)
+  route('POST', '/api/backups/check', (_req, res) => json(res, 200, { check: checkBackup(config, store) }))
   route('POST', '/api/backups', async (_req, res) => {
     const dir = await runBackup(config, store, sync)
     json(res, 201, { backup: path.basename(dir) })

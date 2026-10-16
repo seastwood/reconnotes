@@ -103,7 +103,9 @@ It's built for one person's daily notes, and anyone can run it.
   webhook. Tapping one opens the note (or the answer, for *Ask your notes*).
 - **Backups you can restore.** Scheduled snapshots, plus a plain Markdown copy of every note.
   *Settings › Backups* shows what changed since each backup and restores one note or everything;
-  each note's current state goes into its version history first. An *offsite copy* of each backup
+  each note's current state goes into its version history first. Once a month the server reads
+  its newest backup back as a restore would (*Check it restores* does it now) and says if anything
+  is wrong. An *offsite copy* of each backup
   can go to another disk or S3-compatible storage (Backblaze B2, Wasabi, R2…), encrypted if you
   like.
 - **Never locked in.** *Settings › Export & import*: every note as Markdown in its folders, with

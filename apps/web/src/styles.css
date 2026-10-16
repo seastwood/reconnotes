@@ -7549,3 +7549,35 @@ button.ask-chat-title:disabled {
 .week-overdue {
   margin-bottom: 4px;
 }
+
+/* Backups: whether the newest backup restores */
+.backup-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.backup-check.ok {
+  background: color-mix(in srgb, #2e9d4f 12%, transparent);
+}
+.backup-check.ok > svg {
+  color: #2e9d4f;
+  flex: none;
+  margin-top: 2px;
+}
+.backup-check.bad {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.backup-check.bad > svg {
+  color: var(--danger);
+  flex: none;
+  margin-top: 2px;
+}
+.backup-check ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
