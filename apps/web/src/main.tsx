@@ -90,6 +90,20 @@ function pinToViewport() {
     { capture: true, passive: true },
   )
   document.addEventListener('focusout', () => setTimeout(apply, 50))
+  // a text box low in a list ("Add a to-do" under the calendar): once the keyboard is up (and the
+  // app has shrunk above it), its list scrolls just enough to show it
+  document.addEventListener('focusin', (e) => {
+    const el = e.target
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) || el.type === 'checkbox' || el.type === 'date') return
+    const show = () => {
+      if (!el.isConnected || document.activeElement !== el) return
+      const r = el.getBoundingClientRect()
+      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight
+      if (r.bottom > bottom - 8 || r.top < 0) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+    setTimeout(show, 350)
+    setTimeout(show, 750)
+  })
   apply()
 }
 
