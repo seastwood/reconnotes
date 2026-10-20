@@ -3,7 +3,7 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { ArrowDown, ArrowUp, Copy, GripVertical, Loader2, ScanText, Scissors, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Copy, GripVertical, Loader2, Palette, ScanText, Scissors, Sparkles, Trash2 } from 'lucide-react'
 import { copyBlock } from '../editor/blockClipboard'
 import { getStrokes, getTranscripts, inkHash, newId, tidyHandwriting, transcriptSourceKey } from '@reconnotes/core'
 import { DrawingCanvas } from './DrawingCanvas'
@@ -271,6 +271,12 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
     grip.addEventListener('pointercancel', end)
   }
 
+  /** The Pencil's tool palette, under this button (for when the bottom toolbar is hidden). */
+  const openTools = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    inkUi.set({ palette: inkUi.get().palette ? null : { x: r.left + r.width / 2, y: r.bottom - 16 } })
+  }
+
   const footer = active && editor.isEditable && (
     <div className="drawing-footer-actions" onPointerDown={(e) => e.stopPropagation()}>
       <span className="drag-grip" onPointerDown={startDrag} title="Drag to move this drawing" aria-label="Drag to move">
@@ -281,6 +287,9 @@ function DrawingView({ node, editor, deleteNode, selected, getPos }: ReactNodeVi
       </button>
       <button onClick={() => move(1)} title="Move down" aria-label="Move drawing down">
         <ArrowDown size={16} />
+      </button>
+      <button onClick={openTools} title="Pens, colours and sizes (or squeeze / double-tap the Pencil)" aria-label="Drawing tools">
+        <Palette size={16} /> Tools
       </button>
       <span className="spacer" />
       <button onClick={tidy} title="Make the handwriting neater: straighter lines, even words and margins, smoother strokes (undo restores it)">

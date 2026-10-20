@@ -206,6 +206,10 @@ export function SettingsDialog({ onClose, tab: initial }: { onClose: () => void;
               Draw with finger in an open drawing (tap a drawing to open it; two fingers scroll). Otherwise only Apple Pencil and mouse draw
             </label>
             <label className="check">
+              <input type="checkbox" checked={s.inkToolbar === 'always'} onChange={(e) => settings.set({ inkToolbar: e.target.checked ? 'always' : 'pencil-hidden' })} />
+              Always show the drawing toolbar at the bottom. Otherwise it hides once you use Apple Pencil: squeeze or double-tap the Pencil, or tap Tools above the drawing, for pens, colours and sizes
+            </label>
+            <label className="check">
               <input type="checkbox" checked={s.shapeSnap !== false} onChange={(e) => settings.set({ shapeSnap: e.target.checked })} />
               Hold the pen still at the end of a line, box, circle or arrow to make it a clean shape
             </label>

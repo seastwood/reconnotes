@@ -17,6 +17,7 @@ import {
   type DrawTool,
 } from './toolState'
 import { useUndoManager, useUndoState } from '../editor/undo'
+import { useSettings } from '../lib/settings'
 
 export const TOOL_ICONS: Record<DrawTool, typeof PenLine> = {
   pen: PenLine,
@@ -132,9 +133,17 @@ export function SizeRow() {
   )
 }
 
-/** Toolbar shown at the bottom of the screen while drawing (like Apple Notes). */
-export function InkToolbar() {
+/**
+ * Toolbar shown at the bottom of the screen while drawing (like Apple Notes).
+ * With `hideForPencil`, it stays out of the way once an Apple Pencil is in
+ * use (its squeeze / double-tap, or Tools above the drawing, open the same
+ * tools next to the pen) unless there's a lasso selection to act on, or the
+ * "always show" setting is on.
+ */
+export function InkToolbar({ hideForPencil = false }: { hideForPencil?: boolean }) {
   const activeDrawing = useInkUi((s) => s.activeDrawing)
+  const pencilSeen = useInkUi((s) => s.pencilSeen)
+  const alwaysShow = useSettings((s) => s.inkToolbar === 'always')
   const um = useUndoManager()
   const { canUndo, canRedo } = useUndoState(um)
   const [selCount, setSelCount] = useState(0)
@@ -152,6 +161,7 @@ export function InkToolbar() {
   }, [])
 
   if (!activeDrawing) return null
+  if (hideForPencil && pencilSeen && !alwaysShow && selCount === 0 && !(lasso && clipCount > 0)) return null
   const action = (a: string, extra: object = {}) =>
     window.dispatchEvent(new CustomEvent('reconnotes:ink-action', { detail: { drawingId: activeDrawing, action: a, ...extra } }))
 

@@ -486,7 +486,7 @@ export function NoteEditor({ noteId, doc, folderId, onOpenNote, onFollowLink = o
           {historyOpen && <VersionHistory noteId={noteId} onClose={() => setHistoryOpen(false)} />}
           {shareOpen && <ShareDialog noteId={noteId} onClose={() => setShareOpen(false)} />}
           {shareWithOpen && <ShareWithDialog item={{ kind: 'note', id: noteId }} name={editor.state.doc.firstChild?.textContent || 'this note'} onClose={() => setShareWithOpen(false)} />}
-          <InkToolbar />
+          <InkToolbar hideForPencil />
           <PencilPalette />
         </div>
       </UndoContext.Provider>

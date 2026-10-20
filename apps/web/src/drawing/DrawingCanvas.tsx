@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import {
   DRAWING_WIDTH,
@@ -91,6 +91,23 @@ export function DrawingCanvas({ doc, drawingId, undoManager, editable, footer, o
   const open = useInkUi((s) => s.activeDrawing === drawingId)
   const openRef = useRef(open)
   openRef.current = open
+  // Opening (or closing) a drawing adds (or removes) its buttons above it.
+  // Keep the ink where it was on screen, so a stroke begun with the touch
+  // that opened it doesn't jump: read where it was before the change is
+  // committed, then scroll the note by however far it moved.
+  const wasOpen = useRef(open)
+  const topBefore = useRef<number | null>(null)
+  if (open !== wasOpen.current && wrapRef.current) topBefore.current = wrapRef.current.getBoundingClientRect().top
+  useLayoutEffect(() => {
+    wasOpen.current = open
+    const before = topBefore.current
+    topBefore.current = null
+    const el = wrapRef.current
+    const scroller = el?.closest('.editor-scroll')
+    if (before === null || !el || !scroller) return
+    const shift = el.getBoundingClientRect().top - before
+    if (Math.abs(shift) >= 1) scroller.scrollTop += shift
+  }, [open])
   /** two or more fingers are down: they scroll, nothing draws */
   const multiTouch = useRef(false)
   const [selection, setSelection] = useState<{ ids: Set<string>; bounds: Rect } | null>(null)

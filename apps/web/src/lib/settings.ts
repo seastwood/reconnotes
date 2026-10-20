@@ -22,6 +22,8 @@ export interface Settings {
   backgroundOcr: boolean
   /** iOS app: transcribe recordings with Apple's on-device speech recognition */
   deviceSpeech: boolean
+  /** a note's drawing toolbar at the bottom: hidden once Apple Pencil is used (its squeeze / double-tap opens the tools), or always shown */
+  inkToolbar?: 'pencil-hidden' | 'always'
   /** hold the pen still at the end of a stroke to snap it to a clean shape */
   shapeSnap?: boolean
   /** ticking a checklist item moves it below the unticked ones (unticking moves it back up) */

@@ -42,14 +42,19 @@ export function usePencilInteractions() {
     }
     // Remember where the pencil is (hovering or touching) so the palette opens next to it.
     const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'pen') return
       // a plain variable, not the store: updating the store on every move re-renders the page while writing
-      if (e.pointerType === 'pen') lastPencil = { x: e.clientX, y: e.clientY }
+      lastPencil = { x: e.clientX, y: e.clientY }
+      // (before any drawing sees the touch, so the bottom toolbar never flashes up for it)
+      if (!inkUi.get().pencilSeen) inkUi.set({ pencilSeen: true })
     }
     window.addEventListener('reconnotes:pencil', onPencil)
     window.addEventListener('pointermove', onMove, { passive: true })
+    window.addEventListener('pointerdown', onMove, { capture: true, passive: true })
     return () => {
       window.removeEventListener('reconnotes:pencil', onPencil)
       window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerdown', onMove, { capture: true })
     }
   }, [])
 }
