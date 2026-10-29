@@ -58,6 +58,25 @@ export function noteFilter(sync: SyncEngine, scope: Scope = {}): (noteId: string
   }
 }
 
+/**
+ * Notes chosen by name (a note's references): only a lock keeps them out – a folder left out of
+ * search is still read when you've chosen a note in it.
+ */
+export function unlockedFilter(sync: SyncEngine, unlocked: string[] = []): (noteId: string) => boolean {
+  const ws = sync.getDoc(WORKSPACE_DOC)
+  const rules = folderRules(ws ? listFolders(ws) : [])
+  const live = new Set(rules.keys())
+  const meta = sync.noteMeta()
+  const open = new Set(unlocked)
+  return (noteId) => {
+    const n = meta.get(noteId)
+    if (!n) return false
+    const f = effectiveFolderId(n, live)
+    const lockedBy = f ? rules.get(f)?.lockedBy : undefined
+    return !lockedBy || open.has(lockedBy)
+  }
+}
+
 /** The scope from a search's query string: ?folders=a,b&unlocked=c */
 export function scopeFromQuery(params: URLSearchParams): Scope {
   const list = (k: string) => (params.get(k) ?? '').split(',').filter((id) => /^([a-z0-9]{8,64}|none)$/.test(id))

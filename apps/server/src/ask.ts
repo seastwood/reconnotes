@@ -4,7 +4,7 @@ import type { SyncEngine } from './sync'
 import type { Ai } from './ai'
 import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
-import { aiSkips, noteFilter, type Scope } from './access'
+import { aiSkips, noteFilter, unlockedFilter, type Scope } from './access'
 import { askRefs } from './askHistory'
 import { documentOf } from './references'
 import { reportPartial, reportProgress } from './jobs'
@@ -189,8 +189,9 @@ export async function askNotes(
     .slice(0, 25)
   // "Ask about this note": just those notes, as much of each as fits
   const pinned = (scope.notes ?? []).filter(usable).slice(0, 8)
-  // asked about one note: the notes it refers to ("as described in R402 of the FRC manual"), chosen for it
-  const canRead = noteFilter(sync, { unlocked: scope.unlocked })
+  // asked about one note: the notes it refers to ("as described in R402 of the FRC manual"), chosen for it –
+  // read even in a folder left out of search (you chose them); only a lock keeps them out
+  const canRead = unlockedFilter(sync, scope.unlocked)
   const readable = (id: string) => id !== pinned[0] && Boolean(meta.get(id)) && !meta.get(id)!.trashedAt && canRead(id)
   const chosenRefs = pinned.length === 1 ? askRefs(store, pinned[0]).filter(readable) : []
   // the rest of each one's document (a manual split into chapters): read only for the rules the note points to
@@ -552,11 +553,17 @@ export function onlyRules(text: string, pointed: Map<string, string | null>): st
       const name = label.replace(/^\(?[a-z][.)]\s*/, '')
       const lettered = (l: string) => /^\s*(?:[-*]\s+|\*\*)?\(?[A-Z][.)]\s/.test(l)
       const named = (l: string) => /^\s*[-*]\s+\**\p{Lu}[\p{L}]+(?:[ /&][\p{L}]+){0,3}\**\s*[–—:-]\s/u.exec(l)
+      // …or without the bullets too (a PDF's plain lines: "Padding – A minimum of…")
+      const plain = (l: string) => /^\s*\**\p{Lu}[\p{L}]+(?:[ /&][\p{L}]+){0,3}\**\s*[–—]\s/u.exec(l)
       let partAt = lettered
       let from = block.findIndex((l) => lettered(l) && l.toLowerCase().replace(/\*/g, '').includes(label))
       if (from < 0) {
         partAt = (l) => Boolean(named(l))
         from = block.findIndex((l) => named(l)?.[0].replace(/[-*\s–—:]+/g, ' ').trim().toLowerCase() === name)
+      }
+      if (from < 0) {
+        partAt = (l) => Boolean(plain(l))
+        from = block.findIndex((l) => plain(l)?.[0].replace(/[-*\s–—:]+/g, ' ').trim().toLowerCase() === name)
       }
       if (from > 0) {
         let to = from + 1
@@ -772,7 +779,7 @@ ${history.length ? `The conversation so far (the request may refer to it):\n${hi
  */
 export function noteContext(store: Store, sync: SyncEngine, noteId: string, question: string, scope: Scope = {}, history: AskTurn[] = []): string {
   const meta = sync.noteMeta()
-  const canRead = noteFilter(sync, { unlocked: scope.unlocked })
+  const canRead = unlockedFilter(sync, scope.unlocked)
   const ok = (id: string) => Boolean(meta.get(id)) && !meta.get(id)!.trashedAt && canRead(id)
   if (!ok(noteId)) return ''
   const textOf = (id: string) => {

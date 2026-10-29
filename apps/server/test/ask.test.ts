@@ -5,7 +5,7 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import * as Y from 'yjs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { WORKSPACE_DOC, createFolder, createNote, getContent, getNotes, noteDocName } from '@reconnotes/core'
+import { WORKSPACE_DOC, createFolder, createNote, updateFolder, getContent, getNotes, noteDocName } from '@reconnotes/core'
 import { annotateDates, findDates, timeRange } from '../src/timeRange'
 import { setAskRefs } from '../src/askHistory'
 import { findReferences, setIgnoredRef } from '../src/references'
@@ -778,6 +778,38 @@ describe('a note that refers to another (its manual)', () => {
     expect(about).toContain('pool noodles of 2 1/2 in. diameter')
     expect(about).not.toContain('3/4 in. plywood')
     app.store.setSetting('webImports', {})
+  })
+  it('a reference in a folder left out of search is still read – the manual as a PDF gives it, letters lost', async () => {
+    const folder = 'nosearchfold01'
+    await app.sync.change(WORKSPACE_DOC, (ws) => {
+      createFolder(ws, { id: folder, name: 'Game Manuals' })
+      updateFolder(ws, folder, { noSearch: true })
+    })
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title, folderId: folder }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk('nosearchmain01', 'MinneTrials 2026 Manual - Cookie Chaos', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual. The lower edge of the bumpers should be no more than 2.5” above the ground.')
+    await mk(
+      'nosearchfrc001',
+      '2025 FRC Game Manual',
+      [
+        'Figure 8-3 BUMPER coverage requirements',
+        'R402 *BUMPER construction. BUMPERS must consist of the following:',
+        'Padding – A minimum of 2 ¼ in. (~58 mm) depth of foam padding, at least 4 ½ in. (~114 mm) tall.',
+        'Backing – 3/4 in. thick plywood.',
+        'Cover – a durable rugged fabric.',
+        'R403 *BUMPERS must not be wider than the robot.',
+      ].join('\n\n'),
+    )
+    setAskRefs(app.store, 'nosearchmain01', ['nosearchfrc001'])
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the A. Padding section of R402?', null, {}, { notes: ['nosearchmain01'] })
+    expect(prompts.at(-1)).toContain('A minimum of 2 ¼ in. (~58 mm) depth of foam padding')
+    // only the padding part: not the backing or cover, nor the next rule
+    expect(prompts.at(-1)).not.toContain('3/4 in. thick plywood')
+    expect(prompts.at(-1)).not.toContain('not be wider than the robot')
+    expect(noteContext(app.store, app.sync, 'nosearchmain01', 'what is the A. Padding section of R402?')).toContain('depth of foam padding')
   })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
