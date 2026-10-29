@@ -869,6 +869,11 @@ describe('a note that refers to another (its manual)', () => {
   it('a figure cited to a note that doesn’t give it is cited to the one that does', () => {
     expect(figuresIn('A minimum of 2 ¼ in. (~58 mm) depth, at least 4 ½ in. tall, per R402 [3]')).toEqual([2.25, 58, 4.5])
     expect(figuresIn('2 1/4 in. and 2.25 inches, rule G301, 1 or 2 robots')).toEqual([2.25, 2.25])
+    // every way a fraction is written
+    expect(figuresIn('2¼, 2-1/4, 2,25 and 2⁄4 more')).toEqual([2.25, 2.25, 2.25, 0.5])
+    expect(figuresIn('⅝ in. bolts, 3/4 in. plywood, 1 ⅞ in. tube, 10 ⅜ in. wide')).toEqual([0.625, 0.75, 1.875, 10.375])
+    // not dates, nor thousands
+    expect(figuresIn('due 10/22, weighs 1,500 lb.')).toEqual([1500])
     const texts = new Map([
       [1, 'R12. BUMPERS are required … The lower edge of the bumpers should be no more than 2.5” above the ground. Gaps in the bumpers are permissible.'],
       [12, 'R402 *BUMPER construction. Padding – A minimum of 2 ¼ in. (~58 mm) depth of foam padding, at least 4 ½ in. (~114 mm) tall.'],

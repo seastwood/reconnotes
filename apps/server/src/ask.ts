@@ -398,7 +398,7 @@ export async function askNotes(
           const about =
             keyRules.includes(r) ||
             (part !== null && part !== undefined && keyWords.some((w) => norm(part).split(' ').some((p) => p.length > 2 && (p.startsWith(w) || w.startsWith(p))))) ||
-            keyWords.filter((w) => ruleText.includes(w.replace(/s$/, ''))).length >= Math.max(2, Math.ceil(keyWords.length * 0.6))
+            keyWords.filter((w) => ruleText.includes(stem(w))).length >= Math.max(2, Math.ceil(keyWords.length * 0.6))
           if (!about) continue
           if (n === undefined) {
             add(def!.noteId, def!.text.length > PER_NOTE ? excerpt(def!.text, [r.toLowerCase(), ...words], PER_NOTE) : def!.text, def!)
@@ -747,20 +747,32 @@ function sentenceAround(answer: string, at: number, len: number): string {
   return answer.slice(start, end).replace(/\[\d+\]/g, ' ')
 }
 
-const FRACTION: Record<string, number> = { '¼': 0.25, '½': 0.5, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125 }
+/** Every fraction character, as a number (½, ⅝, …). */
+const FRACTION: Record<string, number> = {
+  '½': 1 / 2, '⅓': 1 / 3, '⅔': 2 / 3, '¼': 1 / 4, '¾': 3 / 4, '⅕': 1 / 5, '⅖': 2 / 5, '⅗': 3 / 5, '⅘': 4 / 5, '⅙': 1 / 6, '⅚': 5 / 6,
+  '⅐': 1 / 7, '⅛': 1 / 8, '⅜': 3 / 8, '⅝': 5 / 8, '⅞': 7 / 8, '⅑': 1 / 9, '⅒': 1 / 10,
+}
+const FRACTION_CHARS = `[${Object.keys(FRACTION).join('')}]`
 /**
- * The figures a text gives, as numbers: "2 ¼ in." and "2 1/4" and "2.25" alike. Not rule numbers
- * (R12), citations ([1]), nor small whole numbers (1, 2) – they're everywhere.
+ * The figures a text gives, as numbers – "2 ¼", "2¼", "2 1/4", "2-1/4", "2.25" and "2,25" alike, "3/4"
+ * and "⅝" on their own too. Not rule numbers (R12), citations ([1]), nor small whole numbers (1, 2) –
+ * they're everywhere. (Numbers, not units: "57 mm" isn't "2.25 in.")
  */
 export function figuresIn(t: string): number[] {
   const s = t
     .replace(/\[\d+\]/g, ' ')
-    .replace(/(\d+)\s*([¼½¾⅓⅔⅛])/g, (_, a: string, f: string) => ` ${Number(a) + FRACTION[f]} `)
-    .replace(/(\d+)\s+(\d)\/(\d{1,2})(?!\d)/g, (_, a: string, b: string, c: string) => ` ${Number(a) + Number(b) / Number(c)} `)
-    .replace(/[¼½¾⅓⅔⅛]/g, (f) => ` ${FRACTION[f]} `)
+    .replace(/\u2044/g, '/') // the fraction slash
+    // a whole number and a fraction character: "2 ¼", "2¼", "2-¼"
+    .replace(new RegExp(`(\\d+)[\\s-]*(${FRACTION_CHARS})`, 'g'), (_, a: string, f: string) => ` ${Number(a) + FRACTION[f]} `)
+    // a whole number and a typed fraction: "2 1/4", "2-1/4"
+    .replace(/(?<![\d/.])(\d+)[\s-]+(\d+)\/(\d+)(?![\d/])/g, (m, a: string, b: string, c: string) => (Number(c) > Number(b) ? ` ${Number(a) + Number(b) / Number(c)} ` : m))
+    // a typed fraction on its own: "3/4", "5/16" – a measurement's halves, quarters, … (not a date: 10/22)
+    .replace(/(?<![\d/.])(\d{1,2})\/(2|3|4|5|8|10|16|32|64)(?![\d/])/g, (m, b: string, c: string) => (Number(c) > Number(b) && Number(b) > 0 ? ` ${Number(b) / Number(c)} ` : m))
+    .replace(new RegExp(FRACTION_CHARS, 'g'), (f) => ` ${FRACTION[f]} `)
   const out: number[] = []
-  for (const m of s.matchAll(/(?<![\p{L}\d.\-/])\d+(?:[.,]\d+)?(?![\d/])/gu)) {
-    const v = Number(m[0].replace(',', '.'))
+  // (a comma before one or two digits is a decimal one – "2,25"; "1,500" is fifteen hundred)
+  for (const m of s.matchAll(/(?<![\p{L}\d.\-/])(?:\d{1,3}(?:,\d{3})+(?![\d,])|\d+(?:\.\d+|,\d{1,2}(?!\d))?)(?![\d/])/gu)) {
+    const v = Number(/,\d{3}/.test(m[0]) ? m[0].replace(/,/g, '') : m[0].replace(',', '.'))
     if (Number.isFinite(v) && (v % 1 !== 0 || v >= 3)) out.push(v)
   }
   return out
