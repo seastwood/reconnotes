@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUp, ArrowUpDown, BookOpen, Diff, Redo2, MessagesSquare, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
+import { ArrowUp, ArrowUpDown, BookOpen, Check, Copy, Diff, Redo2, MessagesSquare, MessageSquare, PencilLine, RotateCcw, Undo2, ChevronLeft, FileText, FilePlus2, Folder, Library, Loader2, MessageCircleQuestion, Search, Sparkles, SquarePen, Trash2, X } from 'lucide-react'
 import { useFolderAccess } from '../lib/folderLock'
+import { marked } from '../lib/markdown'
 import { isFinished, submitJob, useJobs, watchingJob, type Job } from '../lib/jobs'
 import { safeLocalGet, safeLocalSet, useStore } from '../lib/store'
 import { isSyncConfigured } from '../lib/settings'
@@ -428,9 +429,12 @@ function AskChat({
     ) : null
   const allTurns: TurnToSave[] = [...saved.filter((t) => !t.edit).map((t) => ({ question: t.question, answer: t.answer, sources: t.sources, cites: t.cites })), ...doneLive]
   const saveButton = (t: TurnToSave) => (
-    <button className="text ask-save" onClick={() => setSaving([t])}>
-      <FilePlus2 size={14} /> Save as note
-    </button>
+    <>
+      <button className="text ask-save" onClick={() => setSaving([t])}>
+        <FilePlus2 size={14} /> Save as note
+      </button>
+      <CopyAnswerButton turn={t} />
+    </>
   )
 
   /** a source: the note, at the line with the answer – beside the chat, or with the chat stepping aside (phone) */
@@ -1093,5 +1097,43 @@ function ChatInput({
         </button>
       </div>
     </form>
+  )
+}
+
+/** An answer to paste anywhere: its text (citations kept) and the notes they point to, formatted and plain. */
+function answerToCopy(t: TurnToSave): { text: string; html: string } {
+  const cited = new Set([...t.answer.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))
+  const sources = t.sources.filter((x) => cited.has(x.n)).map((x) => `[${x.n}] ${x.title}${x.section ? ` › ${x.section}` : ''}`)
+  // plain: without Markdown's marks for bold and headings
+  const plain = t.answer.trim().replace(/\*\*(.+?)\*\*/g, '$1').replace(/__(.+?)__/g, '$1').replace(/^#{1,6}\s+/gm, '')
+  const text = [plain, ...(sources.length ? ['', 'Sources:', ...sources] : [])].join('\n')
+  const html = marked.parse([t.answer.trim(), ...(sources.length ? ['', '**Sources**', '', ...sources.map((x) => `- ${x}`)] : [])].join('\n'), { async: false }) as string
+  return { text, html }
+}
+
+/** "Copy" beside "Save as note": a tick for a moment once it's copied. */
+function CopyAnswerButton({ turn }: { turn: TurnToSave }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const copy = async () => {
+    const { text, html } = answerToCopy(turn)
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })])
+    } catch {
+      try {
+        await navigator.clipboard.writeText(text)
+      } catch {
+        return
+      }
+    }
+    setCopied(true)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <button className="text ask-save" onClick={() => void copy()} title="Copy this answer (with its sources) to paste anywhere">
+      {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
+    </button>
   )
 }

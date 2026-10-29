@@ -1994,6 +1994,9 @@ button.link {
   margin-top: 6px;
   font-size: 13px;
 }
+.ask-save + .ask-save {
+  margin-left: 14px;
+}
 
 /* ------------------------------------------------------------ AI agents */
 .dialog {
