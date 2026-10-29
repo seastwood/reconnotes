@@ -6,6 +6,7 @@ import type { MeaningIndex } from './semantic'
 import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfToday, timeRange, todayLabel } from './timeRange'
 import { aiSkips, noteFilter, type Scope } from './access'
 import { askRefs } from './askHistory'
+import { documentOf } from './references'
 import { reportPartial, reportProgress } from './jobs'
 import { RULE_ID, definesRule, claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
@@ -190,7 +191,11 @@ export async function askNotes(
   const pinned = (scope.notes ?? []).filter(usable).slice(0, 8)
   // asked about one note: the notes it refers to ("as described in R402 of the FRC manual"), chosen for it
   const canRead = noteFilter(sync, { unlocked: scope.unlocked })
-  const refs = pinned.length === 1 ? askRefs(store, pinned[0]).filter((id) => id !== pinned[0] && meta.get(id) && !meta.get(id)!.trashedAt && canRead(id)) : []
+  const readable = (id: string) => id !== pinned[0] && Boolean(meta.get(id)) && !meta.get(id)!.trashedAt && canRead(id)
+  const chosenRefs = pinned.length === 1 ? askRefs(store, pinned[0]).filter(readable) : []
+  // the rest of each one's document (a manual split into chapters): read only for the rules the note points to
+  const siblings = new Set(chosenRefs.flatMap((id) => documentOf(store, id)).filter((id) => readable(id) && !chosenRefs.includes(id)))
+  const refs = [...chosenRefs, ...siblings]
   const isRef = new Set(refs)
   if (pinned.length) ids = [...pinned, ...refs]
   // a question about a time ("yesterday", "last week", "on 10/5"): the notes
@@ -256,7 +261,8 @@ export async function askNotes(
     for (const id of ids) {
       const doc = sync.getDoc(noteDocName(id))
       if (!doc) continue
-      const md = annotateDates(noteToMarkdown(doc, { attachmentText: true }), now, tz)
+      // an attached PDF (a manual) whole: it's read by sections, and R402 is far past the start
+      const md = annotateDates(noteToMarkdown(doc, { attachmentText: true, attachmentTextLimit: 2_000_000 }), now, tz)
       if (!md.trim()) continue
       if (md.length <= SMALL_NOTE) all.push({ noteId: id, path: [], text: md.trim(), index: 0 })
       else all.push(...splitSections(id, meta.get(id)!.title, md))
@@ -265,6 +271,11 @@ export async function askNotes(
     // only that is read from it – the rest of R402, and the referenced document's other rules, don't apply
     if (refs.length) {
       const mainText = all.filter((x) => !isRef.has(x.noteId)).map((x) => x.text).join('\n')
+      // another chapter of a chosen reference: only where it defines a rule the note (or the question) names
+      if (siblings.size) {
+        const named = [...new Set([...[...mainText.matchAll(RULE_ID)].map((m) => m[0]), ...rules])]
+        all.splice(0, all.length, ...all.filter((x) => !siblings.has(x.noteId) || named.some((r) => definesRule(x.text, r))))
+      }
       const pointed = pointedRules(mainText, all.filter((x) => isRef.has(x.noteId)).map((x) => x.text))
       if (pointed.size) {
         const narrowed: Section[] = []
@@ -394,6 +405,8 @@ export async function askNotes(
       ? `\n\nThe lines of the notes above most about the question – answer from these first, and give every value in them that answers it (each limit, with when it applies: e.g. one at the start and another during a match):\n${lines.map((l) => `[${l.n}] ${l.line}`).join('\n')}`
       : ''
   }
+  // the documents referred to, as the AI is told: those chosen, and the other chapters read from
+  const refsNamed = () => [...new Set([...chosenRefs, ...sources.map((x) => x.noteId).filter((id) => siblings.has(id))])]
   const promptFor = (context: string) => `Answer the question using only the notes below (my own notes). Lines starting with ✍️ are handwriting, 📷 text from pictures and 🎙️ recordings.
 
 - Start with the answer, not a restatement of the question. Then explain it: give every relevant detail the notes give – each value with its unit, and the conditions it applies under (for example one limit at the start and another during a match).
@@ -403,7 +416,7 @@ export async function askNotes(
 - After each fact or item, cite the note it came from like [1] or [2][3].
 - If the notes don't contain the answer, say so plainly – don't guess or use outside knowledge.${
     refs.length
-      ? `\n- "${meta.get(pinned[0])?.title || 'The main note'}" is the main document; ${refs.map((id) => `"${meta.get(id)?.title || 'Untitled'}"`).join(', ')} ${refs.length === 1 ? 'is' : 'are'} referred to by it. The main document decides: a referenced document's rule applies only where the main document points to it (e.g. "as described in R402"). Where the main document says something itself, or the two differ, give the main document's rule – not the referenced one's. When a fact comes from a referenced document, say so ("in the FRC manual…"). Where the main document points to a referenced rule for details ("constructed as described in R402"), give those details from it – each value with its unit.`
+      ? `\n- "${meta.get(pinned[0])?.title || 'The main note'}" is the main document; ${refsNamed().map((id) => `"${meta.get(id)?.title || 'Untitled'}"`).join(', ')} ${refsNamed().length === 1 ? 'is' : 'are'} referred to by it. The main document decides: a referenced document's rule applies only where the main document points to it (e.g. "as described in R402"). Where the main document says something itself, or the two differ, give the main document's rule – not the referenced one's. When a fact comes from a referenced document, say so ("in the FRC manual…"). Where the main document points to a referenced rule for details ("constructed as described in R402"), give those details from it – each value with its unit.`
       : ''
   }
 - Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
@@ -732,8 +745,14 @@ export async function askGeneral(
   question: string,
   when: { tzOffset?: number; now?: number } = {},
   history: AskTurn[] = [],
+  /** asked in a note's chat: that note (the parts about the question) and what it points to in its references */
+  about = '',
 ): Promise<{ answer: string; sources: AskSource[]; general: true; agent: string }> {
-  const prompt = `You're a helpful assistant. Answer the request below from what you know – it isn't about any notes.
+  const prompt = `You're a helpful assistant. Answer the request below from what you know${
+    about
+      ? `. It's asked while reading the note below (with the rules it points to in the documents it refers to): use them where they answer it, and say when you go beyond them.\n\n${about}\n`
+      : ' – it isn\'t about any notes.'
+  }
 
 - Be practical and complete, without filler or chit-chat. Start with the answer.
 - Write in Markdown: short headings where they help, lists for things to get or do (a recipe: its ingredients as a list with amounts, then numbered steps), and "- [ ] " checklists for tasks.
@@ -744,6 +763,43 @@ Today is ${todayLabel(when.now ?? Date.now(), when.tzOffset ?? 0)}.
 ${history.length ? `The conversation so far (the request may refer to it):\n${history.map((h) => `Q: ${h.question}\nA: ${h.answer.slice(0, 3000)}`).join('\n\n')}\n\n` : ''}Request: ${question}`
   const { text, agent } = await ai.chat(prompt, (soFar) => reportPartial({ answer: soFar, sources: [], general: true }))
   return { answer: text, sources: [], general: true, agent }
+}
+
+/**
+ * What "Anything" is given when asked in a note's chat: the note's parts about the question, and
+ * the rules it (or the question) names, from the notes it refers to – the same ones "This note" reads.
+ */
+export function noteContext(store: Store, sync: SyncEngine, noteId: string, question: string, scope: Scope = {}, history: AskTurn[] = []): string {
+  const meta = sync.noteMeta()
+  const canRead = noteFilter(sync, { unlocked: scope.unlocked })
+  const ok = (id: string) => Boolean(meta.get(id)) && !meta.get(id)!.trashedAt && canRead(id)
+  if (!ok(noteId)) return ''
+  const textOf = (id: string) => {
+    const doc = sync.getDoc(noteDocName(id))
+    return doc ? noteToMarkdown(doc, { attachmentText: true, attachmentTextLimit: 2_000_000 }) : ''
+  }
+  const asked = [question, ...history.map((h) => h.question)].join(' ')
+  const words = asked
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}_]+/u)
+    .filter((w) => w.length >= 3 && !STOP.has(w))
+  const rules = ruleIds(asked)
+  const main = textOf(noteId)
+  let out = `=== "${meta.get(noteId)!.title || 'Untitled'}" (the note) ===\n${excerpt(main, [...words, ...rules.map((r) => r.toLowerCase())], PER_NOTE * 2)}`
+  const chosen = askRefs(store, noteId).filter((id) => id !== noteId && ok(id))
+  const refs = [...new Set([...chosen, ...chosen.flatMap((id) => documentOf(store, id))])].filter((id) => id !== noteId && ok(id))
+  if (refs.length) {
+    const texts = new Map(refs.map((id) => [id, textOf(id)]))
+    const pointed = pointedRules(main, [...texts.values()])
+    // a rule the question asks about that only a reference defines
+    for (const r of rules) if (!pointed.has(r) && [...texts.values()].some((t) => definesRule(t, r))) pointed.set(r, null)
+    for (const [r, part] of pointed) {
+      const id = refs.find((x) => definesRule(texts.get(x)!, r))
+      const text = id ? onlyRules(texts.get(id)!, new Map([[r, part]])) : ''
+      if (text && out.length < TOTAL) out += `\n\n=== ${r} in "${meta.get(id!)!.title || 'Untitled'}" (a document the note refers to) ===\n${text.slice(0, PER_NOTE)}`
+    }
+  }
+  return out.slice(0, TOTAL)
 }
 
 /** a sentence saying the notes don't say something ("no explicit rules are stated in the notes") */

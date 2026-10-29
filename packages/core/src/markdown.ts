@@ -17,6 +17,8 @@ export function noteToMarkdown(
     attachmentPlaceholder?: (kind: 'audio' | 'file', id: string, name: string) => string
     /** add the text recognised in pictures and recordings (for AI input) */
     attachmentText?: boolean
+    /** how much of each one's text (default 20,000 characters) – Ask reads a whole attached manual */
+    attachmentTextLimit?: number
   } = {},
 ): string {
   const transcripts = getTranscripts(doc)
@@ -53,7 +55,7 @@ export function noteToMarkdown(
 
   const attText = (id: string, label: string) => {
     const t = opts.attachmentText ? transcripts.get(`att:${id}`) : undefined
-    if (t?.trim()) out.push(`> ${label} ${t.trim().slice(0, 20000).replace(/\n/g, '\n> ')}`)
+    if (t?.trim()) out.push(`> ${label} ${t.trim().slice(0, opts.attachmentTextLimit ?? 20000).replace(/\n/g, '\n> ')}`)
   }
 
   const block = (el: Y.XmlElement, indent: string, listMarker?: string) => {

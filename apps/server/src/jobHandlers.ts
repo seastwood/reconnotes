@@ -34,7 +34,7 @@ import type { Config } from './config'
 import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
-import { askGeneral, askNotes } from './ask'
+import { askGeneral, askNotes, noteContext } from './ask'
 import { tidyNote } from './tidy'
 import { recipeFromPhotos } from './photoRecipe'
 import { PAGE_KINDS, guessKind, notesFromPhotos, readForGuess, type PhotoKind } from './photoPages'
@@ -583,6 +583,12 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     return { result: { text: tidied, cleaned: tidied !== text } }
   })
 
+  // "Anything" in a note's chat: the AI's own answer, with the note and the rules it points to in its references
+  const generalAbout = (input: Record<string, unknown>, question: string) => {
+    const scope = scopeFromInput(input)
+    return scope.notes?.length === 1 ? noteContext(store, sync, scope.notes[0], question, scope, historyFromInput(input.history)) : ''
+  }
+
   jobs.register('ask', async (job) => {
     const tzOffset = Number(job.input.tzOffset)
     const when = { tzOffset: Number.isFinite(tzOffset) && Math.abs(tzOffset) <= 14 * 60 ? tzOffset : undefined }
@@ -596,7 +602,7 @@ export function registerJobHandlers(config: Config, store: Store, sync: SyncEngi
     }
     const r: Awaited<ReturnType<typeof askNotes>> & { general?: boolean } =
       job.input.mode === 'general'
-        ? await askGeneral(ai, question, when, historyFromInput(job.input.history))
+        ? await askGeneral(ai, question, when, historyFromInput(job.input.history), generalAbout(job.input, question))
         : await askNotes(store, sync, ai, question, sync.meaning, when, scopeFromInput(job.input), historyFromInput(job.input.history))
     // kept as a conversation (to read again, or carry on, from "Ask about this note")
     saveTurn(store, job.id, job.input, {

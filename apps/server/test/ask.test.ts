@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, namesIn, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
+import { askNotes, noteContext, namesIn, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -746,6 +746,38 @@ describe('a note that refers to another (its manual)', () => {
     // and what R12 points to comes right after it in the lines most about the question
     const key = prompts.at(-1)!.split('The lines of the notes above most about the question')[1]
     expect(key).toMatch(/R12\. BUMPERS are required[^\n]*\n\[\d+\] \(R402 in "FRC 2025 Game Manual", which that rule points to\) R402 BUMPER construction\. A\. Padding/)
+  })
+  it('a manual split into chapters: the rule pointed to is read from the chapter that has it, not the one chosen', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk('splitmain00001', 'Cookie Chaos rules', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual.')
+    await mk('splitcontents1', '2025GameManual – Contents', '- 7 Robot Construction\n- 8 Inspection')
+    await mk('splitchapter71', '7 Robot Construction', 'R301 Wires must be labelled.\n\nR402 *BUMPERS must be constructed as follows:\n\nA. Padding: pool noodles of 2 1/2 in. diameter.\n\nB. Backing: 3/4 in. plywood.')
+    await mk('splitchapter81', '8 Inspection', 'R501 Every robot is inspected before it plays.')
+    app.store.setSetting('webImports', {
+      split1: { id: 'split1', url: 'https://pdf.reconnotes/2025GameManual.pdf', follow: false, maxPages: 1, splitPdf: true, folderId: null, contentsNoteId: 'splitcontents1', at: 0, pages: {
+        a: { noteId: 'splitchapter71', hash: '', at: 0, importedOn: '', title: '7 Robot Construction' },
+        b: { noteId: 'splitchapter81', hash: '', at: 0, importedOn: '', title: '8 Inspection' },
+      } },
+    })
+    // the contents note chosen as the manual
+    setAskRefs(app.store, 'splitmain00001', ['splitcontents1'])
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the A. Padding section of R402?', null, {}, { notes: ['splitmain00001'] })
+    expect(prompts.at(-1)).toContain('pool noodles of 2 1/2 in. diameter')
+    // only the part pointed to, and nothing from the chapters it doesn't point to
+    expect(prompts.at(-1)).not.toContain('3/4 in. plywood')
+    expect(prompts.at(-1)).not.toContain('Wires must be labelled')
+    expect(prompts.at(-1)).not.toContain('Every robot is inspected')
+    // "Anything" asked in the note's chat is given the same
+    const about = noteContext(app.store, app.sync, 'splitmain00001', 'what is the A. Padding section of R402?')
+    expect(about).toContain('R12. BUMPERS are required')
+    expect(about).toContain('R402 in "7 Robot Construction"')
+    expect(about).toContain('pool noodles of 2 1/2 in. diameter')
+    expect(about).not.toContain('3/4 in. plywood')
+    app.store.setSetting('webImports', {})
   })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')

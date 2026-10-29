@@ -82,6 +82,21 @@ export function setIgnoredRef(store: Store, noteId: string, key: string, ignore:
   store.setSetting('askRefsIgnored', all)
 }
 
+/**
+ * The rest of the document a note is part of: the other chapters of a PDF split
+ * into a note each, the other pages of a guide imported from the web (and its
+ * contents note). A reference chosen as "the manual" may be its contents, or one
+ * chapter – the rule the main note points to is in another.
+ */
+export function documentOf(store: Store, noteId: string): string[] {
+  const out = new Set<string>()
+  for (const r of listImports(store)) {
+    const ids = [...Object.values(r.pages).map((p) => p.noteId), ...(r.contentsNoteId ? [r.contentsNoteId] : [])]
+    if (ids.includes(noteId)) for (const id of ids) if (id !== noteId) out.add(id)
+  }
+  return [...out]
+}
+
 /** A document's key for ignoring it. */
 export const docKey = (d: { name: string; url?: string }) => `doc:${d.url ? sameAddress(d.url) : d.name.toLowerCase()}`
 
