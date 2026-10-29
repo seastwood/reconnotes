@@ -366,7 +366,12 @@ export async function askNotes(
     }
     const added = new Map<Section, number>()
     const noteOfN = (n: number) => (n < 0 ? unread.get(n)?.noteId : sources.find((x) => x.n === n)?.noteId)
-    for (const l of keyLines(pool, words, rules, 4, 0.9, (n) => (isRef.has(noteOfN(n) ?? '') ? 0.5 : 1))) {
+    // about this question: its own words and rules – a follow-up's lines aren't the last question's
+    // (one that names nothing – "and the second one?" – goes by the conversation's)
+    const ownRules = ruleIds(question)
+    const keyWords = ownWords.length ? ownWords : words
+    const keyRules = ownWords.length || ownRules.length ? ownRules : rules
+    for (const l of keyLines(pool, keyWords, keyRules, 4, 0.9, (n) => (isRef.has(noteOfN(n) ?? '') ? 0.5 : 1))) {
       const sec = unread.get(l.n)
       if (sec && !added.has(sec)) {
         add(sec.noteId, sec.text, sec)
@@ -393,6 +398,8 @@ export async function askNotes(
           const text = onlyRules(texts.get(n)!, new Map([[r, onlyPointed.get(r) ?? null]]))
           const line = text
             .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+            // a PDF's page footer caught mid-rule ("Section 8 ROBOT Construction Rules (R) V11 84 of 164")
+            .replace(/\s(?:Section \d+\b[^•\n]{1,60}?\s)?V\d+(?:\.\d+)?\s+\d+ of \d+(?=\s)/g, ' ')
             .replace(/^\s*[-*]\s+/gm, '• ')
             .replace(/\s+/g, ' ')
             .trim()
@@ -500,7 +507,9 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     const key = keyed
     // the best line gives figures (40”, 60”): only lines that give figures too
     const figures = /\d/.test(key[0]?.line ?? '')
-    const quote = key.filter((l) => (!figures || /\d/.test(l.line)) && !quoted(text, l.line)).slice(0, 4)
+    // a referenced rule's details the answer already gives (it cites them): not quoted again
+    const given = (l: { n: number; line: string }) => l.line.startsWith('(') && isRef.has(sources.find((x) => x.n === l.n)?.noteId ?? '') && new RegExp(`\\[${l.n}\\]`).test(text)
+    const quote = key.filter((l) => (!figures || /\d/.test(l.line)) && !quoted(text, l.line) && !given(l)).slice(0, 4)
     // a "no" when the most relevant rule says something is permitted: the answer may be wrong – say so
     if (yesNo && key[0] && saysNo(text) && PERMITS.test(key[0].line))
       text += `\n\n**Check this:** the answer says no, but the note’s most relevant line allows some of it (“${clip(sentencesOf(key[0].line).find((x) => PERMITS.test(x)) ?? key[0].line, 200)}”) [${key[0].n}].`
@@ -573,7 +582,8 @@ export function onlyRules(text: string, pointed: Map<string, string | null>): st
         let to = from + 1
         while (to < block.length && !partAt(block[to])) to++
         const opening = block.slice(0, block.findIndex((l) => partAt(l)))
-        block = [...opening, ...block.slice(from, to), `(Only “${part}” of ${r} applies here – the main document points to that part alone.)`]
+        // (cut down already – read again for the lines most about the question: the note once)
+        block = [...opening, ...block.slice(from, to).filter((l) => !l.startsWith('(Only “')), `(Only “${part}” of ${r} applies here – the main document points to that part alone.)`]
       }
     }
     out.push(block.join('\n').trim())

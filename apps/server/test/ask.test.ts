@@ -831,6 +831,31 @@ describe('a note that refers to another (its manual)', () => {
     expect(key).toMatch(/\(R402 in "2025 FRC Game Manual", which that rule points to\) R402 \*BUMPER construction\. BUMPERS must consist of the following: Padding – A minimum of 2 ¼ in\./)
     expect(prompts.at(-1)).not.toContain('3/4 in. thick plywood')
   })
+  it('a follow-up quotes the lines about itself, not the last question’s; a rule cut down twice says so once', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk(
+      'followupmain01',
+      'Cookie Chaos rules',
+      ['R05. ROBOTS must not be taller than 60 in. during a MATCH.', 'R06. At the start of a MATCH a ROBOT must fit within 36 in. x 36 in. x 40 in. tall.', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual.', ...Array.from({ length: 8 }, (_, i) => `G${10 + i}. Teams must be polite in situation ${i}. ` + 'Be kind to others. '.repeat(10))].join('\n\n'),
+    )
+    await mk('followupfrc001', '2025 FRC Game Manual', 'R402 *BUMPER construction. BUMPERS must consist of the following:\n\nPadding – A minimum of 2 ¼ in. depth of foam. Section 8 ROBOT Construction Rules (R) V11 84 of 164 More padding words here.\n\nBacking – plywood.')
+    setAskRefs(app.store, 'followupmain01', ['followupfrc001'])
+    const r = await askNotes(app.store, app.sync, app.ai, 'what is the max allowed height of the robot?', null, {}, { notes: ['followupmain01'] }, [
+      { question: 'what is the A. Padding section of R402?', answer: 'A minimum of 2 ¼ in. of foam [2].', sources: ['followupmain01', 'followupfrc001'] },
+    ])
+    expect(r.answer).not.toContain('R12. BUMPERS are required')
+    expect(r.answer).not.toContain('R402 *BUMPER construction')
+    // asked about R402 itself: its padding, the note on it once, no page footer
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the A. Padding section of R402?', null, {}, { notes: ['followupmain01'] })
+    const key = prompts.at(-1)!.split('The lines of the notes above most about the question')[1]
+    expect(key).toContain('A minimum of 2 ¼ in. depth of foam')
+    expect(key).not.toContain('84 of 164')
+    expect(key.match(/Only “A\. Padding” of R402 applies here/g)?.length).toBe(1)
+  })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
     const title = (id: string) => (id === 'frc' ? '2025 FRC Game Manual' : null)
