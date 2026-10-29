@@ -374,7 +374,7 @@ export const ImageNode = Node.create({
     // mustn't turn them into selecting the picture (which can swallow the tap).
     return ReactNodeViewRenderer(ImageView, {
       // sized: as wide as that, beside the pictures next to it when they fit (see .node-image[data-sized])
-      attrs: ({ node }) => (node.attrs.width ? { 'data-sized': '', style: `width: ${node.attrs.width}%` } : { style: '' }),
+      attrs: ({ node }): Record<string, string> => (node.attrs.width ? { 'data-sized': '', style: `width: ${node.attrs.width}%` } : { style: '' }),
       stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('.image-actions, .image-resize, .drawing-canvas.overlay.open, .drawing-canvas.overlay.replay')),
     })
   },
