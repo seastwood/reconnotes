@@ -105,7 +105,7 @@ function clipboardContent(view: EditorView, slice: Slice, doc: Y.Doc): { html: s
 }
 
 /** Put HTML + text on the system clipboard from a button (not a copy event). */
-async function writeClipboard(html: string, text: string): Promise<boolean> {
+async function writeTextClipboard(html: string, text: string): Promise<boolean> {
   // a copy event we fill ourselves works everywhere, inside the tap
   let done = false
   const onCopy = (e: ClipboardEvent) => {
@@ -194,8 +194,11 @@ async function inlinePictures(html: string, blobs: Map<string, Blob>): Promise<s
  * pictures for other apps. Call it straight from a tap / release: browsers
  * only allow the clipboard then. Resolves to whether it worked.
  */
-export function copyRich(view: EditorView, slice: Slice, doc: Y.Doc): Promise<boolean> {
+export function copyRich(view: EditorView, slice: Slice, doc: Y.Doc, fallback = true): Promise<boolean> {
   const { html, text } = clipboardContent(view, slice, doc)
+  // nothing but pictures: no "[image]" text – apps that take text first would paste that instead of the picture
+  const onlyPictures = !text.replace(/\[image\]/g, '').trim()
+  const writeClipboard = (h: string, t: string) => (fallback ? writeTextClipboard(h, t) : Promise.resolve(false))
   const ids = picturesIn(slice)
   const blobs = async () => {
     const m = new Map<string, Blob>()
@@ -210,7 +213,7 @@ export function copyRich(view: EditorView, slice: Slice, doc: Y.Doc): Promise<bo
     return (async () => {
       const m = await blobs()
       const images = await Promise.all([...m.values()].map(async (b) => ({ data: await toBase64(b), mime: b.type })))
-      await NativeClipboard.write({ text, html: await inlinePictures(html, m), images })
+      await NativeClipboard.write({ text: onlyPictures ? '' : text, html: await inlinePictures(html, m), images })
       return true
     })().catch(() => writeClipboard(html, text))
   if (!ids.length || typeof ClipboardItem === 'undefined') return writeClipboard(html, text)
@@ -218,7 +221,7 @@ export function copyRich(view: EditorView, slice: Slice, doc: Y.Doc): Promise<bo
   const loaded = blobs()
   try {
     const item = new ClipboardItem({
-      'text/plain': new Blob([text], { type: 'text/plain' }),
+      ...(onlyPictures ? {} : { 'text/plain': new Blob([text], { type: 'text/plain' }) }),
       'text/html': loaded.then(async (m) => new Blob([await inlinePictures(html, m)], { type: 'text/html' })),
       'image/png': loaded.then((m) => {
         const first = [...m.values()][0]
@@ -279,7 +282,8 @@ export async function copyBlock(editor: Editor, pos: number | undefined, doc: Y.
   if (!node) return
   const slice = new Slice(editor.state.doc.slice(pos, pos + node.nodeSize).content, 0, 0)
   const { html, text } = clipboardContent(editor.view, slice, doc)
-  const ok = await writeClipboard(html, text)
+  // a picture as the picture too, for other apps
+  const ok = await (node.type.name === 'image' ? copyRich(editor.view, slice, doc) : writeTextClipboard(html, text))
   if (!ok) return showToast('Couldn’t copy – try selecting it and using Copy')
   const what = node.type.name === 'drawing' ? 'Handwriting' : node.type.name === 'image' ? 'Picture' : node.type.name === 'audio' ? 'Recording' : 'File'
   if (cut) {
@@ -305,6 +309,8 @@ export const BlockClipboard = Extension.create<{ doc: Y.Doc | null }>({
       e.clipboardData.setData('text/html', html)
       e.clipboardData.setData('text/plain', text)
       e.preventDefault()
+      // with pictures: the pictures themselves too (⌘C on a picture pastes the picture in other apps, not "[image]")
+      if (picturesIn(slice).length && (nativeClipboard() || (typeof ClipboardItem !== 'undefined' && Boolean(navigator.clipboard)))) void copyRich(view, slice, doc, false)
       if (cut) view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'))
       return true
     }
