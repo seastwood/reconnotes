@@ -389,10 +389,19 @@ export async function askNotes(
         for (const r of onlyPointed.keys()) {
           if (given.has(r) || !new RegExp(`\\b${r}\\b`).test(k.line)) continue
           let n = sources.find((x) => isRef.has(x.noteId) && definesRule(texts.get(x.n) ?? '', r))?.n
+          const def = n === undefined ? everySection.find((x) => isRef.has(x.noteId) && definesRule(x.text, r)) : undefined
+          if (n === undefined && !def) continue
+          // only when the question is about it: names the rule or the part, or most of its words are the rule's
+          // ("can the bumper perimeter have gaps?" isn't about R402's padding, though R12 points to it)
+          const part = onlyPointed.get(r)
+          const ruleText = norm(n !== undefined ? texts.get(n)! : def!.text)
+          const about =
+            keyRules.includes(r) ||
+            (part !== null && part !== undefined && keyWords.some((w) => norm(part).split(' ').some((p) => p.length > 2 && (p.startsWith(w) || w.startsWith(p))))) ||
+            keyWords.filter((w) => ruleText.includes(w.replace(/s$/, ''))).length >= Math.max(2, Math.ceil(keyWords.length * 0.6))
+          if (!about) continue
           if (n === undefined) {
-            const def = everySection.find((x) => isRef.has(x.noteId) && definesRule(x.text, r))
-            if (!def) continue
-            add(def.noteId, def.text.length > PER_NOTE ? excerpt(def.text, [r.toLowerCase(), ...words], PER_NOTE) : def.text, def)
+            add(def!.noteId, def!.text.length > PER_NOTE ? excerpt(def!.text, [r.toLowerCase(), ...words], PER_NOTE) : def!.text, def!)
             n = sources.length
           }
           const text = onlyRules(texts.get(n)!, new Map([[r, onlyPointed.get(r) ?? null]]))
@@ -489,6 +498,8 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
     text = text.replace(new RegExp(`\\s*(?:\\b(?:in|from|of|see)\\s+)?(?:the\\s+)?["“'‘]${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["”'’](?:\\s+(?:note|manual|document))?`, 'g'), '')
   // a citation to a source that doesn't say it, when another one does: that one
   text = recite(text, texts, sources)
+  // …and by the figures it gives (2.25 in., 4 ½ in.), which another source has and the cited one hasn't
+  text = reciteByFigures(text, texts)
   // …and a short list item ("Walk dogs"), by which source has its words
   text = reciteByWords(text, texts)
   // a fact without a citation: cited to the source it came from
@@ -734,6 +745,47 @@ function sentenceAround(answer: string, at: number, len: number): string {
   for (const e of ends) if (e <= at && answer.slice(e, at).trim()) start = e
   const end = ends.find((e) => e > at + len && answer.slice(at + len, e).trim()) ?? answer.length
   return answer.slice(start, end).replace(/\[\d+\]/g, ' ')
+}
+
+const FRACTION: Record<string, number> = { '¼': 0.25, '½': 0.5, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125 }
+/**
+ * The figures a text gives, as numbers: "2 ¼ in." and "2 1/4" and "2.25" alike. Not rule numbers
+ * (R12), citations ([1]), nor small whole numbers (1, 2) – they're everywhere.
+ */
+export function figuresIn(t: string): number[] {
+  const s = t
+    .replace(/\[\d+\]/g, ' ')
+    .replace(/(\d+)\s*([¼½¾⅓⅔⅛])/g, (_, a: string, f: string) => ` ${Number(a) + FRACTION[f]} `)
+    .replace(/(\d+)\s+(\d)\/(\d{1,2})(?!\d)/g, (_, a: string, b: string, c: string) => ` ${Number(a) + Number(b) / Number(c)} `)
+    .replace(/[¼½¾⅓⅔⅛]/g, (f) => ` ${FRACTION[f]} `)
+  const out: number[] = []
+  for (const m of s.matchAll(/(?<![\p{L}\d.\-/])\d+(?:[.,]\d+)?(?![\d/])/gu)) {
+    const v = Number(m[0].replace(',', '.'))
+    if (Number.isFinite(v) && (v % 1 !== 0 || v >= 3)) out.push(v)
+  }
+  return out
+}
+const hasFigure = (figs: number[], v: number) => figs.some((x) => Math.abs(x - v) < 0.01)
+
+/**
+ * A citation after figures its source doesn't give, when another source gives them all ("padding of
+ * 2.25 in. [1]" – the main note's [1] has no 2.25, the FRC manual's [12] has "2 ¼ in."): that source.
+ * The figures are those since the last citation, or the sentence's start.
+ */
+export function reciteByFigures(answer: string, texts: Map<number, string>): string {
+  const figs = new Map([...texts].map(([n, t]) => [n, figuresIn(t)]))
+  const ends = sentenceEnds(answer)
+  let last = 0
+  return answer.replace(/(?:\[\d+\])+/g, (group, at: number) => {
+    const start = Math.max(last, ...ends.filter((e) => e <= at))
+    last = at + group.length
+    const want = [...new Set(figuresIn(answer.slice(start, at)))]
+    if (!want.length) return group
+    const ns = [...group.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]))
+    if (ns.some((n) => want.some((v) => hasFigure(figs.get(n) ?? [], v)))) return group
+    const by = [...figs].find(([, f]) => want.every((v) => hasFigure(f, v)))
+    return by ? `[${by[0]}]` : group
+  })
 }
 
 /** Citations to a source that doesn't say what the sentence says, when another source plainly does: that one. */

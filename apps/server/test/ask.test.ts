@@ -12,7 +12,7 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, noteContext, namesIn, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
+import { askNotes, figuresIn, noteContext, namesIn, reciteByFigures, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -839,7 +839,7 @@ describe('a note that refers to another (its manual)', () => {
     await mk(
       'followupmain01',
       'Cookie Chaos rules',
-      ['R05. ROBOTS must not be taller than 60 in. during a MATCH.', 'R06. At the start of a MATCH a ROBOT must fit within 36 in. x 36 in. x 40 in. tall.', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual.', ...Array.from({ length: 8 }, (_, i) => `G${10 + i}. Teams must be polite in situation ${i}. ` + 'Be kind to others. '.repeat(10))].join('\n\n'),
+      ['R05. ROBOTS must not be taller than 60 in. during a MATCH.', 'R06. At the start of a MATCH a ROBOT must fit within 36 in. x 36 in. x 40 in. tall.', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual. Gaps in the bumpers and frame perimeter are permissible.', ...Array.from({ length: 8 }, (_, i) => `G${10 + i}. Teams must be polite in situation ${i}. ` + 'Be kind to others. '.repeat(10))].join('\n\n'),
     )
     await mk('followupfrc001', '2025 FRC Game Manual', 'R402 *BUMPER construction. BUMPERS must consist of the following:\n\nPadding – A minimum of 2 ¼ in. depth of foam. Section 8 ROBOT Construction Rules (R) V11 84 of 164 More padding words here.\n\nBacking – plywood.')
     setAskRefs(app.store, 'followupmain01', ['followupfrc001'])
@@ -855,6 +855,29 @@ describe('a note that refers to another (its manual)', () => {
     expect(key).toContain('A minimum of 2 ¼ in. depth of foam')
     expect(key).not.toContain('84 of 164')
     expect(key.match(/Only “A\. Padding” of R402 applies here/g)?.length).toBe(1)
+    // a question about bumpers, not about R402's padding: R12 answers it, R402 isn't put beside it
+    prompts.length = 0
+    const gaps = await askNotes(app.store, app.sync, app.ai, 'can the bumper perimeter have gaps in it?', null, {}, { notes: ['followupmain01'] })
+    expect(prompts.at(-1)!.split('The lines of the notes above most about the question')[1]).toContain('Gaps in the bumpers and frame perimeter are permissible')
+    expect(prompts.at(-1)!.split('The lines of the notes above most about the question')[1]).not.toContain('(R402 in')
+    expect(gaps.answer).not.toContain('R402 *BUMPER construction')
+    // …and one about padding materials still gets it
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'how deep must the bumper padding be?', null, {}, { notes: ['followupmain01'] })
+    expect(prompts.at(-1)!.split('The lines of the notes above most about the question')[1]).toContain('(R402 in')
+  })
+  it('a figure cited to a note that doesn’t give it is cited to the one that does', () => {
+    expect(figuresIn('A minimum of 2 ¼ in. (~58 mm) depth, at least 4 ½ in. tall, per R402 [3]')).toEqual([2.25, 58, 4.5])
+    expect(figuresIn('2 1/4 in. and 2.25 inches, rule G301, 1 or 2 robots')).toEqual([2.25, 2.25])
+    const texts = new Map([
+      [1, 'R12. BUMPERS are required … The lower edge of the bumpers should be no more than 2.5” above the ground. Gaps in the bumpers are permissible.'],
+      [12, 'R402 *BUMPER construction. Padding – A minimum of 2 ¼ in. (~58 mm) depth of foam padding, at least 4 ½ in. (~114 mm) tall.'],
+    ])
+    expect(reciteByFigures('BUMPERS must include padding of depth (≥2.25 inches) and height (≥4.5 inches) [1], but gaps in their perimeter are allowed [1].', texts)).toBe(
+      'BUMPERS must include padding of depth (≥2.25 inches) and height (≥4.5 inches) [12], but gaps in their perimeter are allowed [1].',
+    )
+    // the cited note gives it: stays
+    expect(reciteByFigures('The lower edge must be at most 2.5 in. above the ground [1].', texts)).toBe('The lower edge must be at most 2.5 in. above the ground [1].')
   })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
