@@ -164,7 +164,7 @@ export function tidyIngredient(raw: string): { text: string; allergens: string[]
   const allergens: string[] = []
   const text = raw
     .replace(new RegExp(String.raw`\(?\s*contains:?\s*((?:${ALLERGEN}\s*(?:,|and|&)?\s*)+)\)?`, 'gi'), (_all, list: string) => {
-      for (const a of list.split(/,|and|&/)) if (a.trim()) allergens.push(a.trim().replace(/^\w/, (c) => c.toUpperCase()))
+      for (const a of list.split(/,|\band\b|&/)) if (a.trim()) allergens.push(a.trim().replace(/^\w/, (c) => c.toUpperCase()))
       return ' '
     })
     // a picture read as letters of another script ("ن/٦" for an onion), a badge (©, ®, ™)

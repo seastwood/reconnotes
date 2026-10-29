@@ -370,6 +370,7 @@ describe('a meal-kit card’s lines', () => {
     expect(tidyIngredient('2 TBSP Contains: Milk Butter Garlic Herb')).toEqual({ text: '2 TBSP Butter Garlic Herb', allergens: ['Milk'] })
     expect(tidyIngredient('(Contains: Eggs, Potato Buns')).toEqual({ text: 'Potato Buns', allergens: ['Eggs'] })
     expect(tidyIngredient('Concentrate Chicken Stock (Contains: Milk, Wheat)')).toEqual({ text: 'Concentrate Chicken Stock', allergens: ['Milk', 'Wheat'] })
+    expect(tidyIngredient('Mayonnaise (Contains: Milk and Eggs, Soy)')).toEqual({ text: 'Mayonnaise', allergens: ['Milk', 'Eggs', 'Soy'] })
     expect(tidyIngredient('1 tsp Hot Sauce y').text).toBe('1 tsp Hot Sauce')
     expect(tidyIngredient('*Baking sheet').text).toBe('Baking sheet')
     expect(tidyIngredient('1 Eggplant').text).toBe('1 Eggplant')
