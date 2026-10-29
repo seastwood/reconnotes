@@ -27,6 +27,7 @@ import type { MeaningIndex } from './semantic'
 import { corrections } from './vocabulary'
 import { learnVoice, recordingVoices, seenNames, setSeenNames } from './voices'
 import { groupOfAttachment } from './attachments'
+import { needsOverview } from './overview'
 
 const DOC_NAME = /^(workspace|note:[a-z0-9]{8,64})$/
 
@@ -50,6 +51,7 @@ export class SyncEngine {
   /** set by createApp: search by meaning */
   meaning: MeaningIndex | null = null
   private embedTimers = new Map<string, NodeJS.Timeout>()
+  private overviewTimers = new Map<string, NodeJS.Timeout>()
 
   constructor(
     private config: Config,
@@ -168,6 +170,7 @@ export class SyncEngine {
       for (const drawingId of ex.drawings) this.maybeScheduleHandwriting(noteId, drawingId, doc)
     }
     this.scheduleEmbedding(noteId)
+    this.scheduleOverview(noteId)
     this.learnFromCorrections(noteId, doc)
     this.learnVoices(ex.attachments, doc)
   }
@@ -234,6 +237,32 @@ export class SyncEngine {
     }, delayMs)
     t.unref?.()
     this.embedTimers.set(noteId, t)
+  }
+
+  /**
+   * A long note's overview for Ask (see overview.ts), once the note has been quiet a while – it takes
+   * the GPU a minute, so not while it's being written. Background work: behind anything you ask for.
+   */
+  scheduleOverview(noteId: string, delayMs = 10 * 60_000) {
+    if (!this.jobs || !(this.ai.agents.available('ask') || this.ai.agents.available('compile'))) return
+    clearTimeout(this.overviewTimers.get(noteId))
+    const t = setTimeout(() => {
+      this.overviewTimers.delete(noteId)
+      if (!this.jobs || !needsOverview(this.store, this, noteId)) return
+      const title = this.noteMeta().get(noteId)?.title || 'Untitled'
+      this.jobs.submit({ kind: 'overview', title, noteId, input: { noteId }, origin: 'auto', dedupeKey: `overview:${noteId}` })
+    }, delayMs)
+    t.unref?.()
+    this.overviewTimers.set(noteId, t)
+  }
+
+  /** Queue an overview for every long note without one (first start with them, or after an upgrade). */
+  overviewMissing(): number {
+    const meta = this.noteMeta()
+    const ids = [...meta.values()].filter((m) => !m.trashedAt && !m.template).map((m) => m.id)
+    const missing = ids.filter((id) => needsOverview(this.store, this, id))
+    for (const id of missing) this.scheduleOverview(id, 30_000)
+    return missing.length
   }
 
   /** Queue vectors for every note that doesn't have them yet (first setup, or a new embedding model). */

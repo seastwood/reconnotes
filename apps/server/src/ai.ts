@@ -193,6 +193,9 @@ ${COMPILE_RULES}`
  * The AI features, each run through the configured agents for that task with
  * failover (see agents.ts).
  */
+/** Thinking room for a question Ask reasons out (tokens): enough to weigh a few rules, not to wander. */
+const REASON_ROOM = 1200
+
 export class Ai {
   constructor(
     readonly agents: AgentRegistry,
@@ -553,14 +556,26 @@ ${partNotes.join('\n\n')}
   }
 
   /** "Ask your notes": a question with the relevant notes, answered by the "Compile notes" agents. */
-  async ask(prompt: string, onText?: (soFar: string) => void): Promise<{ text: string; agent: string }> {
+  async ask(prompt: string, onText?: (soFar: string) => void, opts: { reason?: boolean } = {}): Promise<{ text: string; agent: string }> {
     // its own agents ("Ask your notes"), else the ones that compile notes
     const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) => {
-      const gen = () => backend.generate([{ text: withExtra(prompt + standing('ask')) }], 1000)
+      // a question to reason out ("can we…?", "what happens if…?"): a thinking model thinks first – a
+      // bounded amount (a GTX 1070 writes ~30 tokens a second: at most ~40 s); a lookup is answered straight
+      // away, as the agent's "Let it think" says
+      const gen = () => backend.generate([{ text: withExtra(prompt + standing('ask')) }], 1000, opts.reason ? { think: true, thinkRoom: REASON_ROOM } : undefined)
       const raw = await (onText ? streaming(onText, gen) : gen())
       return collapseRepeats(unwrapModelOutput(raw)).trim()
     })
     log.info(`answered a question via "${agent.name}" (${prompt.length} chars of notes → ${result.length})`)
+    return { text: result, agent: agent.name }
+  }
+
+  /** A long note's overview, written ahead in the background (see overview.ts): no thinking, a short answer. */
+  async overview(prompt: string): Promise<{ text: string; agent: string }> {
+    const { result, agent } = await this.agents.run(this.agents.available('ask') ? 'ask' : 'compile', async (backend) =>
+      collapseRepeats(unwrapModelOutput(await backend.generate([{ text: withExtra(prompt) }], 600, { think: false }))).trim(),
+    )
+    log.info(`wrote a note overview via "${agent.name}" (${prompt.length} chars → ${result.length})`)
     return { text: result, agent: agent.name }
   }
 

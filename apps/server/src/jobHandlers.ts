@@ -35,6 +35,7 @@ import type { Store } from './store'
 import type { SyncEngine } from './sync'
 import { Ai, compileMarker, isAiImage, keepCompileExtras, renderDrawingPng, type CompilePart } from './ai'
 import { askGeneral, askNotes, noteContext } from './ask'
+import { makeOverview, needsOverview } from './overview'
 import { tidyNote } from './tidy'
 import { recipeFromPhotos } from './photoRecipe'
 import { PAGE_KINDS, guessKind, notesFromPhotos, readForGuess, type PhotoKind } from './photoPages'
@@ -85,6 +86,7 @@ export const JOB_KINDS: Record<string, string> = {
   'recipe-photos': 'Recipe from photos',
   'photo-pages': 'Note from photos',
   'suggest-title': 'Suggest a title and tags',
+  overview: 'Overview of a long note (for Ask)',
 }
 
 type Parent = Y.XmlFragment | Y.XmlElement
@@ -258,6 +260,7 @@ const FIRST_TASK: Record<string, AiTask | null> = {
   'recipe-photos': 'images',
   'photo-pages': 'images',
   'suggest-title': 'compile',
+  overview: 'compile',
 }
 
 /** a voice heard for less than this (seconds, or share of all the talk) isn't one of the meeting's main voices */
@@ -901,6 +904,14 @@ The request again: ${request}`
     const full = extractNote(doc, store.attachmentTexts(ex.attachments))
     const made = await meaning.indexNote(noteId, full.title, full.text)
     return { result: { noteId, passages: made } }
+  })
+
+  // a long note's overview, for Ask's big picture (see overview.ts)
+  jobs.register('overview', async (job) => {
+    const noteId = String(job.input.noteId)
+    if (!needsOverview(store, sync, noteId)) return { result: { skipped: true } }
+    const r = await makeOverview(store, sync, ai, noteId)
+    return r ? { result: { noteId, text: r.text }, agent: r.agent } : { result: { skipped: true } }
   })
 
   jobs.register('benchmark', async () => {

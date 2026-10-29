@@ -7,8 +7,9 @@ import { annotateDates, describeDate, dueWindow, findDates, shortDate, startOfTo
 import { aiSkips, noteFilter, unlockedFilter, type Scope } from './access'
 import { askRefs } from './askHistory'
 import { documentOf } from './references'
+import { overviewOf } from './overview'
 import { reportPartial, reportProgress } from './jobs'
-import { RULE_ID, definesRule, claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
+import { RULE_ID, definesRule, outline, claimMatch, findForClaim, findIn, keyLines, findTextOf, ruleIds, scoreSections, splitSections, type Section } from './sections'
 
 /**
  * Ask your notes
@@ -369,7 +370,10 @@ export async function askNotes(
       .map((id) => {
         const readPaths = new Set(sources.filter((x) => x.noteId === id && x.section).map((x) => x.section!))
         const out = outline(everySection.filter((x) => x.noteId === id), readPaths)
-        return out ? `How "${meta.get(id)?.title || 'Untitled'}" is laid out (★ = the parts below):\n${out}` : ''
+        const title = meta.get(id)?.title || 'Untitled'
+        // what the whole note is, written ahead (see overview.ts)
+        const ov = overviewOf(store, id)
+        return [ov ? `What "${title}" is (an overview of the whole note):\n${ov}` : '', out ? `How "${title}" is laid out (★ = the parts below):\n${out}` : ''].filter(Boolean).join('\n\n')
       })
       .filter(Boolean)
       .join('\n\n')
@@ -518,7 +522,10 @@ Notes:${context}${key(context)}${bigPicture ? `\n\n${bigPicture}` : ''}
 ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 
   // the answer as it's written: the app shows it growing, with its citations linked
-  let { text: raw, agent } = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }))
+  // a question that needs reasoning, not a lookup: the AI thinks it through first (see needsReasoning)
+  const reason = needsReasoning(question)
+  if (reason) reportProgress('Thinking it through…')
+  let { text: raw, agent } = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }), { reason })
   // not in what was read: a second look, in the sections not read yet (a manual
   // can say "no taller than 18 in." where the question asked for "max height")
   if (NOT_FOUND.test(raw) && rest.length) {
@@ -535,7 +542,7 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
       // the first answer stays on screen while it looks (wiping it to write another looked like a restart)
       reportProgress('Not in the first part it read – looking further…')
       reportPartial({ answer: listify(raw), sources, looking: 'Not in the first part it read – looking further…' })
-      const again = await ai.ask(promptFor(context))
+      const again = await ai.ask(promptFor(context), undefined, { reason })
       // found it there: that answer; else the first one stands
       if (!NOT_FOUND.test(again.text)) ({ text: raw, agent } = again)
     }
@@ -605,6 +612,19 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
+/**
+ * A question that needs reasoning – a judgement from rules, a consequence, a comparison, a why – not
+ * a lookup ("what is the max height?"). Those get thinking time; lookups don't need it.
+ */
+export function needsReasoning(question: string): boolean {
+  const q = question.trim().toLowerCase()
+  // yes/no about what's allowed, or what follows: "can we…", "is it legal…", "would this…", "do I have to…"
+  if (/^(?:can|could|may|might|should|would|will|must|is it|are we|am i|are they|is (?:a|an|the|this|that|my|our)|do (?:we|i|they|you)|does (?:a|an|the|this|that|it|my|our)|did|have to|has to)\b/.test(q)) return true
+  // why, what if, consequences, comparisons, exceptions
+  if (/\b(?:why|how come|what (?:happens|if|would)|what's the difference|difference between|compare|compared|versus|vs\.?|better|worse|instead of|exception|loophole|allowed|legal|illegal|permitted|violat\w*|count(?:s)? as|still (?:count|legal|allowed)|if (?:we|i|they|our|my|a|an|the)\b|strategy|best way|should we)\b/.test(q)) return true
+  return false
+}
+
 /** "see section 6.1.7", "per Section 4.6", "(section 7.2 GENERAL ROBOT DESIGN)" – one section, not "Sections 5 and 6" */
 const SECTION_REF = /\b(?:see|per|in|under|refer to|described in|listed in)?\s*(?:section|§)\s*(\d+(?:\.\d+){0,3}\.?)(?!\s*(?:and|or|-|–|to)\s*\d)/gi
 
@@ -626,37 +646,6 @@ export function defineIn(sections: Section[], term: string): { noteId: string; l
   return null
 }
 
-/**
- * A note's outline from its sections: its parts, with their subparts, those read marked ★ –
- * the big picture a few passages don't give (a penalty table, a definitions appendix, an FAQ).
- */
-export function outline(sections: Section[], readPaths: Set<string>, limit = 1400): string {
-  const paths = sections.map((x) => x.path).filter((p) => p.length)
-  if (!paths.length) return ''
-  // the levels every section shares ("Contents"): left out
-  let skip = 0
-  while (paths.every((p) => p.length > skip + 1 && p[skip] === paths[0][skip])) skip++
-  const tops = new Map<string, { read: boolean; subs: Map<string, boolean> }>()
-  for (const p of paths) {
-    const [a, b] = p.slice(skip)
-    if (!a) continue
-    const top = tops.get(a) ?? { read: false, subs: new Map<string, boolean>() }
-    tops.set(a, top)
-    const here = readPaths.has(p.join(' › '))
-    if (b) top.subs.set(b, (top.subs.get(b) ?? false) || here)
-    else top.read ||= here
-  }
-  let out = ''
-  for (const [a, { read, subs }] of tops) {
-    const line = `- ${a}${read ? ' ★' : ''}${subs.size ? `: ${[...subs].map(([b, r]) => `${b}${r ? ' ★' : ''}`).join(' · ')}` : ''}\n`
-    if (out.length + line.length > limit) {
-      out += '- …\n'
-      break
-    }
-    out += line
-  }
-  return out.trim()
-}
 
 /**
  * The rules a main document takes from the documents it refers to – those it

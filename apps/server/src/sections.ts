@@ -404,3 +404,35 @@ const unitOf = (u: string) => {
   const l = u.toLowerCase().replace(/\.$/, '')
   return /^(”|"|''|in|inch|inches)$/.test(l) ? 'in' : /^(ft|feet|foot)$/.test(l) ? 'ft' : /^(lb|lbs|pound|pounds)$/.test(l) ? 'lb' : /^(s|sec|second|seconds)$/.test(l) ? 's' : /^(pt|pts|point|points)$/.test(l) ? 'pt' : l
 }
+
+/**
+ * A note's outline from its sections: its parts, with their subparts, those read marked ★ –
+ * the big picture a few passages don't give (a penalty table, a definitions appendix, an FAQ).
+ */
+export function outline(sections: Section[], readPaths: Set<string>, limit = 1400): string {
+  const paths = sections.map((x) => x.path).filter((p) => p.length)
+  if (!paths.length) return ''
+  // the levels every section shares ("Contents"): left out
+  let skip = 0
+  while (paths.every((p) => p.length > skip + 1 && p[skip] === paths[0][skip])) skip++
+  const tops = new Map<string, { read: boolean; subs: Map<string, boolean> }>()
+  for (const p of paths) {
+    const [a, b] = p.slice(skip)
+    if (!a) continue
+    const top = tops.get(a) ?? { read: false, subs: new Map<string, boolean>() }
+    tops.set(a, top)
+    const here = readPaths.has(p.join(' › '))
+    if (b) top.subs.set(b, (top.subs.get(b) ?? false) || here)
+    else top.read ||= here
+  }
+  let out = ''
+  for (const [a, { read, subs }] of tops) {
+    const line = `- ${a}${read ? ' ★' : ''}${subs.size ? `: ${[...subs].map(([b, r]) => `${b}${r ? ' ★' : ''}`).join(' · ')}` : ''}\n`
+    if (out.length + line.length > limit) {
+      out += '- …\n'
+      break
+    }
+    out += line
+  }
+  return out.trim()
+}

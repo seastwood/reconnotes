@@ -58,6 +58,7 @@ export function createApp(config: Config, opts: { backups?: boolean; guides?: bo
   jobs.start()
   resumePendingAttachments(config, store, ai, sync)
   sync.embedMissing()
+  sync.overviewMissing()
   const stopBackups = opts.backups === false ? () => {} : scheduleBackups(config, store, sync)
   const stopDigest = startDigestSchedule(store, jobs)
   // the setup guides, as notes in a "ReconNotes Setup" folder (each added once)

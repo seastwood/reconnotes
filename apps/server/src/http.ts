@@ -501,7 +501,7 @@ export function createHttpServer(config: Config, store: Store, sync: SyncEngine,
       throw new HttpError(400, 'invalid JSON')
     }
     const kind = String(spec.kind ?? '')
-    if (!JOB_KINDS[kind] || kind === 'recognise' || kind === 'extract-text') throw new HttpError(400, 'unknown job kind')
+    if (!JOB_KINDS[kind] || kind === 'recognise' || kind === 'extract-text' || kind === 'overview') throw new HttpError(400, 'unknown job kind')
     const noteId = spec.noteId && /^[a-z0-9]{8,64}$/.test(spec.noteId) ? spec.noteId : null
     const title = String(spec.title ?? '').trim() || (noteId ? sync.noteMeta().get(noteId)?.title : '') || JOB_KINDS[kind]
     const job = jobs.submit({ kind, title, noteId, input: { ...(spec.input ?? {}), ...(noteId ? { noteId } : {}) }, prompt: spec.prompt ?? null, device: deviceName(req) })

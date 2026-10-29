@@ -12,7 +12,8 @@ import { findReferences, setIgnoredRef } from '../src/references'
 import { unwrapLink } from '../src/webImport'
 import { markdownToNodes } from '../src/importNotes'
 import { updateNote } from '@reconnotes/core'
-import { askNotes, figuresIn, noteContext, namesIn, reciteByFigures, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
+import { needsOverview, makeOverview, overviewInput } from '../src/overview'
+import { askNotes, needsReasoning, figuresIn, noteContext, namesIn, reciteByFigures, unciteAbsence, autoCite, citeByNumber, citeFinds, labelRefs, markInference, onlyRules, pointedRules, recite, reciteByWords, sectionItems } from '../src/ask'
 import { findIn, keyLines, scoreSections, splitSections } from '../src/sections'
 import { loadConfig } from '../src/config'
 import { createApp, type App } from '../src/app'
@@ -710,6 +711,37 @@ describe('the big picture', () => {
     expect(p).toContain('Terms these lines use, as your notes define them:')
     expect(p).toContain('- ROBOT VOLUME: ROBOT VOLUME – the space a ROBOT may occupy')
     expect(p).toContain('(in "2025 FRC Game Manual")')
+  })
+})
+
+describe('reasoning, and the big picture made ahead', () => {
+  it('thinks only for questions that need reasoning', () => {
+    for (const q of ['can the bumper perimeter have gaps in it?', 'Is it legal to extend 70 inches during endgame?', 'what happens if we cross the center line in auton?', 'why is the field so small?', 'what is the difference between the starting volume and robot volume?', 'Does a robot touching the counter count as possession?', 'would two robots trapping one be a penalty?'])
+      expect(needsReasoning(q), q).toBe(true)
+    for (const q of ['what is the max height of the robot?', 'what is the A. Padding section of R402?', 'how many points is a cookie worth?', 'list the game pieces', 'when is the next meeting?'])
+      expect(needsReasoning(q), q).toBe(false)
+  })
+  it('writes a long note’s overview in the background, and Ask gives it with the outline', async () => {
+    await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id: 'overviewnote01', title: 'Game manual' }))
+    const md = ['# 1 INTRODUCTION', 'The game is played by two alliances. '.repeat(40), '# 4 MATCH PLAY', '## 4.5 SCORING', 'Each cookie scores 5 points. '.repeat(40), '## 4.6 RULE VIOLATIONS', 'A penalty adds points to the other alliance. '.repeat(40), '# 7 ROBOT RULES', 'R01. The ROBOT must be no taller than 60 in. during a MATCH. '.repeat(40)].join('\n\n')
+    await app.sync.change(noteDocName('overviewnote01'), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    expect(needsOverview(app.store, app.sync, 'overviewnote01')).toBe(true)
+    // what the AI is asked to sum up: the outline and each part's opening, not the whole note
+    const input = overviewInput('Game manual', md)
+    expect(input).toMatch(/^Outline:\n- 1 INTRODUCTION\n- 4 MATCH PLAY: 4.5 SCORING · 4.6 RULE VIOLATIONS\n- 7 ROBOT RULES/)
+    expect(input).toContain('[4 MATCH PLAY › 4.6 RULE VIOLATIONS] A penalty adds points to the other alliance.')
+    expect(input.length).toBeLessThan(md.length)
+    prompts.length = 0
+    const made = await makeOverview(app.store, app.sync, app.ai, 'overviewnote01')
+    expect(prompts.at(-1)).toContain('Write an overview of it for someone who will answer questions about it')
+    expect(made?.text).toBeTruthy()
+    // made for the note as it is: not again until it changes
+    expect(needsOverview(app.store, app.sync, 'overviewnote01')).toBe(false)
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the max height of the robot?', null, {}, { notes: ['overviewnote01'] })
+    expect(prompts.at(-1)).toContain(`What "Game manual" is (an overview of the whole note):\n${made!.text}`)
+    // a short note gets none
+    expect(needsOverview(app.store, app.sync, 'followupmain01')).toBe(false)
   })
 })
 
