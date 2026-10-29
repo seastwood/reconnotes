@@ -351,14 +351,22 @@ export const BlockClipboard = Extension.create<{ doc: Y.Doc | null }>({
             copy: (view, e) => copy(view, e, false),
             cut: (view, e) => copy(view, e, true),
           },
-          // ⌘C / ⌘X on a selected picture: what its Copy / Cut button does, straight from the key press –
+          // ⌘C / ⌘X on a selected picture (or text with pictures): what its Copy / Cut button does, straight from the key press –
           // Safari (and the app) drop a picture added to the copy event, so nothing got copied
           handleKeyDown: (view, e) => {
             const sel = view.state.selection
             if (!doc || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !/^[cx]$/i.test(e.key)) return false
-            if (!(sel instanceof NodeSelection) || sel.node.type.name !== 'image') return false
+            const cut = e.key.toLowerCase() === 'x' && view.editable
+            if (sel instanceof NodeSelection && sel.node.type.name === 'image') {
+              e.preventDefault()
+              void copyBlockIn(view, sel.from, doc, cut)
+              return true
+            }
+            // text and pictures together: all of it – the text, and the pictures in their places
+            if (sel.empty || !picturesIn(sel.content()).length) return false
             e.preventDefault()
-            void copyBlockIn(view, sel.from, doc, e.key.toLowerCase() === 'x' && view.editable)
+            void copyRich(view, sel.content(), doc)
+            if (cut) view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'))
             return true
           },
           handlePaste: (view, e) => {
