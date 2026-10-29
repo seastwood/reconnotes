@@ -302,6 +302,8 @@ describe('a meal-kit card’s lines', () => {
     expect(tidyIngredient('© Ground Beef**').text).toBe('Ground Beef**')
     expect(tidyIngredient('C Ground Beef is fully cooked').text).toBe('Ground Beef is fully cooked')
     expect(tidyIngredient('A Pinch of Salt').text).toBe('A Pinch of Salt')
+    // a list joined with "and": each allergen on its own
+    expect(tidyIngredient('Sour Cream (Contains: Milk and Eggs, Soy)')).toEqual({ text: 'Sour Cream', allergens: ['Milk', 'Eggs', 'Soy'] })
     expect(tidyIngredient('¼ Oz Oz').text).toBe('¼ Oz')
     expect(tidyIngredient('1 Jalapeño').text).toBe('1 Jalapeño')
     expect(tidyIngredient('Crème fraîche').text).toBe('Crème fraîche')
