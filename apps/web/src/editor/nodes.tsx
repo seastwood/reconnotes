@@ -6,7 +6,7 @@ import { isSyncConfigured } from '../lib/settings'
 import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, RotateCw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
+import { AudioLines, Check, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, RotateCw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
 import { copyBlock, primePictureCopy } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { attendeeCount, attendeeNames, getContent, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
@@ -385,12 +385,39 @@ export const ImageNode = Node.create({
   },
 })
 
+function RecordingCopyButton({ editor, getPos, doc }: { editor: Editor; getPos: () => number | undefined; doc: Y.Doc }) {
+  const [copied, copy] = useCopied(() => copyBlock(editor, getPos(), doc))
+  return (
+    <button className="block-copy" {...tap(copy)} title="Copy this recording (paste it in any note)" aria-label={copied ? 'Copied' : 'Copy recording'}>
+      {copied ? <Check size={15} /> : <Copy size={15} />}
+    </button>
+  )
+}
+
+/** A Copy button's tick: shown for a moment once it has copied. */
+function useCopied(run: () => Promise<boolean>): [boolean, () => void] {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return [
+    copied,
+    () =>
+      void run().then((ok) => {
+        if (!ok) return
+        setCopied(true)
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => setCopied(false), 1500)
+      }),
+  ]
+}
+
 /** Copy / Cut for a picture, recording or file: to paste it in another note. */
 export function BlockCopyButtons({ editor, getPos, doc, what }: { editor: Editor; getPos: () => number | undefined; doc: Y.Doc; what: string }) {
+  const [copied, copy] = useCopied(() => copyBlock(editor, getPos(), doc))
   return (
     <>
-      <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), doc))} title={`Copy this ${what} (paste it in any note)`} aria-label={`Copy ${what}`}>
-        <Copy size={15} />
+      <button className="block-copy" {...tap(copy)} title={`Copy this ${what} (paste it in any note)`} aria-label={copied ? 'Copied' : `Copy ${what}`}>
+        {copied ? <Check size={15} /> : <Copy size={15} />}
       </button>
       <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), doc, true))} title={`Cut this ${what} – to move it to another note`} aria-label={`Cut ${what}`}>
         <Scissors size={15} />
@@ -826,11 +853,7 @@ function AudioView({ node, editor, getPos }: ReactNodeViewProps) {
             {busy ? <Loader2 size={15} className="spin" /> : <AudioLines size={15} />} {busy ? 'Transcribing…' : 'Transcribe'}
           </button>
         )}
-        {editor.isEditable && ctx && (
-          <button className="block-copy" {...tap(() => void copyBlock(editor, getPos(), ctx.doc))} title="Copy this recording (paste it in any note)" aria-label="Copy recording">
-            <Copy size={15} />
-          </button>
-        )}
+        {editor.isEditable && ctx && <RecordingCopyButton editor={editor} getPos={getPos} doc={ctx.doc} />}
         {ctx && (
           <AudioMenu
             editor={editor}

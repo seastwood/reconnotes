@@ -298,21 +298,27 @@ function pastePayload(view: EditorView, p: Payload, doc: Y.Doc): boolean {
 }
 
 /** Copy or cut the block (drawing, picture, recording, file) at a position – the blocks' own Copy / Cut buttons. */
-export async function copyBlock(editor: Editor, pos: number | undefined, doc: Y.Doc, cut = false) {
-  if (typeof pos !== 'number') return
-  const node = editor.state.doc.nodeAt(pos)
-  if (!node) return
-  const slice = new Slice(editor.state.doc.slice(pos, pos + node.nodeSize).content, 0, 0)
-  const { html, text } = clipboardContent(editor.view, slice, doc)
+export function copyBlock(editor: Editor, pos: number | undefined, doc: Y.Doc, cut = false) {
+  return copyBlockIn(editor.view, pos, doc, cut)
+}
+
+/** Resolves to whether it was copied. */
+async function copyBlockIn(view: EditorView, pos: number | undefined, doc: Y.Doc, cut = false): Promise<boolean> {
+  if (typeof pos !== 'number') return false
+  const node = view.state.doc.nodeAt(pos)
+  if (!node) return false
+  const slice = new Slice(view.state.doc.slice(pos, pos + node.nodeSize).content, 0, 0)
+  const { html, text } = clipboardContent(view, slice, doc)
   // a picture as the picture too, for other apps
-  const ok = await (node.type.name === 'image' ? copyRich(editor.view, slice, doc) : writeTextClipboard(html, text))
-  if (!ok) return showToast('Couldn’t copy – try selecting it and using Copy')
+  const ok = await (node.type.name === 'image' ? copyRich(view, slice, doc) : writeTextClipboard(html, text))
+  if (!ok) return showToast('Couldn’t copy – try selecting it and using Copy'), false
   const what = node.type.name === 'drawing' ? 'Handwriting' : node.type.name === 'image' ? 'Picture' : node.type.name === 'audio' ? 'Recording' : 'File'
   if (cut) {
-    const tr = editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)).deleteSelection()
-    editor.view.dispatch(tr)
+    const tr = view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)).deleteSelection()
+    view.dispatch(tr)
   }
   showToast(`${what} ${cut ? 'cut' : 'copied'} – paste it in any note`)
+  return true
 }
 
 export const BlockClipboard = Extension.create<{ doc: Y.Doc | null }>({
@@ -344,6 +350,16 @@ export const BlockClipboard = Extension.create<{ doc: Y.Doc | null }>({
           handleDOMEvents: {
             copy: (view, e) => copy(view, e, false),
             cut: (view, e) => copy(view, e, true),
+          },
+          // ⌘C / ⌘X on a selected picture: what its Copy / Cut button does, straight from the key press –
+          // Safari (and the app) drop a picture added to the copy event, so nothing got copied
+          handleKeyDown: (view, e) => {
+            const sel = view.state.selection
+            if (!doc || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || !/^[cx]$/i.test(e.key)) return false
+            if (!(sel instanceof NodeSelection) || sel.node.type.name !== 'image') return false
+            e.preventDefault()
+            void copyBlockIn(view, sel.from, doc, e.key.toLowerCase() === 'x' && view.editable)
+            return true
           },
           handlePaste: (view, e) => {
             const html = e.clipboardData?.getData('text/html') ?? ''
