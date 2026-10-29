@@ -647,6 +647,17 @@ describe('what the answer left out', () => {
   })
 })
 
+describe('a table cell beside the line that answers it', () => {
+  it('says what its row is under the column’s heading: a penalty, not points scored', () => {
+    const texts = new Map([
+      [1, 'R01. The ROBOT must start a MATCH inside the STARTING VOLUME of 36” long x 36” wide x 40” tall and not extend beyond the ROBOT VOLUME of 36” long x 36” wide x 60” tall during a MATCH.'],
+      [2, 'Table 4-2: Rule Violation Summary Chart\n\n| PENALTY | Example Violations |\n| --- | --- |\n| +5 Pts | - Pinning longer than 3 seconds |\n| +10 Pts | - Possession of too many GAME PIECES - Being taller than 60-inches - Two (2) ROBOTS trapping |'],
+    ])
+    const lines = keyLines(texts, ['max', 'height', 'robot'], [], 4, 0.9).map((l) => l.line)
+    expect(lines).toContain('PENALTY: +10 Pts – Being taller than 60-inches')
+  })
+})
+
 describe('a citation where the sentence names its section', () => {
   it('goes to that section', () => {
     const texts = new Map([

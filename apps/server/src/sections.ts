@@ -199,12 +199,26 @@ function findableLines(text: string): string[] {
 /** The line Ask adds to a referenced rule cut to its part – not the note's own words. */
 export const ASKS_NOTE = /^\(Only “[^”]*” of [A-Z]{1,3}\d{1,4} applies here/
 
-/** findableLines, each table cell with its row's first cell ("+10 Pts") – what it's in the table for. */
+/**
+ * findableLines, each table cell with its row's first cell and that column's heading ("PENALTY: +10 Pts")
+ * – what it's in the table for. Without the heading "+10 Pts" reads like points scored, not a penalty.
+ */
 function labelledLines(text: string): { raw: string; label?: string }[] {
+  let heading: string | null = null
+  let inTable = false
   return text.split('\n').flatMap((l) => {
-    if (!/^\s*\|/.test(l)) return [{ raw: l }]
+    if (!/^\s*\|/.test(l)) {
+      inTable = false
+      return [{ raw: l }]
+    }
     const cells = l.split('|').filter((c) => c.trim() && !/^[\s:-]+$/.test(c))
-    const label = cells.length > 1 ? plainLine(cells[0]) : ''
+    // a table's first row is its headings
+    if (!inTable) {
+      inTable = true
+      heading = cells.length > 1 ? plainLine(cells[0]) : null
+    }
+    const first = cells.length > 1 ? plainLine(cells[0]) : ''
+    const label = first && heading && heading !== first && heading.length <= 30 ? `${heading}: ${first}` : first
     return cells.flatMap((c, i) =>
       // a list in a cell ("- one - two"): each item is a paragraph of its own in the note
       c.split(/\s+-\s+(?=[\p{Lu}(\d])|<br\s*\/?>/u).map((raw) => ({ raw, ...(i > 0 && label && label.length <= 40 ? { label } : {}) })),

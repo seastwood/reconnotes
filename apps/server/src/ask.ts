@@ -442,6 +442,7 @@ export async function askNotes(
   }
 - Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
+- Read a table's values with their column heading: "+10 Pts" under PENALTY is a penalty against the team that broke the rule, not points it earns.
 - Answer in the language of the question.
 
 Today is ${todayLabel(now, tz)}.${range && !pinned.length ? `\nThe question is about ${range.label}: the notes below are the ones written or edited then.` : ''}
