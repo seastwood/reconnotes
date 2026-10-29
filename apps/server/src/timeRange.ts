@@ -128,7 +128,8 @@ export interface FoundDate {
   at: number
 }
 
-const MONTH_RE = MONTHS.map((m) => m.slice(0, 3)).join('|')
+/** a month's name, whole or cut short ("Apr", "Sept.") – not a word that starts like one ("AprilTag", "Marching") */
+const MONTH_WORD = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])'
 
 /**
  * Dates written in text: 2026-10-22 (and due dates, !2026-10-22), 10/22/26,
@@ -152,9 +153,9 @@ export function findDates(text: string, now = Date.now(), tzOffset = 0): FoundDa
     add(at, `${m[1]}/${m[2]}`.length, thisYear, +m[1] - 1, +m[2])
   }
   const monthIdx = (s: string) => MONTHS.findIndex((x) => x.startsWith(s.slice(0, 3).toLowerCase()))
-  for (const m of text.matchAll(new RegExp(`\\b(${MONTH_RE})[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(\\d{4}))?`, 'gi')))
+  for (const m of text.matchAll(new RegExp(`\\b(${MONTH_WORD})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![.,]\\d)(?:,?\\s+(\\d{4}))?`, 'gi')))
     add(m.index!, m[0].length, m[3] ? +m[3] : thisYear, monthIdx(m[1]), +m[2])
-  for (const m of text.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_RE})[a-z]*\\b(?:,?\\s+(\\d{4}))?`, 'gi')))
+  for (const m of text.matchAll(new RegExp(`(?<![\\d.,])\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH_WORD})\\b(?:,?\\s+(\\d{4}))?`, 'gi')))
     add(m.index!, m[0].length, m[3] ? +m[3] : thisYear, monthIdx(m[2]), +m[1])
   return out.sort((a, b) => a.index - b.index)
 }

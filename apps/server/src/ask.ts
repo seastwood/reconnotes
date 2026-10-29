@@ -221,6 +221,8 @@ export async function askNotes(
   let rest: Section[] = []
   /** every section of the notes asked about (a whole manual, for "Ask about this note") */
   let everySection: Section[] = []
+  /** …and every section before a referenced note was cut to the rules taken from it (its glossary, for terms) */
+  let wholeSections: Section[] = []
   /** the rules (and their parts) the main note takes from the notes it refers to */
   let onlyPointed: Map<string, string | null> | null = null
   let context = ''
@@ -270,6 +272,7 @@ export async function askNotes(
     }
     // the main note names what it takes from a referenced one ("as described in the “A. Padding” section of R402"):
     // only that is read from it – the rest of R402, and the referenced document's other rules, don't apply
+    wholeSections = [...all]
     if (refs.length) {
       const mainText = all.filter((x) => !isRef.has(x.noteId)).map((x) => x.text).join('\n')
       // another chapter of a chosen reference: only where it defines a rule the note (or the question) names
@@ -355,6 +358,35 @@ export async function askNotes(
   // the lines most about the question – asked about one note (a manual), from anywhere in
   // it, not only the parts read (a part not read becomes a source of its own, so it's cited)
   const keyed: { n: number; line: string }[] = []
+  /** the big picture: how the note is laid out (what was read marked), and the terms the key lines use, defined */
+  let bigPicture = ''
+  // the outline of the note asked about – or of the notes most read – with the parts read marked ★
+  const outlineFor = () => {
+    const counts = new Map<string, number>()
+    for (const x of sources) counts.set(x.noteId, (counts.get(x.noteId) ?? 0) + 1)
+    const ids = pinned.length ? pinned.slice(0, 1) : [...counts].filter(([, c]) => c >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id]) => id)
+    return ids
+      .map((id) => {
+        const readPaths = new Set(sources.filter((x) => x.noteId === id && x.section).map((x) => x.section!))
+        const out = outline(everySection.filter((x) => x.noteId === id), readPaths)
+        return out ? `How "${meta.get(id)?.title || 'Untitled'}" is laid out (★ = the parts below):\n${out}` : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
+  }
+  // the CAPITALISED terms the key lines use ("ROBOT VOLUME"), as the notes define them – a glossary, a definitions list
+  const termsFor = () => {
+    const terms = [...new Set(keyed.slice(0, 6).flatMap((k) => [...k.line.matchAll(TERM)].map((m) => m[0].trim())))].filter((t) => !STOP_TERMS.has(t)).sort((a, b) => b.length - a.length)
+    const out: string[] = []
+    for (const t of terms) {
+      if (out.length >= 5) break
+      // a longer term already given covers this one ("ROBOT VOLUME" covers "ROBOT")
+      if (out.some((o) => o.startsWith(`- ${t} `) || o.slice(2, o.indexOf(':')).includes(t))) continue
+      const def = defineIn(wholeSections, t)
+      if (def && !context.includes(def.line.slice(0, 60))) out.push(`- ${t}: ${clip(def.line, 260)} (in "${shortTitle(meta.get(def.noteId)?.title ?? '')}")`)
+    }
+    return out.length ? `Terms these lines use, as your notes define them:\n${out.join('\n')}` : ''
+  }
   if (!range) {
     const pool = new Map(texts)
     const unread = new Map<number, Section>()
@@ -419,6 +451,33 @@ export async function askNotes(
         }
       }
     }
+    // a line pointing elsewhere in its note ("see section 6.1.7 ZONE SPECIFIC RESTRICTIONS"): that section too
+    const followed = new Set<string>()
+    for (const k of keyed.slice(0, 6)) {
+      const id = noteOfN(k.n)
+      if (!id) continue
+      for (const m of k.line.matchAll(SECTION_REF)) {
+        const num = m[1].replace(/\.$/, '')
+        if (followed.size >= 2 || followed.has(`${id}|${num}`) || context.length > TOTAL * 1.25) continue
+        const at = (x: Section) => x.noteId === id && (x.path.at(-1) ?? '').startsWith(`${num} `)
+        if (sources.some((x) => x.noteId === id && x.section && at({ noteId: id, path: x.section.split(' › '), text: '', index: 0 }))) continue
+        // the section (its first piece, or the piece most about the question)
+        const secs = everySection.filter(at)
+        let sec: Section | undefined = secs.find((x) => keyWords.some((w) => x.text.toLowerCase().includes(w))) ?? secs[0]
+        let text = sec ? excerpt(sec.text, keyWords, 1500) : ''
+        // not a heading (a PDF's plain line "6.1.7 ZONE SPECIFIC RESTRICTIONS"): from that line on
+        if (!sec) {
+          const starts = new RegExp(`(?:^|\\n)\\s*(?:\\*\\*)?${num.replace(/\./g, '\\.')}\\s+\\S`)
+          sec = everySection.find((x) => x.noteId === id && starts.test(x.text) && !k.line.includes(x.text.slice(0, 80)))
+          if (sec) text = sec.text.slice(starts.exec(sec.text)!.index).trim().slice(0, 1500)
+        }
+        if (!sec || !text) continue
+        followed.add(`${id}|${num}`)
+        add(sec.noteId, text, sec)
+        read.add(sec)
+      }
+    }
+    bigPicture = [outlineFor(), termsFor()].filter(Boolean).join('\n\n')
   }
   const key = (_context: string) => {
     const lines = keyed
@@ -442,6 +501,7 @@ export async function askNotes(
   }
 - Don't draw conclusions the notes don't state: a rule only allows or forbids what it says. When no line answers the question directly, say so, and give what the notes do say about it (including any exceptions, like gaps that are allowed).
 - Don't add details the notes don't say (dates, days, names, what happened at a meeting). Repeat items in the note's own words.
+- Before answering, work out what each line you use is – a requirement, a penalty, a definition, an exception, an example or a question and answer – from where it is in the note (its section) and what it says, and answer with that in mind. Where a line points to a section or uses a defined term given below, use what it points to.
 - Read a table's values with their column heading: "+10 Pts" under PENALTY is a penalty against the team that broke the rule, not points it earns.
 - Answer in the language of the question.
 
@@ -453,7 +513,7 @@ ${
       : ''
   }${history.length ? 'Follow-up question' : 'Question'}: ${question}
 
-Notes:${context}${key(context)}
+Notes:${context}${key(context)}${bigPicture ? `\n\n${bigPicture}` : ''}
 
 ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 
@@ -544,6 +604,59 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
 }
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+/** "see section 6.1.7", "per Section 4.6", "(section 7.2 GENERAL ROBOT DESIGN)" – one section, not "Sections 5 and 6" */
+const SECTION_REF = /\b(?:see|per|in|under|refer to|described in|listed in)?\s*(?:section|§)\s*(\d+(?:\.\d+){0,3}\.?)(?!\s*(?:and|or|-|–|to)\s*\d)/gi
+
+/** A term a manual writes in capitals ("ROBOT VOLUME", "MATCH"): one to three words. */
+const TERM = /\b[A-Z][A-Z'’-]{2,}(?:\s+[A-Z][A-Z'’-]{1,}){0,2}\b/g
+const STOP_TERMS = new Set(['PENALTY', 'NOTE', 'NOTES', 'FAQ', 'TBD', 'AND', 'THE', 'FOR', 'NOT', 'YES', 'PTS', 'FRC', 'FIRST', 'USA', 'LED', 'CAN', 'PWM', 'USB', 'PDF'])
+
+/** Where a term is defined: a line that starts with it and then says what it is ("ROBOT VOLUME: …", "| MATCH | a 2:30 period … |"). */
+export function defineIn(sections: Section[], term: string): { noteId: string; line: string } | null {
+  const t = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const starts = new RegExp(`^\\s*(?:[-*]\\s+|#{1,6}\\s+|\\|\\s*)?(?:\\*\\*)?${t}s?(?:\\*\\*)?\\s*(?:[:–—|]|-\\s|\\(|\\s(?:is|are|means|refers to)\\s)`)
+  for (const sec of sections)
+    for (const raw of sec.text.split('\n')) {
+      if (!starts.test(raw)) continue
+      const line = raw.replace(/^\s*[-*|#\s]+/, '').replace(/\*\*/g, '').replace(/\s*\|\s*/g, ' – ').replace(/[\s–]+$/, '').trim()
+      // a definition says something: not a heading of the term alone
+      if (line.length >= term.length + 15 && line.length <= 600) return { noteId: sec.noteId, line }
+    }
+  return null
+}
+
+/**
+ * A note's outline from its sections: its parts, with their subparts, those read marked ★ –
+ * the big picture a few passages don't give (a penalty table, a definitions appendix, an FAQ).
+ */
+export function outline(sections: Section[], readPaths: Set<string>, limit = 1400): string {
+  const paths = sections.map((x) => x.path).filter((p) => p.length)
+  if (!paths.length) return ''
+  // the levels every section shares ("Contents"): left out
+  let skip = 0
+  while (paths.every((p) => p.length > skip + 1 && p[skip] === paths[0][skip])) skip++
+  const tops = new Map<string, { read: boolean; subs: Map<string, boolean> }>()
+  for (const p of paths) {
+    const [a, b] = p.slice(skip)
+    if (!a) continue
+    const top = tops.get(a) ?? { read: false, subs: new Map<string, boolean>() }
+    tops.set(a, top)
+    const here = readPaths.has(p.join(' › '))
+    if (b) top.subs.set(b, (top.subs.get(b) ?? false) || here)
+    else top.read ||= here
+  }
+  let out = ''
+  for (const [a, { read, subs }] of tops) {
+    const line = `- ${a}${read ? ' ★' : ''}${subs.size ? `: ${[...subs].map(([b, r]) => `${b}${r ? ' ★' : ''}`).join(' · ')}` : ''}\n`
+    if (out.length + line.length > limit) {
+      out += '- …\n'
+      break
+    }
+    out += line
+  }
+  return out.trim()
+}
 
 /**
  * The rules a main document takes from the documents it refers to – those it

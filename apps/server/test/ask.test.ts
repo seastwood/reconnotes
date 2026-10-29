@@ -102,6 +102,10 @@ describe('dates in notes', () => {
     expect(annotateDates('Eat an Apple by 5/4/26', now, TZ)).toBe('Eat an Apple by 5/4/26 [Mon 4 May 2026, 156 days ago]')
     expect(annotateDates('Fill out paperwork by 10/22/26', now, TZ)).toBe('Fill out paperwork by 10/22/26 [Thu 22 Oct 2026, in 15 days]')
     expect(annotateDates('call back tomorrow, 10/8/2026', now, TZ)).toContain('[Thu 8 Oct 2026, tomorrow]')
+    // not a word that starts like a month, nor a section number's end
+    expect(annotateDates('## 3.7 AprilTag Distribution', now, TZ)).toBe('## 3.7 AprilTag Distribution')
+    expect(annotateDates('Marching band on 12 Marchington Rd', now, TZ)).toBe('Marching band on 12 Marchington Rd')
+    expect(annotateDates('due Sept. 5 or 4 May', now, TZ)).toBe('due Sept. 5 [Sat 5 Sep 2026, 32 days ago] or 4 May [Mon 4 May 2026, 156 days ago]')
   })
 })
 
@@ -655,6 +659,57 @@ describe('a table cell beside the line that answers it', () => {
     ])
     const lines = keyLines(texts, ['max', 'height', 'robot'], [], 4, 0.9).map((l) => l.line)
     expect(lines).toContain('PENALTY: +10 Pts – Being taller than 60-inches')
+  })
+})
+
+describe('the big picture', () => {
+  it('gives the note’s outline, follows “see section …”, and defines the terms the key lines use', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    const filler = (t: string) => `${t} `.repeat(60)
+    await mk(
+      'bigpicmain0001',
+      'Cookie Chaos manual',
+      [
+        '# 1 INTRODUCTION', filler('The program trains students.'),
+        '# 4 MATCH PLAY', '## 4.6 RULE VIOLATIONS', '| PENALTY | Example Violations |', '| --- | --- |', '| +10 Pts | - Illegal contact in protected ZONES (see section 6.1.7 ZONE SPECIFIC RESTRICTIONS) - Being taller than 60-inches |',
+        '# 6 RULES', '## 6.1 CONDUCT', filler('Be gracious.'), '### 6.1.7 ZONE SPECIFIC RESTRICTIONS', 'G21. A ROBOT may not contact an opponent inside its SAFE ZONE.',
+        '# 7 ROBOT CONSTRUCTION RULES', '## 7.2 GENERAL ROBOT DESIGN', 'R01. The ROBOT must start inside the STARTING VOLUME and not extend beyond the ROBOT VOLUME of 36” x 36” x 60” tall during a MATCH.',
+        '# A Appendix', '## A.1 DEFINITIONS', '- STARTING VOLUME: the space a ROBOT must fit inside at the start of a MATCH, 36” x 36” x 40” tall.', '- SAFE ZONE – the taped area in front of each ALLIANCE’s station.',
+      ].join('\n\n'),
+    )
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the max height of the robot?', null, {}, { notes: ['bigpicmain0001'] })
+    const p = prompts.at(-1)!
+    // the outline, the parts read marked
+    expect(p).toMatch(/How "Cookie Chaos manual" is laid out[^\n]*\n- 1 INTRODUCTION\n- 4 MATCH PLAY: 4.6 RULE VIOLATIONS ★/)
+    expect(p).toMatch(/- 7 ROBOT CONSTRUCTION RULES ★: 7.2 GENERAL ROBOT DESIGN ★/)
+    expect(p).toContain('- A Appendix: A.1 DEFINITIONS')
+    // what the penalty line points to
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the penalty for illegal contact in protected zones?', null, {}, { notes: ['bigpicmain0001'] })
+    expect(prompts.at(-1)).toContain('G21. A ROBOT may not contact an opponent inside its SAFE ZONE.')
+  })
+  it('defines a term from the glossary of a manual the note refers to', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk('glossmain00001', 'Trials manual', 'R01. The ROBOT must fit in its ROBOT VOLUME of 36” x 36” x 60” tall during a MATCH.\n\nR12. BUMPERS are required, built as described in the “A. Padding” section of R402.')
+    await mk(
+      'glossfrc000001',
+      '2025 FRC Game Manual',
+      ['# 8 ROBOT Construction Rules', 'R402 *BUMPER construction. BUMPERS must consist of the following:', 'Padding – foam.', '# 12 Glossary', '| Term | Definition |', '| --- | --- |', '| ROBOT VOLUME | the space a ROBOT may occupy: its STARTING VOLUME, and what it may extend into during a MATCH |', '| MATCH | a 2 minute 40 second period of play |'].join('\n\n'),
+    )
+    setAskRefs(app.store, 'glossmain00001', ['glossfrc000001'])
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the max height of the robot?', null, {}, { notes: ['glossmain00001'] })
+    const p = prompts.at(-1)!
+    expect(p).toContain('Terms these lines use, as your notes define them:')
+    expect(p).toContain('- ROBOT VOLUME: ROBOT VOLUME – the space a ROBOT may occupy')
+    expect(p).toContain('(in "2025 FRC Game Manual")')
   })
 })
 
