@@ -811,6 +811,26 @@ describe('a note that refers to another (its manual)', () => {
     expect(prompts.at(-1)).not.toContain('not be wider than the robot')
     expect(noteContext(app.store, app.sync, 'nosearchmain01', 'what is the A. Padding section of R402?')).toContain('depth of foam padding')
   })
+  it('a rule that runs on from one piece of a long section into the next is read whole', async () => {
+    const mk = async (id: string, title: string, md: string) => {
+      await app.sync.change(WORKSPACE_DOC, (ws) => void createNote(ws, { id, title }))
+      await app.sync.change(noteDocName(id), (doc) => void getContent(doc).insert(0, markdownToNodes(md, { attach: () => null, noteFor: () => null })))
+    }
+    await mk('piecesmain0001', 'Cookie Chaos manual', 'R12. BUMPERS are required, and shall be constructed as described in the “A. Padding” section of R402 from the FRC 2025 Game Manual.')
+    const intro = 'R401 *BUMPERS must protect all outside corners of the FRAME PERIMETER. ' + 'Each BUMPER segment covers the frame. '.repeat(42)
+    const md = ['## 8.4 BUMPER Rules', intro, 'R402 *BUMPER construction. BUMPERS must consist of the following:', 'Padding – A minimum of 2 ¼ in. (~58 mm) depth of foam padding, at least 4 ½ in. (~114 mm) tall.', 'Backing – 3/4 in. thick plywood.', 'R403 *BUMPERS must not be wider than the robot.'].join('\n\n')
+    await mk('piecesfrc00001', '2025 FRC Game Manual', md)
+    // the rule's first line ends one piece of the section, its parts start the next
+    const pieces = splitSections('piecesfrc00001', '2025 FRC Game Manual', md)
+    expect(pieces.length).toBe(2)
+    expect(pieces[0].text).toMatch(/consist of the following:$/)
+    setAskRefs(app.store, 'piecesmain0001', ['piecesfrc00001'])
+    prompts.length = 0
+    await askNotes(app.store, app.sync, app.ai, 'what is the A. Padding section of R402?', null, {}, { notes: ['piecesmain0001'] })
+    const key = prompts.at(-1)!.split('The lines of the notes above most about the question')[1]
+    expect(key).toMatch(/\(R402 in "2025 FRC Game Manual", which that rule points to\) R402 \*BUMPER construction\. BUMPERS must consist of the following: Padding – A minimum of 2 ¼ in\./)
+    expect(prompts.at(-1)).not.toContain('3/4 in. thick plywood')
+  })
   it('a sentence from the referenced note only is labelled with it', () => {
     const noteOf = (n: number) => (n === 1 ? 'main' : 'frc')
     const title = (id: string) => (id === 'frc' ? '2025 FRC Game Manual' : null)

@@ -181,6 +181,28 @@ function picturesIn(slice: Slice): string[] {
   return ids
 }
 
+/**
+ * Pictures ready to copy, as data: addresses – made when one is selected, so ⌘C (a copy event,
+ * which can't wait for a file to load) puts the picture itself in the HTML, not just its name.
+ */
+const ready = new Map<string, string>()
+export function primePictureCopy(id: string) {
+  if (ready.has(id)) return
+  void attachmentBlob(id)
+    .then(async (b) => {
+      if (!b || !b.type.startsWith('image/') || b.size > 8_000_000) return
+      ready.set(id, `data:${b.type};base64,${await toBase64(b)}`)
+      // the last few only: they're big
+      while (ready.size > 6) ready.delete(ready.keys().next().value!)
+    })
+    .catch(() => {})
+}
+const withReadyPictures = (html: string) => {
+  let out = html
+  for (const [id, src] of ready) out = out.split(`data-attachment-id="${id}"`).join(`data-attachment-id="${id}" src="${src}"`)
+  return out
+}
+
 /** The HTML with each picture's file inside it (other apps can't fetch ours). */
 async function inlinePictures(html: string, blobs: Map<string, Blob>): Promise<string> {
   let out = html
@@ -306,11 +328,13 @@ export const BlockClipboard = Extension.create<{ doc: Y.Doc | null }>({
       const slice = sel.content()
       if (!hasAtoms(slice)) return false // plain text: the usual copy
       const { html, text } = clipboardContent(view, slice, doc)
-      e.clipboardData.setData('text/html', html)
-      e.clipboardData.setData('text/plain', text)
+      const pictures = picturesIn(slice)
+      // the pictures inside the HTML where they're ready; nothing but pictures: no "[image]" text
+      e.clipboardData.setData('text/html', pictures.length ? withReadyPictures(html) : html)
+      if (!pictures.length || text.replace(/\[image\]/g, '').trim()) e.clipboardData.setData('text/plain', text)
       e.preventDefault()
       // with pictures: the pictures themselves too (⌘C on a picture pastes the picture in other apps, not "[image]")
-      if (picturesIn(slice).length && (nativeClipboard() || (typeof ClipboardItem !== 'undefined' && Boolean(navigator.clipboard)))) void copyRich(view, slice, doc, false)
+      if (pictures.length && (nativeClipboard() || (typeof ClipboardItem !== 'undefined' && Boolean(navigator.clipboard)))) void copyRich(view, slice, doc, false)
       if (cut) view.dispatch(view.state.tr.deleteSelection().scrollIntoView().setMeta('uiEvent', 'cut'))
       return true
     }

@@ -7,7 +7,7 @@ import { Node, mergeAttributes, type Editor } from '@tiptap/core'
 import { NodeViewWrapper, ReactNodeViewRenderer, useEditorState, type ReactNodeViewProps } from '@tiptap/react'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { AudioLines, Copy, Eye, FileText, Loader2, Mic, MoreHorizontal, Pencil, PenLine, RotateCcw, RotateCw, ScanText, Scissors, Share, SpellCheck, TextQuote, Trash2, Users, X } from 'lucide-react'
-import { copyBlock } from './blockClipboard'
+import { copyBlock, primePictureCopy } from './blockClipboard'
 import { convertImage, transcribeAudio } from '../lib/ai'
 import { attendeeCount, attendeeNames, getContent, getNotes, noteGroup, getTranscripts, newId, noteToMarkdown, parseSpeakerNames, parseSpeakers, readNote, speakerName, speakerNamesKey, speakersKey, wordsKey, type Stroke } from '@reconnotes/core'
 import * as Y from 'yjs'
@@ -254,6 +254,11 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, markingUp])
+
+  // selected: its file made ready, so ⌘C copies the picture itself
+  useEffect(() => {
+    if (selected && node.attrs.attachmentId) primePictureCopy(node.attrs.attachmentId as string)
+  }, [selected, node.attrs.attachmentId])
 
   const width = node.attrs.width as number | null
   const startResize = (e: React.PointerEvent) => {

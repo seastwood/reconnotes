@@ -1128,15 +1128,19 @@ public class NativeClipboardPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func write(_ call: CAPPluginCall) {
         let text = call.getString("text") ?? ""
-        var first: [String: Any] = [UTType.utf8PlainText.identifier: text]
-        if let html = call.getString("html"), !html.isEmpty { first[UTType.html.identifier] = html }
-        var items: [[String: Any]] = [first]
+        var images: [[String: Any]] = []
         for img in call.getArray("images", JSObject.self) ?? [] {
             guard let b64 = img["data"] as? String, let data = Data(base64Encoded: b64) else { continue }
             let mime = (img["mime"] as? String) ?? "image/png"
             let type = UTType(mimeType: mime) ?? .png
-            items.append([type.identifier: data])
+            images.append([type.identifier: data])
         }
+        var first: [String: Any] = text.isEmpty ? [:] : [UTType.utf8PlainText.identifier: text]
+        if let html = call.getString("html"), !html.isEmpty { first[UTType.html.identifier] = html }
+        // only pictures (no text): the first picture is the first item – what other apps paste –
+        // not an item holding just the picture's name
+        if text.isEmpty, !images.isEmpty { first.merge(images.removeFirst()) { a, _ in a } }
+        let items: [[String: Any]] = [first] + images
         DispatchQueue.main.async {
             UIPasteboard.general.setItems(items, options: [:])
             call.resolve()

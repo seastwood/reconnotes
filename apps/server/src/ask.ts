@@ -279,12 +279,16 @@ export async function askNotes(
       }
       const pointed = pointedRules(mainText, all.filter((x) => isRef.has(x.noteId)).map((x) => x.text))
       if (pointed.size) {
-        const narrowed: Section[] = []
-        for (const sec of all) {
-          if (!isRef.has(sec.noteId)) narrowed.push(sec)
-          else {
-            const text = onlyRules(sec.text, pointed)
-            if (text) narrowed.push({ ...sec, text })
+        const narrowed: Section[] = all.filter((sec) => !isRef.has(sec.noteId))
+        // each rule out of its whole note: a long section is read in pieces, and a rule can run on
+        // from one into the next ("R402 … consist of the following:" | "Padding – A minimum of…")
+        for (const id of new Set(all.filter((x) => isRef.has(x.noteId)).map((x) => x.noteId))) {
+          const secs = all.filter((x) => x.noteId === id).sort((a, b) => a.index - b.index)
+          const whole = secs.map((x) => x.text.replace(/^#{1,6}\s.*\(continued\)\s*\n+/, '')).join('\n\n')
+          for (const [r, part] of pointed) {
+            const at = secs.find((x) => definesRule(x.text, r))
+            const text = at ? onlyRules(whole, new Map([[r, part]])) : ''
+            if (at && text) narrowed.push({ ...at, text })
           }
         }
         all.splice(0, all.length, ...narrowed)
