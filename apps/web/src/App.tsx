@@ -26,6 +26,7 @@ import { startShareInbox } from './lib/shareInbox'
 import { Toaster } from './components/Toaster'
 import { HideKeyboardButton } from './components/HideKeyboardButton'
 import { Panel } from './components/Panel'
+import { ColumnResizer, savedColumnWidths } from './components/ColumnResizer'
 import { ImageViewerHost } from './components/ImageViewer'
 import { CommandPalette } from './components/CommandPalette'
 import { shouldShowTour } from './components/Tour'
@@ -321,6 +322,8 @@ export function App() {
   usePencilInteractions()
   const ws = useWorkspace()
   const narrow = useMedia('(max-width: 699px)')
+  // the folders and notes columns as wide as they were dragged to (see ColumnResizer)
+  const [columnWidths] = useState(savedColumnWidths)
   // tablets and computers: folders, notes and the note side by side (the
   // columns get narrower on smaller screens); phones show one at a time
   const wide = !narrow
@@ -746,7 +749,7 @@ export function App() {
   }, [templatesKey, nav.view, openNoteMeta?.id, openNoteMeta?.pinned])
 
   return (
-    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}${!narrow && listExpanded && listVisible ? ' list-expanded' : ''}`}>
+    <div className={`app${narrow ? ' narrow' : ''}${wide ? ' wide' : ''}${!narrow && listExpanded && listVisible ? ' list-expanded' : ''}`} style={narrow ? undefined : columnWidths}>
       <Panel
         show={sidebarVisible || peek === 'folders'}
         mode={narrow ? 'push' : overlay && !sidebarInline ? 'none' : 'side'}
@@ -780,6 +783,7 @@ export function App() {
             if (overlay && !sidebarInline) setOverlay(false)
           }}
         />
+        {!narrow && !(overlay && !sidebarInline) && <ColumnResizer name="--sidebar-w" label="folders" />}
       </Panel>
       <Panel show={listVisible || peek === 'list'} mode={narrow ? 'push' : 'side'} dir={navDir.current} className="panel-list" instant={narrow ? instant || peek !== null : sideDrag !== null} style={narrow ? peekStyle('list') : sideStyle('list')}>
         <div className="list-col">
@@ -810,6 +814,7 @@ export function App() {
           />
           )}
         </div>
+        {!narrow && !listExpanded && <ColumnResizer name="--list-w" label="notes list" />}
       </Panel>
       <Panel show={editorVisible || peek === 'note'} mode={narrow ? 'push' : 'none'} dir={navDir.current} className="panel-editor" instant={narrow && (instant || peek !== null)} style={peekStyle('note')}>
         <main className="editor-col">

@@ -3690,6 +3690,44 @@ a.button {
 .panel-editor {
   flex: 1;
 }
+/* computer: drag a column's right edge to make it wider (ColumnResizer) */
+.panel-sidebar,
+.panel-list {
+  position: relative;
+}
+.col-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+.col-resizer:hover::after,
+body.col-resizing .col-resizer::after {
+  background: var(--accent);
+}
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (pointer: coarse) and (hover: none) {
+  .col-resizer {
+    display: none;
+  }
+}
 .panel-sidebar {
   --pw: var(--sidebar-w);
 }
