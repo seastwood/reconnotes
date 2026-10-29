@@ -450,9 +450,10 @@ ${history.length ? 'Follow-up question' : 'Question'} (again): ${question}`
       more++
     }
     if (more) {
+      // the first answer stays on screen while it looks (wiping it to write another looked like a restart)
       reportProgress('Not in the first part it read – looking further…')
-      reportPartial({ answer: '', sources })
-      const again = await ai.ask(promptFor(context), (soFar) => reportPartial({ answer: listify(soFar), sources }))
+      reportPartial({ answer: listify(raw), sources, looking: 'Not in the first part it read – looking further…' })
+      const again = await ai.ask(promptFor(context))
       // found it there: that answer; else the first one stands
       if (!NOT_FOUND.test(again.text)) ({ text: raw, agent } = again)
     }
