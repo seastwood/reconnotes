@@ -1287,6 +1287,14 @@ button.text {
   max-width: 100%;
   vertical-align: top;
 }
+/* a picture made smaller sits beside the next one, when both fit in the line */
+.ProseMirror > .node-image[data-sized] {
+  display: inline-block;
+  vertical-align: top;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding-right: 8px;
+}
 .image-frame img {
   width: 100%;
   max-width: 100%;

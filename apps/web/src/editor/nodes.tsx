@@ -261,12 +261,18 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
     e.stopPropagation()
     // The frame hugs the image, so the handle always sits on its corner.
     const frame = e.currentTarget.closest('.image-frame') as HTMLElement
+    // a picture given a size sits beside the next one when both fit: its node's box is that size
+    const box = (frame.closest('.node-image') as HTMLElement | null) ?? frame
     const startX = e.clientX
     const startW = frame.getBoundingClientRect().width
-    // the block the frame sits in is exactly the text column's width
-    const parentW = (frame.parentElement as HTMLElement).clientWidth
+    // the text column's width
+    const col = box.parentElement as HTMLElement
+    const pad = parseFloat(getComputedStyle(col).paddingLeft) + parseFloat(getComputedStyle(col).paddingRight)
+    const parentW = col.clientWidth - (box === frame ? 0 : pad)
     const move = (ev: PointerEvent) => {
-      frame.style.width = `${Math.max(60, Math.min(parentW, startW + ev.clientX - startX))}px`
+      const w = `${Math.max(60, Math.min(parentW, startW + ev.clientX - startX))}px`
+      if (box === frame) frame.style.width = w
+      else (box.style.width = w), (frame.style.width = '100%')
     }
     const up = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', move)
@@ -282,7 +288,7 @@ function ImageView({ node, selected, updateAttributes, editor, getPos }: ReactNo
       {url && broken ? (
         <div className="attachment-placeholder">This picture can’t be shown{node.attrs.alt ? `: ${node.attrs.alt}` : ''}</div>
       ) : url ? (
-        <div className="image-frame" style={width ? { width: `${width}%` } : undefined} onPointerDownCapture={onPenDown}>
+        <div className="image-frame" style={width ? { width: '100%' } : undefined} onPointerDownCapture={onPenDown}>
           <img
             src={url}
             alt={node.attrs.alt ?? ''}
@@ -367,6 +373,8 @@ export const ImageNode = Node.create({
     // Touches on the picture's own controls are theirs alone: the editor
     // mustn't turn them into selecting the picture (which can swallow the tap).
     return ReactNodeViewRenderer(ImageView, {
+      // sized: as wide as that, beside the pictures next to it when they fit (see .node-image[data-sized])
+      attrs: ({ node }) => (node.attrs.width ? { 'data-sized': '', style: `width: ${node.attrs.width}%` } : { style: '' }),
       stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('.image-actions, .image-resize, .drawing-canvas.overlay.open, .drawing-canvas.overlay.replay')),
     })
   },

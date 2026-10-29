@@ -165,6 +165,8 @@ figure { margin: 6pt 0 10pt; break-inside: avoid; }
 figure.drawing svg { width: 100%; height: auto; display: block; }
 figure.image { position: relative; max-width: 100%; }
 figure.image img { width: 100%; display: block; border-radius: 4pt; }
+/* resized: beside the next picture when both fit, as in the note */
+figure.image:not(.natural) { display: inline-block; vertical-align: top; box-sizing: border-box; padding-right: 6pt; }
 figure.image.natural { width: fit-content; }
 figure.image.natural img { width: auto; max-width: 100%; }
 .title { font-size: 20pt; font-weight: 700; margin: 0 0 8pt; }
